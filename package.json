@@ -4,14 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --watch scripts/start.js",
-    "start": "node scripts/start.js",
+    "dev": "node --env-file-if-exists=.env --watch scripts/start.js",
+    "start": "node --env-file-if-exists=.env scripts/start.js",
     "test": "node --test"
   },
   "engines": {
     "node": "24.x"
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "express": "^5.1.0"
   }
 }

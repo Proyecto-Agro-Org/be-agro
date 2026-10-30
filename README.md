@@ -21,6 +21,22 @@ Expected response:
 {"status":"ok"}
 ```
 
+## CORS
+
+Copy `.env.example` to `.env` and set the frontend origins that may call the
+API from a browser:
+
+```env
+CORS_ORIGINS=http://localhost:5173,https://app.example.com
+```
+
+Origin matching is exact. Requests without an `Origin` header, such as curl or
+server-to-server requests, remain allowed. You can use `CORS_ORIGINS=*` for a
+fully public API, although explicit origins are safer for production.
+
+On Vercel, add `CORS_ORIGINS` under **Project Settings → Environment
+Variables** for Production, Preview, and Development as needed, then redeploy.
+
 ## Tests
 
 ```bash
