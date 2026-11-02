@@ -1,0 +1,63 @@
+@startuml
+!theme plain
+top to bottom direction
+skinparam linetype ortho
+
+class clientes {
+  _id: string <<entityId>>
+  nombre: string
+  createdAt: date
+  updatedAt: date
+}
+class usuarios {
+  _id: string
+  entityId: string
+  googleSub: string
+  email: string
+  nombre: string
+  activo: boolean
+}
+class campos {
+  _id: string
+  entityId: string
+  nombre: string
+  descripcion: string?
+  activo: boolean
+}
+class dispositivos {
+  _id: string <<deviceId>>
+  entityId: string
+  campoId: string
+  nombre: string
+  activo: boolean
+}
+class mediciones {
+  _id: objectId
+  timestamp: date <<timeField>>
+  entityId: string
+  contexto: object <<metaField>>
+  contexto.campoId: string
+  contexto.deviceId: string
+  location: object?
+  nutrients: object
+  soil: object
+}
+class alertas {
+  _id: string
+  entityId: string
+  campoId: string
+  deviceId: string
+  tipo: string
+  severidad: string
+  estado: string
+  timestamp: date
+  resueltaAt: date?
+}
+
+clientes "1" -- "*" usuarios : entityId
+clientes "1" -- "*" campos : entityId
+campos "1" -- "*" dispositivos : campoId
+dispositivos "1" -- "*" mediciones : contexto.deviceId
+campos "1" -- "*" alertas : campoId
+dispositivos "1" -- "*" alertas : deviceId
+@enduml
