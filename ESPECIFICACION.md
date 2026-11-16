@@ -1,330 +1,163 @@
-# Especificación inicial del backend `be-agro`
+# Especificación del backend be-agro
 
-**Proyecto:** A26T02 — Red IoT de Sensores de Suelo  
-**Estado:** Borrador para revisión del equipo  
-**Fecha:** 30 de octubre de 2026
+**Proyecto:** UADE A26T02 — Red IoT de Sensores de Suelo
+**Actualización:** 16/11/2026 · BE-00/BE-01, entrega documental local pendiente de PR.
+**Fuente rectora:** Plan de Trabajo Backend A26T02 del 05/11/2026, §§3–8.
 
-## 1. Propósito
+## 1. Alcance y precedencia
 
-Definir el alcance, requisitos, tecnologías, contrato HTTP y tareas de implementación del backend de consulta para conectar el frontend con MongoDB Atlas. El documento sirve como base para confirmar decisiones con el equipo y crear Issues pequeños, verificables y asignables.
+API de consulta y autenticación entre frontend y MongoDB Atlas. El flujo de adquisición permanece separado: ESP32 → MQTT/EMQX → acción HTTP → iot-ingest → Atlas → be-agro → frontend.
 
-## 2. Alcance
+Precedencia: acuerdos confirmados del plan del 05/11 → código y contratos implementados → especificaciones técnicas recientes → propuestas históricas. El plan define el objetivo; el código determina qué existe hoy. La presente actualización no implementa endpoints, schemas, paquetes ni migraciones.
 
-`be-agro` es una API HTTP para autenticar usuarios y servir datos de áreas, sensores, mediciones, alertas y resúmenes al frontend.
+Fuera del MVP: consumo MQTT desde be-agro, reemplazo de ingesta, CRUD administrativo público, comandos a hardware, entrenamiento IA y procesamiento continuo no aprobado. Worker/WebSocket son opciones futuras.
 
-El alcance de esta especificación incluye:
+## 2. Estado actual comprobado
 
-- Autenticación de usuarios y autorización de consultas.
-- Lectura de datos persistidos en MongoDB Atlas.
-- Endpoints requeridos por las pantallas actuales del frontend.
-- Validación de parámetros, manejo de errores y documentación OpenAPI.
-- Pruebas automatizadas y despliegue de prueba.
+Referencia local: commit `9cab86f35facf0ae49795e9ccf301cfc3c147094`.
 
-Fuera de alcance inmediato:
-
-- Consumir MQTT o conectarse directamente al broker desde esta API.
-- Recibir telemetría de los dispositivos o decidir el mecanismo de ingesta.
-- Escribir comandos de configuración hacia dispositivos.
-- Análisis/IA y recomendaciones agronómicas.
-- CRUD administrativo de clientes, áreas, sensores y usuarios, salvo que el equipo lo incorpore expresamente.
-
-La ingesta MQTT → MongoDB es un componente separado. La API leerá las colecciones compartidas que produzca ese flujo; ambos componentes deben acordar el esquema de documentos e identificadores.
-
-## 3. Autenticación y separación por entidad
-
-- Un usuario autenticado pertenece a una sola entidad/cliente en esta etapa.
-- Las rutas de negocio requieren autenticación; login y health son públicos salvo decisión operativa distinta.
-- Cada documento de dominio incluye `entityId`, que lo vincula con su entidad. El middleware obtiene el `entityId` del usuario autenticado y las consultas filtran por ese valor en el repository.
-- La relación funcional se mantiene: entidad → usuarios/campos; campo → dispositivos; dispositivo → mediciones. El `entityId` de un recurso relacionado debe ser consistente con el de su campo/dispositivo padre.
-- No se implementan roles ni permisos granulares por endpoint en esta etapa. La regla de acceso es el aislamiento por entidad.
-- Nunca se confía en un `cliente_id` o `entity_id` enviado por el frontend para seleccionar el ámbito de datos.
-- Recurso inexistente y recurso perteneciente a otra entidad deben responder según una política uniforme; por defecto `404` para no revelar existencia.
-
-## 4. Requisitos funcionales
-
-### RF-01 — Inicio de sesión con Google
-
-El login debe realizarse con una cuenta de Google, como requisito del profesor. El backend verifica la identidad/credencial de Google según el flujo aprobado y la vincula con un usuario interno y una entidad. No se almacenan contraseñas de Google. Una autenticación válida crea la sesión de la aplicación según la decisión de E0.4; una credencial inválida o una cuenta no habilitada se rechaza sin filtrar información sensible.
-
-### RF-02 — Sesión y cierre de sesión
-
-Proveer una forma de cerrar sesión que expire la cookie y una forma para que el frontend conozca al usuario autenticado si la necesita. Definir explícitamente expiración, `Secure`, `SameSite`, dominio/path y estrategia de renovación. No almacenar secretos ni credenciales de MongoDB en el cliente.
-
-### RF-03 — Dashboard y áreas
-
-Servir un resumen calculado desde los datos autorizados, lista de áreas y detalle de cada área con sensores asociados. Totales y estados deben derivarse de una fuente consistente, no duplicarse como datos manuales.
-
-### RF-04 — Sensores y últimas mediciones
-
-Servir la ficha de un sensor con ubicación, estado, última comunicación y última medición disponible. Un dato ausente se representa como `null`, nunca como cero. Un sensor sin comunicación previa es desconectado y su `ultima_comunicacion` es `null`.
-
-### RF-05 — Históricos
-
-Consultar la serie de una variable por sensor dentro de un rango temporal. Aceptar fechas ISO 8601 con zona horaria, responder timestamps en UTC y validar que `desde < hasta`. Limitar la cantidad máxima de puntos y marcar explícitamente si la serie fue truncada.
-
-### RF-06 — Mapa
-
-Servir sensores autorizados con ubicación y resumen de última medición. Coordenadas faltantes o inválidas no deben impedir que el sensor aparezca en la respuesta.
-
-### RF-07 — Alertas
-
-Listar alertas con filtros opcionales por área, tipo, estado, severidad y fechas. Ordenar severidad alta→media→baja y, dentro de cada nivel, más reciente primero. Informar el total antes del límite aplicado.
-
-### RF-08 — Salud y operación
-
-Exponer un endpoint de salud que compruebe disponibilidad del proceso y, si el despliegue lo requiere, conectividad con MongoDB. No incluir secretos ni detalles internos en respuestas públicas.
-
-## 5. Requisitos no funcionales
-
-- **RNF-01 Seguridad:** HTTPS en despliegues; secretos por variables de entorno; CORS limitado al origen del frontend; protección contra fuerza bruta en login, al menos con rate limit básico.
-- **RNF-02 Contratos:** cada endpoint declara DTORequest y DTOResponse TypeScript. Esta decisión ofrece comprobación estática; por sí sola no valida en runtime los datos JSON recibidos.
-- **RNF-03 Consistencia del contrato:** prefijo `/api/v1`; respuestas serializadas con nombres y nullabilidad acordados con el frontend.
-- **RNF-04 Fechas:** persistir/transportar timestamps como UTC ISO 8601; interpretar los límites de históricos como instantes, no como fechas locales implícitas.
-- **RNF-05 Rendimiento:** índices para claves de acceso y filtros frecuentes; paginación/límites para consultas que puedan crecer.
-- **RNF-06 Errores:** formato uniforme y códigos HTTP coherentes; no exponer stack traces ni mensajes internos en producción.
-- **RNF-07 Observabilidad:** logs estructurados con método, ruta, estado, duración e identificador de petición, sin passwords, tokens ni datos sensibles.
-- **RNF-08 Mantenibilidad:** separar rutas, validación, lógica de aplicación, acceso a datos y configuración.
-- **RNF-09 Documentación:** mantener README de ejecución/configuración y especificación OpenAPI actualizados.
-
-## 6. Tecnologías propuestas
-
-| Área | Propuesta inicial | Estado / decisión pendiente |
-|---|---|---|
-| Runtime | Node.js LTS | Confirmar versión concreta y fijarla en `engines`/archivo de versión. |
-| HTTP | Express | Propuesta del documento de backend; confirmar con el equipo. |
-| Lenguaje | TypeScript | Propuesta; compartir tipos con frontend solo si no genera acoplamiento de modelos internos. |
-| Base de datos | MongoDB Atlas | Base seleccionada por el proyecto. |
-| ODM | Mongoose | Propuesta; validar compatibilidad con colección Time Series y esquema de ingesta. |
-| Mediciones | MongoDB Time Series Collection | Decisión mencionada para históricos; definir `timeField`, `metaField`, granularidad y retención. |
-| Contratos HTTP | DTORequest/DTOResponse TypeScript | Decisión: interfaz/tipo por operación. La validación de runtime de requests no forma parte del alcance actual. |
-| Autenticación | JWT en cookie `httpOnly` | Propuesta; falta decidir access/refresh, expiración, `SameSite`, CSRF y logout. |
-| Hash de contraseñas | bcrypt / bcryptjs | Elegir paquete y factor de costo. |
-| Pruebas | Vitest + Supertest | Propuesta; decidir base aislada/mock y estrategia de integración Mongo. |
-| API docs | OpenAPI (Swagger UI o archivo OpenAPI) | Incluir en la primera entrega para que frontend y BE validen el contrato. |
-| Hosting | Render o Railway | Pendiente. Verificar plan, variables, conexión de Atlas, URL pública y proceso de deploy. |
-
-Estas tecnologías son propuestas, no decisiones aprobadas salvo MongoDB Atlas. Confirmarlas antes del primer Issue de scaffolding.
-
-## 7. Contrato HTTP inicial
-
-Todas las rutas se publican bajo `/api/v1`. Los ejemplos de respuesta reflejan los tipos y mocks actuales del frontend; son el punto de partida para acordar el contrato, no una promesa de que todos los campos del dominio ya estén confirmados.
-
-### 7.1 Autenticación
-
-| Método y ruta | Acceso | Respuesta esperada |
-|---|---|---|
-| `POST /auth/login` | Público | Recibe la credencial/código de Google definido en E0.4; `200`: usuario autenticado y cookie de sesión; `401`: credencial inválida o cuenta no habilitada. |
-| `POST /auth/logout` | Autenticado | `204` y cookie expirada. |
-| `GET /auth/me` | Autenticado | Usuario y contexto de entidad actual. |
-
-El contrato actual del mock usa email/password y devuelve token JSON, pero no satisface el requisito de Google. Debe actualizarse el cliente del frontend al flujo Google aprobado y acordar CORS/credentials si la sesión de la aplicación usa cookie `httpOnly`.
-
-### 7.2 Recursos de consulta
-
-| Método y ruta | Uso | Respuesta principal |
-|---|---|---|
-| `GET /dashboard/resumen` | Métricas, áreas, alertas recientes y última actualización. | `{ resumen, areas, ultimas_alertas, ultima_actualizacion }` |
-| `GET /areas` | Listado y resumen por área. | `{ areas: AreaResumen[] }` |
-| `GET /areas/:areaId` | Nombre e identidad de área. | `{ area_id, nombre }` |
-| `GET /areas/:areaId/sensores` | Sensores de un área. | `{ sensores: SensorDeArea[] }` |
-| `GET /sensores/:deviceId` | Ficha, estado y última medición. | `SensorDetalle` |
-| `GET /sensores/:deviceId/historico` | Serie histórica de una variable. | `HistoricoRespuesta` |
-| `GET /mapa/sensores` | Ubicación y resumen de cada sensor. | `{ sensores: SensorMapa[] }` |
-| `GET /alertas` | Alertas filtradas, total y límite. | `{ total, limit, alertas: Alerta[] }` |
-| `GET /health` | Disponibilidad de API/DB según política operativa. | Estado simple sin información sensible. |
-
-### 7.3 Parámetros y reglas del contrato
-
-- `GET /sensores/:deviceId/historico`: requeridos `variable`, `desde`, `hasta`; opcional `limit` (el mock usa 500). Variables: `humedad`, `temperatura`, `conductividad`, `nitrogeno`, `fosforo`, `potasio`.
-- Los puntos históricos tienen forma `{ timestamp, valor }`; `valor` puede ser `null`. La respuesta incluye `unidad` y `truncado`.
-- `GET /alertas`: filtros opcionales `area_id`, `tipo`, `estado`, `severidad`, `desde`, `hasta`, `limit`. El mock fija `limit` por defecto 50 y máximo 200.
-- Estados de sensor: `conectado | desconectado`. Tipos de alerta: `tecnica | agronomica`; severidad: `alta | media | baja`; estado de alerta: `activa | resuelta`.
-- Una medida tiene forma `{ valor: number | null, unidad: string }`.
-- Timestamps de salida en UTC ISO 8601; ubicación `{ lat, lon } | null`.
-- Área o sensor inexistente/fuera de entidad: `404`. Entrada inválida: `400` cuando sea detectada por las comprobaciones implementadas. No autenticado: `401`.
-
-### 7.4 Errores
-
-Formato recomendado, a confirmar con el frontend:
-
-```json
-{
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "La solicitud contiene parámetros inválidos",
-    "details": []
-  }
-}
-```
-
-El mensaje es seguro para mostrar; `details` puede identificar campos inválidos sin revelar datos sensibles. El backend no debe devolver stack traces en producción.
-
-## 8. Esquema actual de MongoDB
-
-El esquema objetivo propuesto para completar este inventario está en [SCHEMA_PROPUESTA.md](SCHEMA_PROPUESTA.md). Allí se detallan los campos mínimos para login Google, aislamiento por entidad, endpoints y una eventual colección Time Series.
-
-El equipo compartió el siguiente inventario de colecciones y campos. Se considera la referencia física disponible para esta especificación; no se infieren campos que no aparecen en el schema.
-
-| Colección | Campos disponibles según el schema |
+| Componente | Estado comprobado |
 |---|---|
-| `clientes` | `_id: string` |
-| `dispositivos` | `_id: string` |
-| `lotes` | `_id: string` |
-| `usuarios` | `_id: string` |
-| `mediciones` | `_id: ObjectId`, `device_id: string`, `location: { lat: double, lon: double }`, `nutrients: { nitrogen: double, phosphorus: double, potassium: double }`, `soil: { conductivity: double, humidity: double, temperature: double }`, `timestamp: string` |
+| Runtime | Node 24.x en engines; entorno de auditoría v24.19.0, npm 11.17.0 |
+| HTTP | Express ESM en JavaScript; package declara ^5.1.0, lock/instalación resuelven 5.3.0 |
+| Dependencias | cors ^2.8.6 (instalado 2.8.6); ninguna devDependency |
+| Ruta | Solo GET /health → 200, {"status":"ok"}, público, salud del proceso |
+| CORS | CORS_ORIGINS, coincidencia exacta; admite sin Origin y wildcard; rechaza con 403 |
+| Errores | Handler básico con error string; 404 por defecto de Express, sin envoltorio uniforme |
+| Servidor | scripts/start.js; PORT por defecto 3000; sin parser JSON explícito |
+| Hosting | vercel.json: framework express, fluid true; configuración presente, operación publicada no comprobada en esta auditoría |
+| Pruebas | node:test + assert + fetch HTTP local: cinco pruebas aprobadas |
+| Ausente | TypeScript, Zod, Mongoose, conexión Mongo, autenticación, aislamiento, negocio, DTOs, OpenAPI, logging con request ID, lint/build |
 
-**Aclaración de dominio confirmada por el equipo:** cada documento de datos se vincula con su entidad mediante `entityId`; en la colección raíz `clientes`, `_id` identifica la entidad. El schema inicial enviado no mostraba `entityId` en todos los inventarios. El esquema objetivo completo está en [SCHEMA_PROPUESTA.md](SCHEMA_PROPUESTA.md); resta estandarizar el tipo BSON y la forma en que la colección física `lotes` representa `campos`.
+No existe `/api/v1/health` ni ninguna ruta de negocio implementada. Las secciones siguientes son requisitos/contratos de referencia para trabajo posterior.
 
-Representación equivalente del documento de medición:
+## 3. Decisiones confirmadas
 
-```json
-{
-  "_id": "ObjectId",
-  "device_id": "string",
-  "location": { "lat": "double", "lon": "double" },
-  "nutrients": {
-    "nitrogen": "double",
-    "phosphorus": "double",
-    "potassium": "double"
-  },
-  "soil": {
-    "conductivity": "double",
-    "humidity": "double",
-    "temperature": "double"
-  },
-  "timestamp": "string"
-}
-```
+- Capas Route → Controller → Service → Repository → Model, con middlewares, DTOs y adapters por responsabilidad.
+- Node/Express; migración a TypeScript; Zod para validación runtime de entradas y entorno; DTORequest/DTOResponse por operación; Mongoose previsto para Atlas; Vitest/Supertest previstos.
+- Colecciones MongoDB convencionales, **no Time Series**. Históricos conservados e índices por cliente, dispositivo y tiempo.
+- Cliente → Campo → Área → Dispositivo → Mediciones; usuario asociado a un cliente. Campo y Área son niveles diferentes.
+- Cliente autorizado derivado de identidad confiable; todas las consultas y agregaciones limitadas en repository. No implementar roles por endpoint en esta etapa.
+- Nombres/unidades y normalización hacia API centralizados en backend; ausencia → null, nunca cero.
+- Alerta visual por falta de mediciones a cargo del frontend. Persistencia de alertas, worker y WebSocket requieren definición adicional.
 
-### 8.1 Correspondencia con el contrato del frontend
+## 4. Autenticación y aislamiento
 
-- `device_id` permite relacionar una medición con un dispositivo, sujeto a confirmar si `dispositivos._id` siempre coincide exactamente.
-- `entityId` es el criterio de aislamiento: el backend lo deriva de la identidad autenticada y no lo acepta del frontend para elegir el tenant.
-- `soil.humidity`, `soil.temperature` y `soil.conductivity` corresponden a humedad, temperatura y conductividad del frontend.
-- `nutrients.nitrogen`, `nutrients.phosphorus` y `nutrients.potassium` corresponden a nitrógeno, fósforo y potasio.
-- `location` puede alimentar la ubicación del sensor, pero el schema actual la guarda en cada medición. No define la ubicación vigente en `dispositivos` ni permite concluir cómo manejar dispositivos sin mediciones.
-- El schema listado no incluye nombres visibles, relación de dispositivo con cliente/lote, cuentas y credenciales completas de usuario, ni una colección de alertas.
-- El contrato de frontend también usa `area_id` y `area_nombre`. Aún no está establecido si un `lote` equivale a un `área`, ni qué documento relaciona lote, dispositivo y cliente.
+El requisito previo de login Google se conserva como objetivo de integración, sin dar por aprobado un flujo OAuth concreto. El plan exige verificar el funcionamiento existente.
 
-Por lo tanto, los endpoints de históricos se pueden diseñar a partir de `mediciones`, pero varias vistas necesitan enriquecer esos documentos con datos de `dispositivos`, `lotes`, `clientes` y `usuarios`. El endpoint de alertas requiere definir y persistir alertas o calcularlas a partir de reglas de dominio; el schema actual no alcanza para implementarlo tal como lo consume el frontend.
+Frontend auditado en commit `f30c76dbd7f2f87aa5ef02e0be176f2e112fbb96`:
 
-### 8.2 Consideraciones de tipos y colección Time Series
+- `src/api/client.ts` envía Authorization: Bearer desde sessionStorage; no configura credentials para cookies.
+- `LoginPedido` usa email/password; `LoginRespuesta` exige token y hace opcionales usuario/cliente.
+- `/auth/google-demo`, `/auth/demo/sesion` y `/auth/demo/campos` son exclusivos MSW. Google real está deshabilitado sin mocks.
+- AuthProvider recupera identidad al recargar solo en modo mock; logout limpia estado local sin llamar al servidor. Un 401 privado invalida sesión.
+- CampoProvider y consulta de campos están habilitados solo con mocks. El selector usa IDs y una preferencia local contrastada contra el catálogo.
+- El mock actual limita datos al cliente del token y valida campo/área/sensor; esto no constituye una frontera de seguridad real.
 
-El `timestamp` del schema actual está declarado como `string`; la propuesta Time Series usa BSON Date, `timestamp` como `timeField` y `contexto` como `metaField`. Antes de crear o migrar la colección, convertir/normalizar fechas y confirmar frecuencia, granularidad y retención. Ver [SCHEMA_PROPUESTA.md](SCHEMA_PROPUESTA.md).
+Pendientes: ID token Google versus OAuth callback; cuentas habilitadas y alta/asignación de cliente; Bearer versus cookie httpOnly; expiración/renovación/revocación; recuperación real de identidad, logout y CSRF/CORS según decisión. No se introduce bcrypt como requisito de un login Google.
 
-Al estar las magnitudes tipadas como `double`, falta definir cómo se representan mediciones inexistentes o parciales: ausencia de campo, `null` u otro mecanismo. El backend debe mapear la ausencia a `null` para el contrato de UI, sin convertirla en cero. Confirmar asimismo si cada documento tiene todas las seis magnitudes y las unidades correspondientes.
+La API deberá obtener cliente desde sesión/usuario verificado, validar Campo → Área → Dispositivo y limitar mediciones usando relaciones persistidas. `campo_id` selecciona dentro del cliente autorizado, nunca autoriza un tenant. No confiar en `cliente_id` ni `entityId` enviados por navegador o telemetría sin verificación. Recurso ajeno/inexistente: 404; sin sesión: 401.
 
-### 8.3 Modelo lógico que falta documentar
+## 5. Contratos frontend observados, aún no implementados en be-agro
 
-Se necesitan ejemplos reales o acordados de documentos completos para resolver estos datos faltantes:
+Base: VITE_API_BASE_URL, por defecto `/api/v1`. Referencia primaria: `src/api/*`, `src/types/*` y `src/mocks/handlers/*` del commit frontend indicado. Mantener rutas públicas actuales; las rutas `/dispositivos` sugeridas por el plan no sustituyen silenciosamente a `/sensores`.
 
-- **`usuarios`:** identificador de Google (`sub`), email, nombre, estado y relación con una entidad/cliente. El schema informado solo muestra `_id`; confirmar si se permite autoaprovisionar cuentas o si deben habilitarse previamente.
-- **`clientes`:** nombre y demás metadatos necesarios para mostrar/autorizar. El schema informado solo muestra `_id`.
-- **`dispositivos`:** nombre visible, relación con cliente y lote, ubicación vigente, configuración y fecha de última comunicación. El schema informado solo muestra `_id`.
-- **`lotes`:** nombre, cliente propietario y relación con dispositivos; confirmar si representa las áreas del frontend.
-- **`alertas`:** fuente, campos, reglas de generación, severidad, estado y ciclo de resolución. No aparece entre las colecciones listadas.
-- **`mediciones`:** tipo/estándar del timestamp, unidades, frecuencia, lecturas parciales y claves de metadatos para consultas.
-
-Definir índices únicos y compuestos luego de acordar cardinalidades y consultas. No asumir que `_id` de `clientes`, `dispositivos`, `lotes` y `usuarios` tiene el mismo tipo BSON que un ObjectId: el schema indica string.
-
-## 9. Reglas de dominio pendientes de confirmación
-
-1. Relación y nomenclatura entre **cliente**, **campo** y **área**. En el topic MQTT propuesto aparece cliente/campo/dispositivo; el frontend expone `area_id`.
-2. Frecuencia esperada de telemetría y umbral real para conectado/desconectado. Los 30 minutos son solo valor provisional de mocks.
-3. Unidades y rangos válidos de humedad, temperatura, conductividad, nitrógeno, fósforo y potasio.
-4. Esquemas completos de `clientes`, `dispositivos`, `lotes` y `usuarios`, relaciones y claves foráneas lógicas.
-5. Si `lotes` equivale a `areas` en la API y cómo se obtienen los nombres visibles.
-6. Formato real de documentos recibidos por la ingesta Make/MongoDB y claves de correlación con sensores registrados.
-7. Tipo BSON y formato actual de `mediciones.timestamp`; confirmar conversión a BSON Date para Time Series.
-8. Origen de alertas técnicas y agronómicas, colección/reglas, transiciones de estado y criterio de severidad.
-9. Qué significa “última medición” si la medición más reciente tiene variables faltantes.
-10. Unidades y disponibilidad de cada variable por medición.
-11. Orden y límite para las cinco alertas del Dashboard; el mock incluye alertas resueltas en el orden por fecha.
-12. Paginación de alertas cuando `total > limit`: solo mensaje de resultados parciales está definido hoy; decidir cursor o paginación antes de necesitar navegación.
-13. El middleware obtiene `entityId` del usuario autenticado y cada consulta filtra documentos por ese valor; recursos inexistentes o pertenecientes a otra entidad responden `404`.
-14. Estrategia definitiva de sesión y despliegue.
-
-## 10. Arquitectura lógica propuesta
-
-```text
-Frontend (React)
-    │ HTTPS / JSON / cookie de sesión
-    ▼
-API Express (/api/v1)
-    ├── middleware: sesión, contexto de entidad, errores, logs
-    ├── servicios: agregados y reglas del dominio
-    └── repositorios Mongoose
-             │
-             ▼
-       MongoDB Atlas
-        ├── entidades de acceso y catálogo
-        ├── alertas
-        └── mediciones (Time Series)
-
-Ingesta IoT (separada) ──► MongoDB Atlas
-```
-
-Las rutas no contienen lógica de agregación compleja ni acceden a colecciones arbitrarias. El aislamiento por entidad debe aplicarse dentro de cada consulta del repository, no solo en la respuesta final.
-
-## 11. Plan de tareas para Issues
-
-Orden recomendado. Los Issues marcados **bloqueados por decisión** no deben empezar hasta cerrar sus preguntas asociadas.
-
-| ID sugerido | Tarea | Resultado / criterios de aceptación |
+| Método y ruta relativa | Entradas/alcance observado | Respuesta de referencia |
 |---|---|---|
-| BE-01 | Cerrar decisiones de stack, sesión, hosting y reglas de dominio | Decisiones registradas en este documento; usuario asociado a una entidad; no quedan alternativas ambiguas para iniciar el scaffold. |
-| BE-02 | Acordar contrato API con frontend | OpenAPI inicial cubre login, recursos, query params, nullabilidad, errores, auth, límites y fechas; cada operación tiene DTORequest/DTOResponse y frontend valida nombres y formas. |
-| BE-03 | Completar y acordar modelo de persistencia con ingesta | Schemas completos de `clientes`, `dispositivos`, `lotes`, `usuarios`, `mediciones` y alertas; relaciones; ejemplos JSON; timestamp BSON Date/Time Series; unidades, índices iniciales y reglas de identidad documentados. |
-| BE-04 | Crear scaffold de `be-agro` | TypeScript, Express, scripts local/build, configuración validada, estructura modular, lint/formato y `/health`; arranque reproducible desde README. |
-| BE-05 | Conectar MongoDB Atlas y preparar acceso a datos | Conexión por entorno, manejo de desconexión, repositorios tipados, índices documentados y prueba de conexión sin credenciales versionadas. |
-| BE-06 | Implementar login, sesión, logout y `/auth/me` | Hash de contraseña, cookie con atributos acordados, validación, respuestas de error genéricas y protección comprobada para rutas privadas. |
-| BE-07 | Implementar middleware de autenticación y separación por entidad | El middleware resuelve la entidad única del usuario; cada consulta filtra por ella y pruebas comprueban que no se filtran datos de otra entidad. |
-| BE-08 | Implementar catálogo de áreas/sensores | `GET /areas`, `GET /areas/:areaId`, `GET /areas/:areaId/sensores`, `GET /sensores/:deviceId`; campos y 404 coinciden con OpenAPI. |
-| BE-09 | Implementar Dashboard | Resumen/áreas/alertas derivadas de datos reales y consistentes con las reglas aprobadas. |
-| BE-10 | Implementar medición actual e históricos | Última lectura, filtros y rangos, límite máximo, UTC, nullabilidad, orden estable y `truncado`. |
-| BE-11 | Implementar mapa | Sensores autorizados con coordenadas y resumen; valores nulos/inválidos tratados según contrato. |
-| BE-12 | Implementar alertas | Filtros combinables, orden acordado, total y límite, paginación/cursor si se aprobó. |
-| BE-13 | Endurecer API y observabilidad | CORS, cookies/CSRF, rate limit, Helmet u opción equivalente, logs sin secretos, error handler uniforme y límites HTTP. |
-| BE-14 | Completar pruebas y documentación | Unitarias, integración HTTP/DB, casos positivos/negativos/borde y OpenAPI/README actualizados. |
-| BE-15 | Despliegue de prueba e integración con frontend | URL HTTPS operativa, variables configuradas, frontend con mocks desactivados en entorno de prueba, recorrido Login→Dashboard→Área→Sensor→Histórico/Mapa/Alertas validado. |
+| POST /auth/login | email, password; sin Bearer | token; usuario y cliente opcionales en tipo real |
+| POST /auth/google-demo | Solo MSW | LoginRespuesta demo |
+| POST /auth/demo/sesion | Solo MSW, body token | usuario y cliente completos |
+| GET /auth/demo/campos | Solo MSW, cliente desde Bearer | { campos: Campo[] } |
+| GET /dashboard/resumen | campo_id | { resumen, areas, ultimas_alertas, ultima_actualizacion } |
+| GET /areas | campo_id | { areas: AreaResumen[] } |
+| GET /areas/:areaId | campo_id | { area_id, nombre, campo_id? } |
+| GET /areas/:areaId/sensores | campo_id | { sensores: SensorDeArea[] } |
+| GET /sensores/:deviceId | campo_id | SensorDetalle |
+| GET /sensores/:deviceId/historico | campo_id, variable, desde, hasta, limit | HistoricoRespuesta |
+| GET /mapa/sensores | campo_id | { sensores: SensorMapa[] } |
+| GET /alertas | campo_id; opcionales area_id, tipo, estado, severidad, desde, hasta, limit | { total, limit, alertas } |
 
-## 12. Definition of Done para Issues de backend
+Los mocks requieren exactamente un `campo_id` no vacío; sin identidad responden 401, campo ajeno o recurso fuera de ese campo 404. Debe acordarse el endpoint real de campos (el plan propone GET /campos), recuperación de identidad y logout en BE-03. No copiar endpoints demo a producción.
 
-- Cumple criterios de aceptación y contrato documentado.
-- DTORequest/DTOResponse TypeScript definidos para cada operación y alineados con OpenAPI.
-- Middleware de autenticación y aislamiento por entidad aplicado a todas las rutas protegidas.
-- Casos positivos, negativos y borde relevantes cubiertos por pruebas.
-- No se versionan secretos; `.env.example` contiene solo nombres/valores no sensibles.
-- Errores y logs no filtran credenciales, tokens ni stack traces.
-- OpenAPI y README actualizados cuando cambia configuración o contrato.
-- PR revisado y sin errores bloqueantes conocidos.
+### Formas y reglas observadas
 
-## 13. Variables de entorno previstas
+- Cliente: `{cliente_id,nombre}`; Usuario: `{usuario_id,nombre,email,cliente_id}`; Campo: `{campo_id,nombre,cliente_id}`; Área: `{area_id,nombre,campo_id}`; Sensor: `{device_id,nombre,area_id}`. Área API mantiene campo_id opcional temporalmente.
+- AreaResumen añade sensores, conectados, desconectados, alertas_activas, ultima_actualizacion nullable. Dashboard resumen tiene esos cinco conteos (areas en lugar de identidad de área).
+- SensorDeArea: device_id, nombre, estado, ultima_comunicacion, ubicacion, alertas_activas. El área se expresa mediante la ruta.
+- SensorDetalle: identidad del sensor + area_nombre, estado, ultima_comunicacion, ubicacion, ultima_medicion. Última medición: timestamp y seis variables `{valor:number|null, unidad:string}`, o null si no hubo lecturas.
+- Histórico: device_id, nombre, area_id, area_nombre, variable, unidad, puntos `{timestamp,valor:number|null}[]`, truncado. El cliente envía limit=1000; el handler usa 500 si se omite. Límite máximo y política de truncamiento deben cerrarse en BE-03.
+- Mapa: identidad + area_nombre, estado, ubicacion, ultima_comunicacion, ultima_medicion nullable con timestamp, humedad y temperatura. Ubicación `{lat,lon}|null`; conservar dispositivos sin coordenadas.
+- Alerta: alerta_id, device_id, sensor_nombre, area_id, area_nombre, tipo, severidad, descripcion, timestamp, estado. Tipos tecnica/agronomica; severidad alta/media/baja; estado activa/resuelta.
+- Alertas: default limit 50, máximo 200 en mock; total antes del límite; orden por severidad alta→media→baja y fecha descendente. Dashboard usa las cinco más recientes por fecha e incluye resueltas.
+- Variables de UI: humedad, temperatura, conductividad, nitrogeno, fosforo, potasio. Unidades demo: %, °C, dS/m, mg/kg. No certifican la unidad física de cada documento.
+- Fechas de respuesta objetivo: ISO 8601 UTC; históricos con zona horaria, desde < hasta, límites y orden estable. La validación de UI/MSW no reemplaza Zod del backend.
 
-```dotenv
-NODE_ENV=development
-PORT=3000
-MONGODB_URI=
-FRONTEND_ORIGIN=http://localhost:5173
-JWT_SECRET=
-JWT_EXPIRES_IN=
-COOKIE_NAME=
-COOKIE_SECURE=false
-COOKIE_SAME_SITE=lax
-```
+### Errores y transición
 
-Revisar la lista al decidir si se usa JWT en cookie, refresh token, sesiones almacenadas o configuración propia del hosting. Ningún valor real debe escribirse aquí ni en `.env.example`.
+Objetivo aprobado local: `{"error":{"code":"...","message":"..."}}`. Códigos estables como VALIDATION_ERROR, UNAUTHENTICATED, RESOURCE_NOT_FOUND e INTERNAL_ERROR; status 400/401/404/409/429/500 según semántica. El 403 actual de CORS se conserva como comportamiento existente y deberá documentarse al migrar errores.
 
-## 14. Decisiones para la próxima revisión del equipo
+Frontend/MSW actuales consumen `{error:string}`; `leerMensajeError` no interpreta el objeto objetivo. Registrar y acordar adaptación en BE-03 antes de integrar; este cambio documental no modifica cliente ni handler. 404 uniforme, propagación asíncrona y logs seguros son trabajo futuro.
 
-Para pasar de borrador a backlog implementable, confirmar en este orden:
+## 6. Persistencia e incompatibilidades de ingesta
 
-1. ¿El stack queda aprobado como Node + Express + TypeScript + Mongoose?
-2. ¿La API de esta etapa será solo lectura además del login/logout?
-3. ¿Cómo se incorpora la relación usuario-entidad en `usuarios` y en los recursos existentes?
-4. ¿El esquema de documentos de MongoDB ya existe y quién mantiene el contrato con Make/ingesta?
-5. ¿Se mantiene cookie httpOnly para la sesión propia después de autenticar con Google? ¿Qué dominios/orígenes tendrán frontend y API?
-6. ¿Qué hosting se elige y qué plan/limitaciones se aceptan?
-7. ¿Cuáles son frecuencia, umbral de desconexión, unidades y reglas de alertas?
+Fuente inspeccionada: iot-ingest commit `e6ffda0f0a4b9a18298c239ac34cc61de6b1c3fa`, README y modules/measurements, modules/devices, config/env.ts.
 
-Una vez respondidas, registrar las decisiones aquí y convertir BE-01 a BE-03 en Issues del proyecto.
+| Aspecto | Evidencia de código, no inspección Atlas |
+|---|---|
+| Base/colecciones | Defaults iot_sensores, mediciones, dispositivos, configurables por entorno |
+| Mediciones | POST /ingest acepta objeto JSON no vacío, elimina _id entrante, agrega _receivedAt BSON Date e inserta nuevo documento |
+| Sobre MQTT | Si EMQX manda sobre, payload puede permanecer string; no se garantiza desanidado de telemetría |
+| Dispositivos | Upsert por clientid string, índice único clientid; _createdAt y _lastSeen BSON Date |
+| Merge de estado | Reemplazo de campos superiores recibidos, conservación de omitidos; un subobjeto recibido reemplaza al anterior |
+| Identificador | Acepta variantes de ID y números a string; clientid identifica dispositivo MQTT, no cliente del dominio |
+| Tenant/relaciones | No garantiza entityId/cliente_id, campo, área ni catálogo de usuarios |
+| Magnitudes | No garantiza soil/nutrients, readings ni measurements; unidades y timestamp de origen libres |
+| Históricos | Inserciones sin deduplicación de mediciones demostrada; no se modifica ingesta en esta etapa |
+
+El inventario histórico del repositorio enumera clientes, lotes, usuarios y dispositivos con _id string, y mediciones con device_id, location, soil, nutrients y timestamp string. Se conserva como información documental no verificada, no como esquema físico vigente. El código de ingesta genera _id Mongo y usa clientid en dispositivos: no asumir igualdad con device_id ni con el _id string del inventario anterior.
+
+No se accedió a Atlas, configuración EMQX o payload capturado del hardware. BE-02 debe resolver nombres/tipos BSON y relaciones reales; BE-04 distingue adquisición de recepción y formato temporal. Ver [propuesta de schema](SCHEMA_PROPUESTA.md).
+
+## 7. Mediciones, procedencia y reglas científicas
+
+Fuentes locales: especificación técnica del 30/10/2026 §§5,10,12–13; Anexo Fórmulas S8 §§1,5–8; datasheet SOIL-MB-THC-S Rev.04 pp.2,15–17; informe agronómico pp.4–9.
+
+| Clase | Tratamiento |
+|---|---|
+| Medido directamente | S8 temperatura, conductividad y humedad reportada; conservar unidad/origen bruto |
+| Estimado por dispositivo | Salinidad/TDS entregados por sonda; no presentarlos como ensayos independientes |
+| Calculado/derivado | Conversión CE y fórmulas con entradas válidas; registrar método/versión/referencias |
+| Laboratorio/campo | Nitrato/P/K/pH y caracterización externa con método, profundidad, fecha y vigencia |
+| Ausente | null en HTTP, sin cero ni sustitución por datos demo; causa/procedencia a diseñar |
+
+S8 no mide NPK ni pH; tampoco permite reconstruirlos a partir de CE/temperatura/humedad. `nitrogeno` genérico no equivale automáticamente a NO₃⁻/NO₃-N. Humedad %RH reportada no se homologa a % volumétrico sin calibración. Conversión de referencia: 1200 µS/cm = 1,2 dS/m; no aplicar esa conversión a valores cuya unidad de origen se desconoce.
+
+Porosidad requiere densidades válidas; aire requiere humedad volumétrica calibrada de igual profundidad. No usar constantes de laboratorio ni umbrales agronómicos como universales. La normalización de respuesta será responsabilidad del backend, preservando históricos brutos y distinguiendo simulados/reales. No implementar fórmulas en BE-01.
+
+## 8. Requisitos futuros verificables
+
+- Controllers delgados, services sin Express, repositories con filtros de cliente dentro de Mongo; modelos separados de DTOs y adapters para Google/proveedores.
+- DTORequest y DTOResponse tipados por operación; sin entrada documentar que no aplica. Zod valida realmente params/query/body/env; interfaces TS por sí solas no validan HTTP.
+- Conexión Atlas segura administrada, colecciones convencionales y consultas con límites/índices por cliente/dispositivo/tiempo.
+- CORS de orígenes explícitos; cookies/credentials/CSRF solo según sesión aprobada; protección de login, request ID y logs sin secretos.
+- Errores seguros uniformes, 404 común, ninguna falla inesperada convertida a 200.
+- Pruebas Vitest/Supertest de services, mappers, validación, sesión, aislamiento, errores y repositories en base aislada; preservar regresión de health/CORS.
+- OpenAPI y documentación alineados con frontend. No existe todavía archivo OpenAPI en este checkout.
+
+## 9. Decisiones pendientes y continuidad
+
+BE-02: relevamiento físico sanitizado, IDs BSON, relación clientid/device_id/_id, catálogo confiable y significado de lotes; estrategia histórica sin pérdida y filtros de cliente aun para documentos antiguos.
+
+BE-03: congelar DTOs/OpenAPI, campos reales, auth Google/sesión, endpoint de campos/identidad/logout, errores y límites con frontend; no renombrar rutas por propuesta.
+
+BE-04: nombres/unidades/precisión, timestamps adquisición/recepción y fechas inválidas, lecturas parciales y última lectura por documento versus por variable, procedencia, calibración, frecuencia/umbral y ubicación vigente.
+
+Alertas: aprobar origen y ciclo de vida para las que entregue API; no exigir colección propia ni detector continuo por la alerta visual de ausencia.
+
+Flujo Git: solo main comprobada local y remota; acordar develop/dev antes de usarla como base. La auditoría no crea ramas/Issues ni marca tareas integradas.
+
+## 10. Historial de decisiones
+
+Los borradores del 30/10 y 02/11/2026 proponían Time Series, campo→dispositivo sin Área, cookie JWT y alternativas Render/Railway; trataban runtime validation como fuera de alcance. Quedan sustituidos por el acuerdo del 05/11. Se conserva el inventario histórico, los contratos de consulta y pendientes útiles, sin convertir propuestas en hechos.
+
+La numeración BE-01…BE-15 del antiguo §11 era sugerida y difería del plan del 05/11. Rige el backlog de [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md); versiones anteriores completas disponibles en Git, commit base 9cab86f. Ver [informe de auditoría](INFORME_BE00_BE01.md) para evidencias y limitaciones.

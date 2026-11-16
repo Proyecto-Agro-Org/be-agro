@@ -2,62 +2,55 @@
 !theme plain
 top to bottom direction
 skinparam linetype ortho
-
+title Agro - modelo conceptual propuesto BE-01
+note "Colecciones convencionales. No Time Series.\nIDs, nombres BSON y lotes pendientes de BE-02.\nNo representa el estado fisico observado de Atlas." as N
 class clientes {
-  _id: string <<entityId>>
+  _id: IdCliente
   nombre: string
-  createdAt: date
-  updatedAt: date
 }
 class usuarios {
-  _id: string
-  entityId: string
-  googleSub: string
-  email: string
-  nombre: string
-  activo: boolean
+  _id: IdUsuario
+  entityId: IdCliente
+  identidad: pendiente
 }
 class campos {
-  _id: string
-  entityId: string
+  _id: IdCampo
+  entityId: IdCliente
   nombre: string
-  descripcion: string?
-  activo: boolean
+}
+class areas {
+  _id: IdArea
+  entityId: IdCliente
+  campoId: IdCampo
+  nombre: string
 }
 class dispositivos {
-  _id: string <<deviceId>>
-  entityId: string
-  campoId: string
-  nombre: string
-  activo: boolean
+  _id: IdFisico
+  entityId: IdCliente
+  campoId: IdCampo
+  areaId: IdArea
+  deviceId: IdPublico
+  clientid: IdMQTT
 }
 class mediciones {
-  _id: objectId
-  timestamp: date <<timeField>>
-  entityId: string
-  contexto: object <<metaField>>
-  contexto.campoId: string
-  contexto.deviceId: string
-  location: object?
-  nutrients: object
-  soil: object
+  _id: IdFisico
+  referenciaDispositivo: pendiente
+  referenciaCliente: pendiente
+  timestampAdquisicion: pendiente
+  timestampRecepcion: pendiente
+  payloadBruto: object
+  procedencia: pendiente
 }
-class alertas {
-  _id: string
-  entityId: string
-  campoId: string
-  deviceId: string
-  tipo: string
-  severidad: string
-  estado: string
-  timestamp: date
-  resueltaAt: date?
+class alertas <<opcional>> {
+  cliente: IdCliente
+  dispositivo: IdDispositivo
+  origen: pendiente
+  cicloDeVida: pendiente
 }
-
-clientes "1" -- "*" usuarios : entityId
-clientes "1" -- "*" campos : entityId
-campos "1" -- "*" dispositivos : campoId
-dispositivos "1" -- "*" mediciones : contexto.deviceId
-campos "1" -- "*" alertas : campoId
-dispositivos "1" -- "*" alertas : deviceId
+clientes "1" -- "*" usuarios
+clientes "1" -- "*" campos
+campos "1" -- "*" areas
+areas "1" -- "*" dispositivos
+dispositivos "1" -- "*" mediciones
+dispositivos "1" -- "*" alertas
 @enduml

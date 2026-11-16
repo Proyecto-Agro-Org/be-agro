@@ -1,285 +1,107 @@
-# Propuesta de esquema MongoDB para `be-agro`
+# Propuesta de esquema MongoDB para be-agro
 
-**Estado:** propuesta para revisión del equipo  
-**Base:** schema actual compartido + alcance de `be-agro`  
-**Especificación relacionada:** [ESPECIFICACION.md](ESPECIFICACION.md)
+**Actualización:** 16/11/2026 · BE-01.
+**Estado:** modelo conceptual propuesto; pendiente de relevamiento y aprobación BE-02.
+**Decisión confirmada:** colecciones convencionales, **no Time Series**. No se ejecutan migraciones.
 
-## 1. Objetivos del esquema
+## 1. Qué se conoce y qué falta verificar
 
-El esquema debe permitir:
+El inventario histórico compartido enumera clientes, usuarios, lotes y dispositivos con _id string; mediciones con _id ObjectId, device_id string, timestamp string, location, soil y nutrients. No es una inspección actual de Atlas.
 
-- Autenticar con Google y resolver a qué entidad pertenece el usuario.
-- Aislar todas las lecturas por `entityId` obtenido del usuario autenticado.
-- Relacionar entidad → usuarios/campos → dispositivos → mediciones.
-- Servir áreas, sensores, mapa, última lectura e históricos al frontend.
-- Representar alertas si siguen dentro del alcance de esta entrega.
+El código de iot-ingest (`e6ffda0f0a4b9a18298c239ac34cc61de6b1c3fa`) usa por defecto base iot_sensores y colecciones mediciones/dispositivos, configurables. Inserta JSON libre con _receivedAt Date y _id generado; actualiza dispositivos por clientid string con _createdAt/_lastSeen Date. No garantiza tenant, campo, área, formato de magnitudes ni fecha de adquisición. El clientid MQTT identifica dispositivo; **no significa cliente del sistema**.
 
-## 2. Decisión de modelado
+No se verificaron opciones de colecciones, índices efectivos, documentos reales ni versiones de Atlas. El índice único clientid está solicitado por el repository de ingesta; su existencia física no fue comprobada. La falta de un model de clientes/áreas en ingesta tampoco demuestra que esas colecciones no existan.
 
-- La colección actual `clientes` representa la entidad/tenant del sistema. Su `_id` es el identificador de entidad.
-- Cada usuario pertenece a una entidad mediante `entityId`.
-- Cada campo pertenece a una entidad mediante `entityId`.
-- Cada dispositivo pertenece a un campo y a la misma entidad mediante `campoId` y `entityId`.
-- Cada medición pertenece a un dispositivo y campo y lleva la referencia a la misma entidad para filtrar directamente por tenant.
-- En el contrato HTTP, el frontend puede seguir llamando `area_id` al campo y `device_id` al dispositivo. El backend mapea los nombres sin obligar a que coincidan con los nombres internos de Mongo.
+## 2. Modelo lógico confirmado
 
-Para evitar inventar equivalencias, el modelo lógico usa `campos`. Si los documentos de `lotes` ya representan exactamente campos, se migra esa colección a la forma objetivo (conservando el nombre físico `lotes` si no se quiere renombrar). Si “lote” y “campo” son conceptos diferentes, se mantiene `lotes` separado y se crea `campos`.
-
-## 2.1 Diagrama objetivo
-
-```plantuml
-@startuml
-!theme plain
-top to bottom direction
-skinparam linetype ortho
-
-class clientes {
-  _id: string <<entityId>>
-  nombre: string
-  createdAt: date
-  updatedAt: date
-}
-class usuarios {
-  _id: string
-  entityId: string
-  googleSub: string
-  email: string
-  nombre: string
-  activo: boolean
-}
-class campos {
-  _id: string
-  entityId: string
-  nombre: string
-  descripcion: string?
-  activo: boolean
-}
-class dispositivos {
-  _id: string <<deviceId>>
-  entityId: string
-  campoId: string
-  nombre: string
-  activo: boolean
-}
-class mediciones {
-  _id: objectId
-  timestamp: date <<timeField>>
-  entityId: string
-  contexto: object <<metaField>>
-  contexto.campoId: string
-  contexto.deviceId: string
-  location: object?
-  nutrients: object
-  soil: object
-}
-class alertas {
-  _id: string
-  entityId: string
-  campoId: string
-  deviceId: string
-  tipo: string
-  severidad: string
-  estado: string
-  timestamp: date
-  resueltaAt: date?
-}
-
-clientes "1" -- "*" usuarios : entityId
-clientes "1" -- "*" campos : entityId
-campos "1" -- "*" dispositivos : campoId
-dispositivos "1" -- "*" mediciones : contexto.deviceId
-campos "1" -- "*" alertas : campoId
-dispositivos "1" -- "*" alertas : deviceId
-@enduml
+```text
+Cliente ── Usuario (un cliente por usuario)
+   └── Campo
+         └── Área
+               └── Dispositivo
+                     └── Mediciones
 ```
 
-`entityId` repetido en documentos de negocio permite aislar consultas directamente. `clientes._id` identifica la entidad raíz; por eso no se agrega un `entityId` redundante a la propia entidad.
+Campo y Área no se fusionan. El significado de lotes y la colección física de cada nivel se definen con evidencia en BE-02. `entityId` es la convención interna propuesta de tenant; `cliente_id`, `campo_id`, `area_id`, `device_id` son nombres públicos observados en frontend, no equivalencias BSON automáticas.
 
-## 3. Esquema objetivo
+## 3. Colecciones y campos candidatos
 
-Los tipos de IDs y referencias deben ser consistentes. Como el schema actual declara IDs de catálogo como `string`, esta propuesta mantiene strings para referencias de dominio y reserva `ObjectId` para `_id` de mediciones.
+**Todo este apartado es propuesta**, no schema implementado ni contrato BSON aprobado. `IdCliente`, `IdCampo`, `IdArea`, `IdDispositivo` representan tipos por acordar; no convertir strings a ObjectId por su apariencia.
 
-### `clientes` — entidad
-
-```js
-{
-  _id: String,          // entityId estable
-  nombre: String,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-### `usuarios` — identidad interna vinculada con Google
-
-```js
-{
-  _id: String,
-  entityId: String,     // referencia a clientes._id
-  googleSub: String,    // subject estable provisto por Google; no usar email como ID primario
-  email: String,
-  nombre: String,
-  activo: Boolean,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-Un usuario se asocia con una sola entidad. No se guarda contraseña de Google. Una cuenta no habilitada o sin `entityId` no accede a la API. Si se elige autoaprovisionamiento, debe definirse una regla segura para asignar la entidad; no se debe tomar `entityId` del perfil enviado por el navegador.
-
-### `campos` — campos/áreas visibles en la aplicación
-
-```js
-{
-  _id: String,
-  entityId: String,     // referencia a clientes._id
-  nombre: String,
-  descripcion: String | null,
-  activo: Boolean,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-La API puede serializar `_id` como `area_id`. No añadir ubicación del campo salvo que el equipo confirme que el campo completo tiene una ubicación propia distinta de los puntos de los sensores.
-
-### `dispositivos` — sensores/nodos registrados
-
-```js
-{
-  _id: String,          // device_id público/estable
-  entityId: String,     // duplicado deliberado para filtrar tenant directamente
-  campoId: String,      // referencia a campos._id (o a lotes._id si se conserva esa colección)
-  nombre: String,
-  activo: Boolean,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-El estado `conectado/desconectado`, la última comunicación, la ubicación vigente y la última medición se derivan de la medición más reciente. Evitar guardar esos mismos valores en `dispositivos` si no existe un proceso de ingesta que los mantenga sincronizados. Si se necesitan para rendimiento, definirlos como una proyección/cache y dejar claro que `mediciones` es la fuente de verdad.
-
-### `mediciones` — colección MongoDB Time Series
-
-```js
-{
-  _id: ObjectId,
-  timestamp: Date,      // BSON Date; se serializa a ISO 8601 UTC en la API
-  entityId: String,     // referencia a clientes._id; filtro de tenant
-  contexto: {
-    campoId: String,
-    deviceId: String
-  },
-  location: {
-    lat: Number,
-    lon: Number
-  } | null,
-  nutrients: {
-    nitrogen: Number | null,
-    phosphorus: Number | null,
-    potassium: Number | null
-  },
-  soil: {
-    conductivity: Number | null,
-    humidity: Number | null,
-    temperature: Number | null
-  }
-}
-```
-
-Configuración propuesta de la colección:
-
-```js
-db.createCollection("mediciones", {
-  timeseries: {
-    timeField: "timestamp",
-    metaField: "contexto",
-    granularity: "minutes"
-  }
-})
-```
-
-`contexto` agrupa los identificadores estables del campo/dispositivo; `entityId` queda como campo directo del documento para respetar el modelo de tenant acordado; `timestamp` representa el instante de observación. `granularity` debe ajustarse a la frecuencia real confirmada de publicación. No fijar retención hasta acordar cuánto histórico se debe conservar.
-
-La colección Time Series exige que `timeField` contenga una fecha BSON válida. MongoDB permite un `metaField` opcional para metadatos relativamente estables y documenta un índice compuesto de metadatos/tiempo para nuevas colecciones. Verificar versión de Atlas antes de fijar opciones. ([MongoDB: Create and Query a Time Series Collection](https://www.mongodb.com/docs/manual/core/timeseries/timeseries-procedures/))
-
-### `alertas` — colección propuesta para el contrato actual
-
-```js
-{
-  _id: String,
-  entityId: String,
-  campoId: String,
-  deviceId: String,
-  tipo: "tecnica" | "agronomica",
-  severidad: "alta" | "media" | "baja",
-  descripcion: String,
-  estado: "activa" | "resuelta",
-  timestamp: Date,
-  resueltaAt: Date | null,
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
-El schema actual no incluye alertas. Como el frontend consulta alertas activas y resueltas, con filtros y orden, se propone persistirlas en esta colección. Las reglas que las crean/resuelven siguen pendientes; `entityId`, `campoId` y `deviceId` deben corresponder a los recursos relacionados. Si el equipo decide derivarlas en cada consulta, deberá justificar cómo representar y consultar de forma estable su historial y resolución.
-
-## 4. Reglas de aislamiento y consistencia
-
-1. El `entityId` autorizado se obtiene de la sesión interna del usuario, cuya relación `usuarios.entityId` se resolvió durante login.
-2. Todas las consultas de catálogo filtran por `entityId` en MongoDB, incluidas listas, detalles y agregaciones.
-3. Las consultas de mediciones filtran por `entityId` y `contexto.deviceId`/`campoId` según el recurso solicitado.
-4. Nunca se usa un `entityId` que venga en query, body o header público para ampliar el acceso.
-5. Al crear una referencia o transformar datos, comprobar que usuario, campo, dispositivo y medición mantienen el mismo `entityId`.
-6. Un recurso inexistente o fuera de la entidad autenticada responde `404`.
-7. IDs y nombres de campos son sensibles a mayúsculas/minúsculas; adoptar exactamente `entityId`, `campoId`, `deviceId`, `googleSub`, `timestamp`, `contexto`, `location`, `nutrients` y `soil` o escoger una convención única antes de migrar.
-
-## 5. Mapeo a respuestas del frontend
-
-| Persistencia | Contrato frontend |
+| Colección lógica | Campos mínimos candidatos y relaciones |
 |---|---|
-| `campos._id` | `area_id` |
-| `campos.nombre` | `nombre` / `area_nombre` |
-| `dispositivos._id` | `device_id` |
-| `dispositivos.campoId` | `area_id` |
-| `mediciones.timestamp` | `timestamp` ISO 8601 UTC |
-| `mediciones.soil.humidity` | `humedad` |
-| `mediciones.soil.temperature` | `temperatura` |
-| `mediciones.soil.conductivity` | `conductividad` |
-| `mediciones.nutrients.nitrogen` | `nitrogeno` |
-| `mediciones.nutrients.phosphorus` | `fosforo` |
-| `mediciones.nutrients.potassium` | `potasio` |
-| `mediciones.location` | `ubicacion` |
+| clientes | _id: IdCliente, nombre |
+| usuarios | _id: IdUsuario, entityId: IdCliente, googleSub si se aprueba Google, email, nombre, activo |
+| campos | _id: IdCampo, entityId: IdCliente, nombre |
+| areas | _id: IdArea, entityId: IdCliente, campoId: IdCampo, nombre |
+| dispositivos | _id físico preservado, entityId, campoId, areaId, deviceId público, clientid MQTT, nombre, ubicación vigente opcional |
+| mediciones | _id físico preservado, referencia de dispositivo/cliente/campo/área verificable, instante adquisición, recepción, payload bruto y fuente/versión de formato |
+| alertas | Solo si se aprueba persistencia: cliente/relaciones, tipo, severidad, descripción, estado, apertura/resolución |
 
-Las unidades se fijan en el contrato de API según las decisiones del equipo; el documento actual no las contiene. Un valor ausente se transforma en `null`, nunca en cero.
+No se propone sobrescribir _lastSeen como instante de adquisición. Un evento de broker puede actualizarlo sin una medición nueva. Unificar clientid/device_id/_id requiere tabla de correlación confiable; preferir mapear sobre el modelo real antes que renombrar datos.
 
-## 6. Índices iniciales a evaluar
+### Mediciones convencionales y preservación
 
-- `usuarios`: índice único por `googleSub`; índice por `entityId` para administración/consultas de usuarios.
-- `campos`: índice compuesto por `entityId` y `_id` si se requiere validar/consultar ambos explícitamente.
-- `dispositivos`: índice compuesto por `entityId` y `campoId` para listar dispositivos de un campo.
-- `mediciones`: índice de la colección Time Series en `contexto`/`timestamp` según la configuración; evaluar índice secundario para `entityId` y validar el plan de consultas en Atlas. Las colecciones Time Series admiten índices secundarios con consideraciones y limitaciones propias. ([MongoDB: Time Series Indexes](https://www.mongodb.com/docs/manual/core/timeseries/timeseries-index/))
-- `alertas`: índices según filtros aprobados, empezando por entidad/estado/fecha y entidad/campo/estado.
+El documento original puede ser `soil/nutrients`, `readings`, `measurements` o sobre con payload string. No seleccionar uno como canónico sin muestras. Proponer un discriminador de formato/versión y mappers en be-agro; asignación de tenant/relaciones desde catálogo confiable, no desde un valor libre enviado por hardware.
 
-Los índices deben comprobarse contra versión y limitaciones de Atlas, cardinalidad y consultas reales. No intentar imponer índices únicos no soportados por la colección Time Series; la unicidad de mediciones, si hace falta, se resuelve en el productor/ingesta o con una colección de deduplicación.
+La fecha de adquisición y _receivedAt son conceptos distintos. BSON Date para adquisición es un candidato para consultas consistentes; si hoy hay strings, relevar tipos, zona, validez y orden antes de acordar transformación. No reemplazar silenciosamente timestamp ausente por recepción.
 
-## 7. Migración desde el schema actual
+Mantener brutos e históricos, incluyendo datos parciales. No introducir TTL ni política de retención que elimine registros sin acuerdo. No ejecutar db.createCollection, backfill, creación de índices o cambios de ingesta durante BE-00/BE-01.
 
-1. Confirmar versión de MongoDB Atlas y revisar documentos reales; `entityId` es parte del modelo acordado y se comprueba su tipo/consistencia en todas las colecciones de datos.
-2. Exportar un respaldo antes de alterar documentos o colecciones.
-3. Normalizar `entityId` en usuarios, campos/lotes y dispositivos (completarlo solo donde falte) y añadir `campoId` a dispositivos. Verificar cada relación antes de actualizar mediciones.
-4. Transformar las mediciones para incluir `entityId`, `contexto.campoId` y `contexto.deviceId`, preservando el `device_id` original durante una fase de compatibilidad si Make o consumidores actuales lo requieren.
-5. Convertir strings ISO válidos de `timestamp` a BSON Date; separar/revisar los documentos con fechas inválidas, sin descartarlos silenciosamente.
-6. Crear la colección Time Series nueva con opciones aprobadas e importar/conmutar lecturas por etapas. No convertir una colección existente en el lugar sin validar restricciones/versiones y plan de rollback.
-7. Crear usuarios con Google `sub` y `entityId`; no inventar cuentas o asociarlas a una entidad por email sin regla aprobada.
-8. Implementar `alertas` solo cuando su origen y reglas estén acordadas.
-9. Validar conteos, relaciones y consultas por entidad; documentar rollback y retirar compatibilidad antigua cuando todos los consumidores migren.
+## 4. Acceso seguro con datos existentes
 
-## 8. Pendientes para aceptar esta propuesta
+1. La sesión verificada resuelve usuario y cliente autorizado.
+2. El repository valida campo y área dentro de ese cliente, luego dispositivo y correlación de ID.
+3. Consultas de mediciones deben incluir un alcance verificable de cliente en Mongo, directamente si existe tenant confiable, o mediante relación/catálogo y conjunto de dispositivos autorizado cuyo identificador sea inequívoco.
+4. Documentos sin correlación verificable no se exponen por suposición. Identificadores reutilizados entre clientes impiden usar device_id aislado como autorización.
+5. Listas y agregaciones mantienen el mismo alcance, nunca filtran otros clientes después de recuperarlos.
+6. Recurso ajeno/inexistente: 404. No permitir que campo_id/cliente_id del navegador amplíen acceso.
 
-- Confirmar si `lotes` son los campos del modelo. Si sí, decidir mantener el nombre físico `lotes` o renombrar a `campos`; no duplicar ambos por defecto.
-- Acordar tipos BSON reales para `entityId`, `campoId` y `deviceId`; esta propuesta usa string para ser consistente con el schema actual.
-- Acordar formato y frecuencia real de `timestamp` antes de elegir `granularity`.
-- Acordar unidades y política de mediciones parciales.
-- Acordar si alertas se persisten o se calculan y si forman parte del alcance.
-- Acordar allowlist/alta de cuentas Google y proceso para asignar `entityId` a usuarios.
+La opción de desnormalizar entityId/campoId/areaId en mediciones puede facilitar índices, pero exige consistencia, responsable y tratamiento de historial de reasignaciones; no está resuelta en esta propuesta.
+
+## 5. Mapeos hacia frontend
+
+| Origen a verificar | Salida pública | Condición |
+|---|---|---|
+| Campo del catálogo | campo_id | Mantener nivel independiente |
+| Área del catálogo | area_id | No mapear campos._id a area_id |
+| Identidad pública del dispositivo | device_id | Correlacionar con clientid/_id |
+| Fecha de adquisición válida | timestamp UTC ISO 8601 | Recepción no es sustituto implícito |
+| soil.humidity o measurements.soil_moisture_reported_pct | humedad {valor,unidad} | Mapeos candidatos; calibración VWC no implícita |
+| soil.temperature o measurements.soil_temperature_c | temperatura | Verificar escala/unidad |
+| soil.conductivity o measurements.conductivity_us_cm | conductividad | µS/cm→dS/m solo con unidad confirmada |
+| nutrients.nitrogen/phosphorus/potassium | nitrogeno/fosforo/potasio | Ausentes en S8; confirmar método y fuente |
+| location o geolocation o catálogo | ubicacion {lat,lon} o null | Definir fuente vigente y precedencia |
+
+`readings` no tiene un vocabulario garantizado: requiere muestras y mapper propio. Los distintos JSON de documentos de referencia son ejemplos simulados, no datos del sensor capturados. La especificación usa soil_moisture_reported_pct y el anexo soil_moisture_sensor_pct: elegir nombre/versionado en BE-04.
+
+Procedencia propuesta para magnitudes: medida, estimada por dispositivo, derivada, laboratorio/campo o ausente; método, unidad original, calibración, profundidad, vigencia, referencias de entradas y versión de fórmula cuando corresponda. El formato HTTP de estos metadatos aún no está aprobado. Las seis variables UI se conservan con null para ausencia; no inventar NPK ni pH en S8.
+
+## 6. Índices candidatos para BE-02
+
+Los nombres siguientes se refieren al **modelo propuesto**. Adaptarlos a los campos físicos aprobados y al patrón real de consultas; no ejecutarlos como receta.
+
+| Consulta | Índice convencional candidato |
+|---|---|
+| Última/histórico por dispositivo y cliente | { entityId: 1, deviceId: 1, timestamp: -1 } |
+| Resumen por campo/tiempo | { entityId: 1, campoId: 1, timestamp: -1 } |
+| Resumen por área/tiempo | { entityId: 1, areaId: 1, timestamp: -1 } |
+| Áreas del campo | { entityId: 1, campoId: 1 } en areas |
+| Dispositivos del área | { entityId: 1, areaId: 1 } en dispositivos |
+| Identidad Google | googleSub único si proveedor/alta aprobados |
+| Alertas persistidas | { entityId: 1, estado: 1, timestamp: -1 }, sujeto a filtros |
+| Estado MQTT actual | clientid único solicitado por ingesta; evaluar unicidad real global |
+
+No duplicar índices por defecto: medir cardinalidad, costo de escritura y explain en base aislada. Deduplicación de telemetría por msg_id/seq es propuesta histórica aún no implementada; evaluar claves y duplicados antes de cualquier índice único.
+
+## 7. Relevamiento y eventual compatibilidad
+
+BE-02 debe aportar muestras sanitizadas, nombres físicos, tipos y referencias para toda la cadena, opciones e índices existentes y resolución de lotes. BE-04 acuerda fechas/unidades/procedencia y conversión de documentos antiguos.
+
+Solo después de aprobación: diseñar respaldo, conteos previos, compatibilidad de productores/consumidores, transformación reversible, validación cruzada de clientes y rollback; conservar brutos y fechas inválidas para revisión. Ningún paso de migración se ejecutó aquí.
+
+## 8. Historia preservada
+
+La propuesta anterior (Git base 9cab86f) usaba timestamp Date con timeField/metaField, contexto y equivalencia campos→area_id. Esa arquitectura queda retirada por plan del 05/11 y jerarquía completa. `ddbb.puml` se actualiza como diagrama conceptual, sin afirmar existencia física de colecciones. La alternativa de persistir alertas continúa pendiente; ausencia visual de mediciones sigue a cargo del frontend.
+
+Referencias: [ESPECIFICACION.md](ESPECIFICACION.md), [INFORME_BE00_BE01.md](INFORME_BE00_BE01.md).
