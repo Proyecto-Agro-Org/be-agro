@@ -2,6 +2,17 @@
 
 Estas instrucciones aplican al contenido de `be-agro/`. Si una regla contradice un contrato aprobado en `ESPECIFICACION.md`, prevalece el contrato vigente y se actualizan ambos documentos mediante PR.
 
+## Decisiones vigentes y estado
+
+- Rige el Plan de Trabajo Backend A26T02 del 05/11/2026: acuerdos confirmados → código/contratos implementados → especificación reciente → propuestas históricas. Una propuesta no equivale a aprobación.
+- Estado auditado al 16/11/2026: Express/JavaScript, CORS y `/health`; TypeScript, Zod, Mongoose, Vitest y Supertest están previstos, todavía no instalados. Ver `INFORME_BE00_BE01.md`.
+- Usar colecciones MongoDB convencionales, **no Time Series**; preservar históricos y planificar índices por cliente, dispositivo y tiempo. No ejecutar migraciones por inferencia documental.
+- La jerarquía es Cliente → Campo → Área → Dispositivo → Mediciones; el usuario pertenece a un cliente. No equiparar `lotes`, `campos` y `areas` sin evidencia física y acuerdo.
+- El frontend actual usa Bearer y mocks de identidad/Google/campos; eso no demuestra autenticación real del backend. La sesión definitiva requiere acuerdo.
+- La normalización de magnitudes, nombres y unidades de la API corresponde al backend. Distinguir medición directa, estimación del dispositivo, derivación, laboratorio y ausencia; nunca completar ausencias con cero. S8 no mide NPK ni pH; su humedad reportada no equivale automáticamente a humedad volumétrica.
+- La alerta visual por falta de mediciones corresponde al frontend. Worker, WebSocket e historial persistente de desconexión requieren una decisión posterior.
+- `documentacion-referencia/` es local y se excluye mediante `.git/info/exclude`, sin modificar `.gitignore` compartido.
+
 ## Backend `be-agro`
 
 ### Arquitectura
@@ -43,14 +54,14 @@ La estructura puede evolucionar mediante decisión documentada, manteniendo las 
 - Declarar los DTOs como tipos/interfaces TypeScript y mantenerlos alineados con OpenAPI y los tipos consumidos por frontend.
 - Los controllers reciben/mapean datos al DTOResponse. Los services y repositories no retornan documentos Mongoose como respuesta pública.
 - No usar `any` para evitar definir un contrato; preferir tipos explícitos y `unknown` con estrechamiento cuando corresponda.
-- **Límite aceptado:** los DTOs TypeScript ofrecen comprobación estática; no validan JSON recibido en runtime. No afirmar que un request HTTP queda validado solo por tener una interfaz. Si el equipo requiere validación de runtime, deberá aprobar esquemas (por ejemplo Zod) y actualizar este documento y el DoD.
+- Los DTOs TypeScript ofrecen comprobación estática; no validan JSON en runtime. Zod está aprobado para validar params/query/body y configuración de entorno en las etapas de implementación. Definir esquemas alineados con DTOs/OpenAPI y probar sus rechazos; no afirmar que ya existen en el código actual.
 
 ### Sesión y separación por entidad
 
 - Todas las rutas de negocio requieren usuario autenticado, salvo endpoints declarados públicos como login y health.
 - Un usuario pertenece a una sola entidad/cliente para esta etapa. El middleware de autenticación carga la identidad y el `entityId` desde una fuente confiable de sesión/usuario.
 - Aplicar la separación de entidad en cada consulta del repository. No confiar en `entityId`, `cliente_id` o equivalente proveniente de body, query o headers públicos para decidir el alcance de datos.
-- Mantener consistente `entityId` en las relaciones entidad → campo → dispositivo → medición; validar relaciones usando IDs persistidos.
+- Mantener consistente el cliente en las relaciones entidad → campo → área → dispositivo → medición; validar relaciones usando IDs persistidos. `entityId` es la convención interna propuesta, cuyo tipo BSON y presencia física se verifican en BE-02; no asumir que ingesta lo produce.
 - No implementar roles ni permisos por endpoint en esta etapa. La protección definida es autenticación y aislamiento de datos por entidad.
 - Un recurso fuera del ámbito de la entidad responde con el status acordado en la especificación; por defecto usar `404` para no revelar su existencia.
 
