@@ -1,6 +1,6 @@
 # Plan de implementación del backend be-agro
 
-**Actualizado:** 16/11/2026 · alineación BE-00/BE-01.
+**Actualizado:** 17/11/2026 · consolidación local BE-02 a BE-08, sin publicación.
 **Fuente rectora:** Plan de Trabajo Backend A26T02 del 05/11/2026 §§7–11.
 **Contrato y evidencia:** [ESPECIFICACION.md](ESPECIFICACION.md), [INFORME_BE00_BE01.md](INFORME_BE00_BE01.md).
 
@@ -8,9 +8,12 @@
 
 - [ ] Pendiente; [/] trabajo local preparado/en revisión; [!] requiere decisión/evidencia; [x] PR integrado y criterios satisfechos.
 - Una entrega local o un PR abierto no está Done. No se completa ninguna etapa por haber redactado su propuesta.
-- Solo main y origin/main comprobadas. No asumir develop/dev; acordar rama de integración antes de crear feature/<issue>-<tema>. Esta auditoría no crea ramas, commits, Issues ni despliegues.
-- BE-00 y BE-01 producen documentación; no incluyen BE-02/03/04 ni instalación/migración de paquetes.
-- Ya existen Express/JS, health y CORS. Se adaptan al stack objetivo conservando comportamiento; no se reconstruyen.
+- Rama de integración acordada: `dev`, verificada junto con `main` en `1bb20f76b7a739f42c75b37b9a64315276560ec1`. La rama local `integration/be-02-a-be-08` prepara la consolidación; no se fusionó en remoto por falta de evidencia de separación Vercel/Production.
+- BE-00 y BE-01 fueron documentación integrada mediante PR #1; esto no completa automáticamente criterios externos ni etapas posteriores.
+- BE-05 a BE-08 ya tienen código publicado en PR Draft #5 a #9 y ahora reunido localmente; aún no integrado en `dev`. TypeScript, Mongoose, Zod, errores/logging y hardening cuentan con validación local, no validación Preview real.
+- BE-02/03/04 son propuestas documentales de PR Draft #2/#3/#4, incorporadas localmente sin aprobar Atlas, contratos o unidades. No se ejecutaron migraciones ni normalizadores.
+- BE-09.0/09.1 permanecen locales en su working tree original, fuera de esta consolidación. BE-09 real, modelos y endpoints de negocio no están implementados en esta rama.
+- Evidencia vigente: [informe de consolidación](INFORME_CONSOLIDACION_DEV_BE02_BE08.md). Ninguna casilla nueva se marca Done.
 - Las casillas anteriores E0…E4 no estaban completadas. Se reorganizan con los IDs del plan del 05/11, evitando colisiones con la numeración BE sugerida del antiguo documento.
 
 ## Backlog vigente y dependencias
@@ -19,13 +22,13 @@
 |---|---|---|---|---|
 | [/] | BE-00 | 0 | Auditar repo, ramas, health, scripts, entorno, pruebas, Vercel y documentación. Informe trazable con límites de acceso; PR revisado/integrado para cierre. | Repo y fuentes disponibles |
 | [/] | BE-01 | 0 | Consolidar capas, Zod, jerarquía, colecciones comunes, auth observada y alertas. Documentos coherentes, decisiones pendientes explícitas; PR integrado para cierre. | BE-00 y plan 05/11 |
-| [ ] | BE-02 | 1 | Definir IDs y schema Mongo físico/objetivo con ejemplos sanitizados, BSON, lotes, relaciones y alcance de cliente; índices convencionales e históricos preservados. | BE-01; evidencia Atlas/ingesta |
-| [ ] | BE-03 | 1 | Definir DTORequest/DTOResponse, schemas Zod y OpenAPI con frontend: campo_id/area_id/device_id, rutas sensores, auth, errores, filtros, límites y nullabilidad. | BE-01; modelo mínimo BE-02 y decisiones de sesión |
-| [ ] | BE-04 | 1 | Catálogo de unidades, precisión, fuente, null, fechas adquisición/recepción y conversión de datos previos; ejemplos aprobados por dominio/ingesta. | BE-02/03; muestras y Agronomía |
-| [ ] | BE-05 | 2 | Migrar Express JS a TypeScript sin perder health/CORS/Vercel; scripts dev/build/start o estrategia equivalente documentada y reproducible. | Contrato mínimo BE-02/03/04 |
-| [ ] | BE-06 | 2 | Implementar capas por recurso y DTOs/mappers/adapters, sin consultas Mongo en controllers ni Express en services. | BE-05 |
-| [ ] | BE-07 | 2 | Configurar Mongoose y Zod requests/env; conexión segura, fallos controlados y configuración validada. | BE-05/06; modelo aprobado |
-| [ ] | BE-08 | 2 | Error handler/404 uniforme, logging con request ID, CORS, seguridad HTTP y límites; pruebas sin secretos. | BE-03 y base TS |
+| [/] | BE-02 | 1 | Definir IDs y schema Mongo físico/objetivo con ejemplos sanitizados, BSON, lotes, relaciones y alcance de cliente; índices convencionales e históricos preservados. | BE-01; evidencia Atlas/ingesta |
+| [/] | BE-03 | 1 | Definir DTORequest/DTOResponse, schemas Zod y OpenAPI con frontend: campo_id/area_id/device_id, rutas sensores, auth, errores, filtros, límites y nullabilidad. | BE-01; modelo mínimo BE-02 y decisiones de sesión |
+| [/] | BE-04 | 1 | Catálogo de unidades, precisión, fuente, null, fechas adquisición/recepción y conversión de datos previos; ejemplos aprobados por dominio/ingesta. | BE-02/03; muestras y Agronomía |
+| [/] | BE-05 | 2 | Migrar Express JS a TypeScript sin perder health/CORS/Vercel; scripts dev/build/start o estrategia equivalente documentada y reproducible. | Contrato mínimo BE-02/03/04 |
+| [/] | BE-06 | 2 | Implementar capas por recurso y DTOs/mappers/adapters, sin consultas Mongo en controllers ni Express en services. | BE-05 |
+| [/] | BE-07 | 2 | Configurar Mongoose y Zod requests/env; conexión segura, fallos controlados y configuración validada. | BE-05/06; modelo aprobado |
+| [/] | BE-08 | 2 | Error handler/404 uniforme, logging con request ID, CORS, seguridad HTTP y límites; pruebas sin secretos. | BE-03 y base TS |
 | [ ] | BE-09 | 3 | Integrar Google/sesión aprobada, contexto de cliente, recuperación/logout y aislamiento de consultas por jerarquía. | BE-07/08; política auth cerrada |
 | [ ] | BE-10 | 4 | GET campos por cliente y catálogo áreas; campos vacíos, 400/401/404, filtro por cliente dentro de repository. | BE-02/03/09 |
 | [ ] | BE-11 | 4 | Dispositivos por área y detalle, mappers/ubicación/última comunicación, recursos ajenos 404; conservar rutas públicas acordadas. | BE-10 |

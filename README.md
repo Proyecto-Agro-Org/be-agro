@@ -2,6 +2,38 @@
 
 Minimal Express API prepared for Vercel.
 
+## Consolidación local BE-02 a BE-08 — 17/11/2026
+
+La rama `integration/be-02-a-be-08` reúne localmente los commits originales BE-05,
+BE-06, BE-07.1, BE-07.2 y BE-08 mediante merges, desde `origin/dev` en
+`1bb20f76b7a739f42c75b37b9a64315276560ec1`. Incorpora BE-02/03/04 exclusivamente
+como **documentación provisional**, sin aprobar modelos físicos, contratos ni
+conversiones. No incorpora los entregables locales BE-09 ni el informe local BE-05.
+
+Validación de esta consolidación: npm ci, typecheck, build y **120/120 pruebas**
+aprobados. Diferencial contra BE-07.2: 13 escenarios, **11 compatibles y dos cambios
+intencionales de seguridad del 404**, sin regresiones detectadas. Código, tests,
+package/lock, tsconfig y configuración Vercel son idénticos al commit BE-08.
+
+**Sin publicación ni merge remoto:** no pudo comprobarse en Vercel qué rama produce
+Production ni si un push/integración puede afectarla. GitHub no muestra protección
+para `dev`, pero eso no resuelve el control externo. No se marca ninguna etapa Done.
+Vercel Preview funcional, revisión del equipo e integración permanecen pendientes.
+Detalle, respaldos, discrepancias documentales y procedimiento de continuación:
+[informe de consolidación](INFORME_CONSOLIDACION_DEV_BE02_BE08.md).
+
+Precedencia al consumir los documentos incorporados: acuerdos confirmados y código
+implementado → propuestas pendientes BE-02/03/04. `docs/openapi.json` **no es un
+inventario de rutas desplegadas**. Solo health existe; el envelope anidado propuesto,
+las reglas de unidades y el diagrama Mongo no se activan por estar en esta rama.
+Se conserva error string transitorio, UUID/logging seguro y 404 no reflectante de
+BE-08; el perfil HTTP completo sigue optativo.
+
+## Antecedentes de las entregas
+
+Los resultados siguientes describen sus etapas originales; para el estado conjunto
+vigente consultar el apartado anterior y el informe de consolidación.
+
 Estado local BE-08.5 al 17/11/2026: TypeScript ESM compilado, Node 24.x, Express 5, CORS y
 `GET /health` (salud del proceso; no verifica MongoDB). Las rutas de negocio
 `/api/v1`, autenticación, acceso a Atlas y aislamiento por cliente aún no están
@@ -18,7 +50,8 @@ Time Series) y Cliente → Campo → Área → Dispositivo → Mediciones.
 La evaluación y el alcance de BE-05 están en
 [preparación TypeScript](INFORME_BE05_PREPARACION_TYPESCRIPT.md) y
 [contrato técnico](APROBACION_TECNICA_BE05.md). No se incorporaron los commits
-exclusivos de los PR Draft BE-02/03/04.
+exclusivos de los PR Draft BE-02/03/04 en aquella entrega; ahora se reúnen como
+propuestas documentales en la consolidación local descrita arriba.
 Los resultados actuales están en [implementación](INFORME_BE05_IMPLEMENTACION_TYPESCRIPT.md)
 y [auditoría BE-05.2](INFORME_BE05_AUDITORIA_TYPESCRIPT.md):18/18 pruebas y13/13
 escenarios HTTP locales equivalentes para BE-05; Preview y revisión/integración pendientes.
@@ -49,7 +82,8 @@ obsoletos sobre un mismo Request y la copia de metadata extra en errores.
 
 `documentacion-referencia/` permanece local, excluida mediante
 `.git/info/exclude`; no debe agregarse al repositorio. La rama de integración
-acordada es `dev`; esta implementación sigue local en su rama de trabajo.
+acordada es `dev`; la consolidación sigue local en `integration/be-02-a-be-08`,
+sin modificar `dev` ni `main`.
 
 ## Arquitectura local BE-06
 
@@ -77,8 +111,9 @@ El perfil default actual usa contexto UUID → CORS → rutas → 404 → handle
 → frontera terminal, con callback final de dispatch protegido. Se conserva el
 404 HTML genérico sin pathname; el perfil optativo BE-08 se describe más abajo. Autenticación
 y contrato uniforme definitivo siguen pendientes. Comandos y entrada prevista
-de Vercel no cambian. BE-06 parte de la rama BE-05 aún no integrada, por lo
-que una futura publicación deberá revisar esa dependencia y el autodeploy.
+de Vercel no cambian. BE-06 se publicó originalmente encadenada a BE-05; esta
+consolidación conserva esa ascendencia y permite revisar el conjunto hacia `dev`.
+Una futura publicación exige primero verificar el riesgo del autodeploy.
 
 ## Infraestructura MongoDB — BE-07.1
 
