@@ -2,7 +2,7 @@
 
 Minimal Express API prepared for Vercel.
 
-Estado local BE-07.1 auditado al 17/11/2026: TypeScript ESM compilado, Node 24.x, Express 5, CORS y
+Estado local BE-07.2 al 17/11/2026: TypeScript ESM compilado, Node 24.x, Express 5, CORS y
 `GET /health` (salud del proceso; no verifica MongoDB). Las rutas de negocio
 `/api/v1`, autenticación, acceso a Atlas y aislamiento por cliente aún no están
 implementados. Mongoose y Zod están incorporados para infraestructura MongoDB
@@ -40,8 +40,12 @@ y 25 de infraestructura Mongo), typecheck y build aprobados. Ver el
 [informe BE-07.1](INFORME_BE07_INFRAESTRUCTURA_MONGOOSE_ZOD.md).
 La [auditoría BE-07.1A](INFORME_BE07_AUDITORIA.md) corrigió la validación de
 nombres de base decodificados y el bloqueo de cierre tras un fallo de Mongoose.
-La etapa completa BE-07 sigue pendiente de revisión, integración y alcance
-posterior aprobado; la validación de requests todavía no está implementada.
+La etapa completa BE-07 sigue pendiente de revisión e integración. BE-07.2 agrega
+infraestructura de validación de requests sin contratos de negocio definitivos:
+**73/73 pruebas** (46 anteriores y 27 de requests), typecheck y build aprobados.
+Ver [informe BE-07.2](INFORME_BE07_2_VALIDACION_REQUESTS.md).
+La [auditoría BE-07.2A](INFORME_BE07_2_AUDITORIA.md) corrigió resultados async
+obsoletos sobre un mismo Request y la copia de metadata extra en errores.
 
 `documentacion-referencia/` permanece local, excluida mediante
 `.git/info/exclude`; no debe agregarse al repositorio. La rama de integración
@@ -111,6 +115,57 @@ La reutilización solo alcanza una instancia caliente del proceso, no todos los
 workers de Vercel. Atlas, credenciales, permisos, conectividad y presupuesto de
 conexiones requieren validación futura autorizada. No hay readiness de DB;
 `/health` sigue midiendo únicamente salud del proceso.
+
+## Validación de requests — BE-07.2
+
+`createRequestValidation` en `src/middlewares/validate-request.middleware.ts`
+recibe esquemas Zod independientes para body, params y query. Usa safeParseAsync
+y solo lee las partes configuradas. No reemplaza req.body, req.params ni req.query.
+
+Ejemplo didáctico de consumo; no registra una ruta ni aprueba un contrato:
+
+```ts
+import type { Request, Response } from 'express';
+import { z } from 'zod';
+import { createRequestValidation } from './middlewares/validate-request.middleware.js';
+
+const input = createRequestValidation(
+  { body: z.object({ label: z.string().trim() }) },
+  { publicFields: { body: ['label'] } },
+);
+// En una operación futura: parser aprobado → input.middleware → controller.
+function controller(request: Request, response: Response) {
+  const { body } = input.getValidatedData(request);
+  response.json({ label: body.label });
+}
+```
+
+Middleware y accessor deben pertenecer a la misma instancia creada para la
+operación. Los datos viven en un WeakMap privado por request; el accessor falla
+antes de una validación satisfactoria y no devuelve éxitos parciales. Los tipos
+se infieren de z.output, incluyendo transformaciones. No leer el input crudo
+como sustituto de los datos validados. El contenedor es readonly/congelado, no
+una garantía de inmutabilidad profunda de cualquier salida personalizada Zod.
+Cada ejecución tiene una generación privada: una ejecución antigua que termina
+después de otra sobre el mismo Request no puede sobreescribir sus resultados.
+Se rechaza con un error interno de ejecución. Esto no cancela refinamientos;
+la integración normal debe invocar el middleware una vez por operación.
+Los campos opcionales ausentes y los explícitamente undefined se conservan como
+los distingue el esquema. Una parte configurada aparece aunque su salida sea
+undefined; una parte no configurada no aparece. JSON no representa undefined.
+
+Los errores internos distinguen invalidación esperada y fallo de ejecución de
+un refinamiento. Las issues incluyen part, path, code y un mensaje fijo seguro;
+no contienen input ni mensajes originales de Zod. publicFields debe ser una
+lista estática de nombres autorizados: los demás segmentos se redactan como
+[field] y los índices como [index], porque un path personalizado puede contener
+datos sensibles. El array path vacío identifica el error de la parte completa.
+
+El middleware solo llama a next; no elige status, serializa errores ni modifica
+el handler legacy. BE-08 deberá integrar estos errores antes de conectar esta
+infraestructura a rutas reales. El parser JSON y los límites de entrada también
+deben acordarse por operación. Health no recibe este middleware. No se agregan
+esquemas ni endpoints de negocio ni dependencia MongoDB.
 
 ## Local development
 
