@@ -1,5 +1,13 @@
 import cors from 'cors';
-import express from 'express';
+import express, { type ErrorRequestHandler } from 'express';
+
+interface AppOptions {
+  allowedOrigins?: ReadonlySet<string>;
+}
+
+interface LegacyError {
+  statusCode?: number;
+}
 
 function getAllowedOrigins(value = process.env.CORS_ORIGINS ?? '') {
   return new Set(
@@ -10,7 +18,7 @@ function getAllowedOrigins(value = process.env.CORS_ORIGINS ?? '') {
   );
 }
 
-export function createApp({ allowedOrigins = getAllowedOrigins() } = {}) {
+export function createApp({ allowedOrigins = getAllowedOrigins() }: AppOptions = {}) {
   const app = express();
 
   app.disable('x-powered-by');
@@ -26,8 +34,9 @@ export function createApp({ allowedOrigins = getAllowedOrigins() } = {}) {
           return;
         }
 
-        const error = new Error('Origin not allowed by CORS');
-        error.statusCode = 403;
+        const error = Object.assign(new Error('Origin not allowed by CORS'), {
+          statusCode: 403,
+        });
         callback(error);
       },
     }),
@@ -37,8 +46,9 @@ export function createApp({ allowedOrigins = getAllowedOrigins() } = {}) {
     response.status(200).json({ status: 'ok' });
   });
 
-  app.use((error, _request, response, _next) => {
-    const statusCode = error.statusCode ?? 500;
+  const errorHandler: ErrorRequestHandler = (error: unknown, _request, response, _next) => {
+    // Describe the existing error convention without introducing runtime validation.
+    const statusCode = (error as LegacyError).statusCode ?? 500;
 
     if (statusCode >= 500) {
       console.error(error);
@@ -50,7 +60,9 @@ export function createApp({ allowedOrigins = getAllowedOrigins() } = {}) {
           ? 'Origin not allowed by CORS'
           : 'Internal server error',
     });
-  });
+  };
+
+  app.use(errorHandler);
 
   return app;
 }
