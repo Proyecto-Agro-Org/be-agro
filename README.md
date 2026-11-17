@@ -2,7 +2,7 @@
 
 Minimal Express API prepared for Vercel.
 
-Estado local BE-05.1 al 16/11/2026: TypeScript ESM compilado, Node 24.x, Express 5, CORS y
+Estado local BE-06 al 16/11/2026: TypeScript ESM compilado, Node 24.x, Express 5, CORS y
 `GET /health` (salud del proceso; no verifica MongoDB). Las rutas de negocio
 `/api/v1`, autenticación, acceso a Atlas y aislamiento por cliente aún no están
 implementados. Zod, Mongoose, Vitest y Supertest siguen planificados;
@@ -19,11 +19,51 @@ La evaluación y el alcance de BE-05 están en
 exclusivos de los PR Draft BE-02/03/04.
 Los resultados actuales están en [implementación](INFORME_BE05_IMPLEMENTACION_TYPESCRIPT.md)
 y [auditoría BE-05.2](INFORME_BE05_AUDITORIA_TYPESCRIPT.md):18/18 pruebas y13/13
-escenarios HTTP locales equivalentes; Preview y revisión/integración pendientes.
+escenarios HTTP locales equivalentes para BE-05; Preview y revisión/integración pendientes.
+
+La implementación incremental BE-06 separa health, configuración CORS y errores
+legacy, sin cambiar sus contratos. Validación local: **21/21 pruebas** (18
+conservadas y tres nuevas) y **13/13 escenarios HTTP equivalentes** frente al
+commit BE-05 `e2c19c38cf2ad8f40c98aaff5d8248a561ccb474`.
+Ver [informe BE-06](INFORME_BE06_ARQUITECTURA_CAPAS.md). BE-06 no está Done:
+revisión/integración pendientes; no se realizaron despliegues.
+La [auditoría BE-06.1](INFORME_BE06_AUDITORIA.md) repitió estas validaciones
+sin encontrar defectos que requieran cambios de código. Propone un futuro PR
+Draft hacia `feature/be-05-preparacion-typescript`, después de revisar y guardar
+el delta BE-06. Antes de publicar debe verificarse el control del autodeploy;
+el Preview de BE-05 continúa pendiente.
 
 `documentacion-referencia/` permanece local, excluida mediante
 `.git/info/exclude`; no debe agregarse al repositorio. La rama de integración
 acordada es `dev`; esta implementación sigue local en su rama de trabajo.
+
+## Arquitectura local BE-06
+
+```text
+src/
+  app.ts                              # Composición; factory y export default sin listen
+  config/cors.ts                      # Lectura de CORS_ORIGINS al crear cada app
+  routes/health.routes.ts             # Router GET /health
+  controllers/health.controller.ts     # HTTP 200 y mapeo explícito a DTO
+  services/health.service.ts           # Salud del proceso, sin Express ni persistencia
+  dto/health.dto.ts                    # GetHealthResponse; DTORequest no aplica
+  middlewares/cors.middleware.ts       # Política CORS existente por instancia
+  middlewares/legacy-error.middleware.ts # Errores legacy centralizados
+scripts/start.ts                       # Listener local sin cambios
+```
+
+Flujo de health: router → controller → service; la respuesta se mapea al DTO
+en el controller. No hay repository/model para health. Persistencia, adapters
+y mappers de dominio se añadirán al existir una responsabilidad aprobada;
+no se crean carpetas vacías ni consultas ficticias. El service no conoce HTTP.
+Los DTOs son tipos estáticos; no validan entradas HTTP en runtime. Health no
+consume params, query ni body y continúa público, sin comprobar Atlas.
+
+El orden global sigue siendo CORS → rutas → handler legacy. Se conserva el
+404 HTML de Express; errores uniformes, autenticación, logging nuevo y
+validación de entorno quedan para sus etapas. Comandos y entrada prevista
+de Vercel no cambian. BE-06 parte de la rama BE-05 aún no integrada, por lo
+que una futura publicación deberá revisar esa dependencia y el autodeploy.
 
 ## Local development
 
