@@ -2,10 +2,12 @@
 
 Minimal Express API prepared for Vercel.
 
-Estado local BE-06 al 16/11/2026: TypeScript ESM compilado, Node 24.x, Express 5, CORS y
+Estado local BE-07.1 auditado al 17/11/2026: TypeScript ESM compilado, Node 24.x, Express 5, CORS y
 `GET /health` (salud del proceso; no verifica MongoDB). Las rutas de negocio
 `/api/v1`, autenticación, acceso a Atlas y aislamiento por cliente aún no están
-implementados. Zod, Mongoose, Vitest y Supertest siguen planificados;
+implementados. Mongoose y Zod están incorporados para infraestructura MongoDB
+explícita y validación de su configuración; no hay modelos ni conexión automática.
+Vitest y Supertest siguen planificados;
 las pruebas actuales conservan `node:test` y ejecutan el JavaScript compilado.
 La migración local no está Done: la validación Vercel Preview sigue pendiente.
 
@@ -32,6 +34,14 @@ sin encontrar defectos que requieran cambios de código. Propone un futuro PR
 Draft hacia `feature/be-05-preparacion-typescript`, después de revisar y guardar
 el delta BE-06. Antes de publicar debe verificarse el control del autodeploy;
 el Preview de BE-05 continúa pendiente.
+
+BE-07.1 agrega infraestructura local sin Atlas: **46/46 pruebas** (21 HTTP/capas
+y 25 de infraestructura Mongo), typecheck y build aprobados. Ver el
+[informe BE-07.1](INFORME_BE07_INFRAESTRUCTURA_MONGOOSE_ZOD.md).
+La [auditoría BE-07.1A](INFORME_BE07_AUDITORIA.md) corrigió la validación de
+nombres de base decodificados y el bloqueo de cierre tras un fallo de Mongoose.
+La etapa completa BE-07 sigue pendiente de revisión, integración y alcance
+posterior aprobado; la validación de requests todavía no está implementada.
 
 `documentacion-referencia/` permanece local, excluida mediante
 `.git/info/exclude`; no debe agregarse al repositorio. La rama de integración
@@ -64,6 +74,43 @@ El orden global sigue siendo CORS → rutas → handler legacy. Se conserva el
 validación de entorno quedan para sus etapas. Comandos y entrada prevista
 de Vercel no cambian. BE-06 parte de la rama BE-05 aún no integrada, por lo
 que una futura publicación deberá revisar esa dependencia y el autodeploy.
+
+## Infraestructura MongoDB — BE-07.1
+
+Dependencias runtime exactas: `mongoose@9.12.2` y `zod@4.6.7`.
+
+- `src/config/mongodb.ts`: `loadMongoConfig(environment)` valida con Zod y el
+  parser local del driver. `MONGODB_URI` requiere esquema mongodb/mongodb+srv,
+  host y base explícita. La base decodificada debe ocupar menos de 64 bytes UTF-8
+  y no contener caracteres prohibidos. No se resuelve DNS ni se verifica acceso
+  al parsear; las credenciales codificadas válidas se conservan sin transformarlas.
+- `MONGODB_SERVER_SELECTION_TIMEOUT_MS`: string entero de 100 a 30000 ms,
+  default 5000. URI ausente o inválida falla al solicitar configuración/conexión,
+  no al arrancar health. `.env.example` contiene un dominio reservado sin secretos.
+- `src/infrastructure/mongodb.ts`: `mongoConnection` ofrece `connect(environment)`,
+  `disconnect()` y `getState()`. Solo un consumidor autorizado debe llamar a connect;
+  app, listener, controllers y health no lo llaman. No copiar conexiones reales
+  a pruebas: estas inyectan una factory simulada y usan entornos explícitos.
+- La apertura concurrente comparte un intento y el pool se reutiliza por proceso.
+  No desconectar por request en serverless; el cierre explícito corresponde a
+  finalización controlada o pruebas. No se registran handlers de señales globales.
+- Si falla un cierre o la limpieza de una apertura fallida, ese manager queda en
+  error permanente: connect/disconnect posteriores rechazan sin volver al driver.
+  Mongoose puede quedar en disconnecting y esperar un evento close inexistente.
+  Se necesita descarte/reinicio controlado del worker; no crear otro pool en el
+  mismo proceso para eludir el bloqueo. Un fallo de apertura cuya limpieza sí
+  termina correctamente permite un reintento explícito.
+  La misma cuarentena aplica si falla el cierre previo a una reapertura;
+  no se reintenta ese cierre ni se permite abrir otro pool.
+- Se deshabilitan autoCreate, autoIndex y buffering; no hay modelos ni queries.
+  Fallos de configuración, apertura y cierre tienen códigos distintos y mensajes
+  seguros, sin causa original. No registrar objetos de configuración o conexiones:
+  contienen datos sensibles. Esto no cambia el formato HTTP legacy.
+
+La reutilización solo alcanza una instancia caliente del proceso, no todos los
+workers de Vercel. Atlas, credenciales, permisos, conectividad y presupuesto de
+conexiones requieren validación futura autorizada. No hay readiness de DB;
+`/health` sigue midiendo únicamente salud del proceso.
 
 ## Local development
 
