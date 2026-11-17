@@ -1,21 +1,11 @@
-import cors from 'cors';
-import express, { type ErrorRequestHandler } from 'express';
+import express from 'express';
+import { getAllowedOrigins } from './config/cors.js';
+import { createCorsMiddleware } from './middlewares/cors.middleware.js';
+import { legacyErrorHandler } from './middlewares/legacy-error.middleware.js';
+import { createHealthRouter } from './routes/health.routes.js';
 
 interface AppOptions {
   allowedOrigins?: ReadonlySet<string>;
-}
-
-interface LegacyError {
-  statusCode?: number;
-}
-
-function getAllowedOrigins(value = process.env.CORS_ORIGINS ?? '') {
-  return new Set(
-    value
-      .split(',')
-      .map((origin) => origin.trim())
-      .filter(Boolean),
-  );
 }
 
 export function createApp({ allowedOrigins = getAllowedOrigins() }: AppOptions = {}) {
@@ -23,46 +13,9 @@ export function createApp({ allowedOrigins = getAllowedOrigins() }: AppOptions =
 
   app.disable('x-powered-by');
 
-  app.use(
-    cors({
-      origin(origin, callback) {
-        const isAllowed =
-          !origin || allowedOrigins.has('*') || allowedOrigins.has(origin);
-
-        if (isAllowed) {
-          callback(null, true);
-          return;
-        }
-
-        const error = Object.assign(new Error('Origin not allowed by CORS'), {
-          statusCode: 403,
-        });
-        callback(error);
-      },
-    }),
-  );
-
-  app.get('/health', (_request, response) => {
-    response.status(200).json({ status: 'ok' });
-  });
-
-  const errorHandler: ErrorRequestHandler = (error: unknown, _request, response, _next) => {
-    // Describe the existing error convention without introducing runtime validation.
-    const statusCode = (error as LegacyError).statusCode ?? 500;
-
-    if (statusCode >= 500) {
-      console.error(error);
-    }
-
-    response.status(statusCode).json({
-      error:
-        statusCode === 403
-          ? 'Origin not allowed by CORS'
-          : 'Internal server error',
-    });
-  };
-
-  app.use(errorHandler);
+  app.use(createCorsMiddleware(allowedOrigins));
+  app.use(createHealthRouter());
+  app.use(legacyErrorHandler);
 
   return app;
 }
