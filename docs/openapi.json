@@ -1,0 +1,2209 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Agro A26T02 — contratos HTTP v1 en revisión",
+    "version": "0.1.0-draft",
+    "description": "BE-03 documental independiente de PR #2. Solo /health existe en be-agro. Éxitos de negocio reflejan FE/MSW; errores estándar y validación son objetivo por revisar. Auth real, campos/sesión, Atlas y unidades no están resueltos. No usar este archivo como inventario de endpoints desplegados."
+  },
+  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.1/dialect/base",
+  "servers": [
+    {
+      "url": "/",
+      "description": "Origen relativo, sin afirmar disponibilidad de un servidor público."
+    }
+  ],
+  "tags": [
+    {
+      "name": "Operación actual"
+    },
+    {
+      "name": "Referencia frontend"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "GetHealth",
+        "summary": "Health real del proceso",
+        "description": "Única ruta implementada. Pública, fuera de /api/v1. No consulta Mongo. DTORequest no aplica (sin params/query/body); Origin pertenece al transporte CORS.",
+        "security": [],
+        "tags": [
+          "Operación actual"
+        ],
+        "x-implementation": "implemented",
+        "x-request-dto": "No aplica",
+        "x-response-dto": "GetHealthResponse",
+        "responses": {
+          "200": {
+            "description": "Proceso disponible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetHealthResponse"
+                },
+                "examples": {
+                  "ok": {
+                    "value": {
+                      "status": "ok"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origin rechazado por CORS actual",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacyErrorResponse"
+                },
+                "examples": {
+                  "rechazo": {
+                    "value": {
+                      "error": "Origin not allowed by CORS"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Handler actual, sin cambio de formato",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegacyErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "PostLogin",
+        "summary": "Login: forma observada del frontend, no auth productiva aprobada",
+        "description": "Contrato email/password observado en FE/MSW. Google real, sesión y transporte quedan pendientes D03-01. No implementado en be-agro; documentarlo no aprueba auth por contraseña.",
+        "tags": [
+          "Referencia frontend"
+        ],
+        "security": [],
+        "x-implementation": "not-implemented",
+        "x-contract-status": "provisional-auth-blocked",
+        "x-request-dto": "PostLoginRequest",
+        "x-response-dto": "LoginResponse",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Forma FE observada; token requerido, identidad opcional",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/dashboard/resumen": {
+      "get": {
+        "operationId": "GetDashboard",
+        "summary": "Resumen Dashboard",
+        "description": "Forma de éxito compatible con tipos FE. Ruta observada en cliente/MSW; NO implementada en be-agro. Validación/errores/seguridad son diseño objetivo pendiente de revisión.",
+        "tags": [
+          "Referencia frontend"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampoId"
+          }
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "x-implementation": "not-implemented",
+        "x-contract-status": "draft-for-review",
+        "x-request-dto": "GetDashboardRequest",
+        "x-response-dto": "GetDashboardResponse",
+        "x-dependencies": [
+          "BE-02: catálogo/IDs/tenant",
+          "BE-04: fechas/unidades/origen"
+        ],
+        "x-query-policy": "Propuesta: una ocurrencia por parámetro, rechazar query desconocida y body en GET. Tenant siempre de sesión.",
+        "responses": {
+          "200": {
+            "description": "Respuesta de referencia, no endpoint desplegado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetDashboardResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/areas": {
+      "get": {
+        "operationId": "GetAreas",
+        "summary": "Listado de áreas",
+        "description": "Forma de éxito compatible con tipos FE. Ruta observada en cliente/MSW; NO implementada en be-agro. Validación/errores/seguridad son diseño objetivo pendiente de revisión.",
+        "tags": [
+          "Referencia frontend"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampoId"
+          }
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "x-implementation": "not-implemented",
+        "x-contract-status": "draft-for-review",
+        "x-request-dto": "GetAreasRequest",
+        "x-response-dto": "GetAreasResponse",
+        "x-dependencies": [
+          "BE-02: catálogo/IDs/tenant",
+          "BE-04: fechas/unidades/origen"
+        ],
+        "x-query-policy": "Propuesta: una ocurrencia por parámetro, rechazar query desconocida y body en GET. Tenant siempre de sesión.",
+        "responses": {
+          "200": {
+            "description": "Respuesta de referencia, no endpoint desplegado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetAreasResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/areas/{areaId}": {
+      "get": {
+        "operationId": "GetArea",
+        "summary": "Detalle de área",
+        "description": "Forma de éxito compatible con tipos FE. Ruta observada en cliente/MSW; NO implementada en be-agro. Validación/errores/seguridad son diseño objetivo pendiente de revisión.",
+        "tags": [
+          "Referencia frontend"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampoId"
+          },
+          {
+            "$ref": "#/components/parameters/AreaId"
+          }
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "x-implementation": "not-implemented",
+        "x-contract-status": "draft-for-review",
+        "x-request-dto": "GetAreaRequest",
+        "x-response-dto": "GetAreaResponse",
+        "x-dependencies": [
+          "BE-02: catálogo/IDs/tenant",
+          "BE-04: fechas/unidades/origen"
+        ],
+        "x-query-policy": "Propuesta: una ocurrencia por parámetro, rechazar query desconocida y body en GET. Tenant siempre de sesión.",
+        "responses": {
+          "200": {
+            "description": "Respuesta de referencia, no endpoint desplegado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetAreaResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/areas/{areaId}/sensores": {
+      "get": {
+        "operationId": "GetAreaSensores",
+        "summary": "Sensores del área",
+        "description": "Forma de éxito compatible con tipos FE. Ruta observada en cliente/MSW; NO implementada en be-agro. Validación/errores/seguridad son diseño objetivo pendiente de revisión.",
+        "tags": [
+          "Referencia frontend"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampoId"
+          },
+          {
+            "$ref": "#/components/parameters/AreaId"
+          }
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "x-implementation": "not-implemented",
+        "x-contract-status": "draft-for-review",
+        "x-request-dto": "GetAreaSensoresRequest",
+        "x-response-dto": "GetAreaSensoresResponse",
+        "x-dependencies": [
+          "BE-02: catálogo/IDs/tenant",
+          "BE-04: fechas/unidades/origen"
+        ],
+        "x-query-policy": "Propuesta: una ocurrencia por parámetro, rechazar query desconocida y body en GET. Tenant siempre de sesión.",
+        "responses": {
+          "200": {
+            "description": "Respuesta de referencia, no endpoint desplegado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetAreaSensoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/sensores/{deviceId}": {
+      "get": {
+        "operationId": "GetSensor",
+        "summary": "Detalle con última medición",
+        "description": "Forma de éxito compatible con tipos FE. Ruta observada en cliente/MSW; NO implementada en be-agro. Validación/errores/seguridad son diseño objetivo pendiente de revisión.",
+        "tags": [
+          "Referencia frontend"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampoId"
+          },
+          {
+            "$ref": "#/components/parameters/DeviceId"
+          }
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "x-implementation": "not-implemented",
+        "x-contract-status": "draft-for-review",
+        "x-request-dto": "GetSensorRequest",
+        "x-response-dto": "GetSensorResponse",
+        "x-dependencies": [
+          "BE-02: catálogo/IDs/tenant",
+          "BE-04: fechas/unidades/origen"
+        ],
+        "x-query-policy": "Propuesta: una ocurrencia por parámetro, rechazar query desconocida y body en GET. Tenant siempre de sesión.",
+        "responses": {
+          "200": {
+            "description": "Respuesta de referencia, no endpoint desplegado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSensorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/sensores/{deviceId}/historico": {
+      "get": {
+        "operationId": "GetHistorico",
+        "summary": "Histórico por variable",
+        "description": "Forma de éxito compatible con tipos FE. Ruta observada en cliente/MSW; NO implementada en be-agro. Validación/errores/seguridad son diseño objetivo pendiente de revisión.",
+        "tags": [
+          "Referencia frontend"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampoId"
+          },
+          {
+            "$ref": "#/components/parameters/DeviceId"
+          },
+          {
+            "name": "variable",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Variable"
+            }
+          },
+          {
+            "name": "desde",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DateTimeWithZone"
+            }
+          },
+          {
+            "name": "hasta",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DateTimeWithZone"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 500
+            }
+          }
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "x-implementation": "not-implemented",
+        "x-contract-status": "draft-for-review",
+        "x-request-dto": "GetHistoricoRequest",
+        "x-response-dto": "GetHistoricoResponse",
+        "x-dependencies": [
+          "BE-02: catálogo/IDs/tenant",
+          "BE-04: fechas/unidades/origen"
+        ],
+        "x-query-policy": "Propuesta: una ocurrencia por parámetro, rechazar query desconocida y body en GET. Tenant siempre de sesión.",
+        "responses": {
+          "200": {
+            "description": "Respuesta de referencia, no endpoint desplegado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetHistoricoResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/mapa/sensores": {
+      "get": {
+        "operationId": "GetMapa",
+        "summary": "Mapa de sensores",
+        "description": "Forma de éxito compatible con tipos FE. Ruta observada en cliente/MSW; NO implementada en be-agro. Validación/errores/seguridad son diseño objetivo pendiente de revisión.",
+        "tags": [
+          "Referencia frontend"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampoId"
+          }
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "x-implementation": "not-implemented",
+        "x-contract-status": "draft-for-review",
+        "x-request-dto": "GetMapaRequest",
+        "x-response-dto": "GetMapaResponse",
+        "x-dependencies": [
+          "BE-02: catálogo/IDs/tenant",
+          "BE-04: fechas/unidades/origen"
+        ],
+        "x-query-policy": "Propuesta: una ocurrencia por parámetro, rechazar query desconocida y body en GET. Tenant siempre de sesión.",
+        "responses": {
+          "200": {
+            "description": "Respuesta de referencia, no endpoint desplegado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetMapaResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/api/v1/alertas": {
+      "get": {
+        "operationId": "GetAlertas",
+        "summary": "Alertas de fuente pendiente",
+        "description": "Forma de éxito compatible con tipos FE. Ruta observada en cliente/MSW; NO implementada en be-agro. Validación/errores/seguridad son diseño objetivo pendiente de revisión.",
+        "tags": [
+          "Referencia frontend"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampoId"
+          },
+          {
+            "name": "area_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PublicId"
+            }
+          },
+          {
+            "name": "tipo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/TipoAlerta"
+            }
+          },
+          {
+            "name": "estado",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/EstadoAlerta"
+            }
+          },
+          {
+            "name": "severidad",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Severidad"
+            }
+          },
+          {
+            "name": "desde",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DateTimeWithZone"
+            }
+          },
+          {
+            "name": "hasta",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DateTimeWithZone"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "security": [
+          {
+            "SessionBearer": []
+          }
+        ],
+        "x-implementation": "not-implemented",
+        "x-contract-status": "provisional-alert-source-blocked",
+        "x-request-dto": "GetAlertasRequest",
+        "x-response-dto": "GetAlertasResponse",
+        "x-dependencies": [
+          "BE-02: catálogo/IDs/tenant",
+          "BE-04: fechas/unidades/origen"
+        ],
+        "x-query-policy": "Propuesta: una ocurrencia por parámetro, rechazar query desconocida y body en GET. Tenant siempre de sesión.",
+        "responses": {
+          "200": {
+            "description": "Respuesta de referencia, no endpoint desplegado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetAlertasResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PublicId": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "\\S",
+        "description": "ID público string opaco; no BSON ni inferencia por prefijo. Valor exacto, sin conversión automática."
+      },
+      "DateTimeWithZone": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$",
+        "description": "Perfil RFC3339 restringido propuesto: T/Z may?sculas, segundos y zona expl?cita, sin segundos intercalares; calendario v?lido. format requiere un validador que lo compruebe; no es validaci?n HTTP implementada."
+      },
+      "UtcDateTime": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$",
+        "description": "Perfil de salida UTC Z con segundos y calendario v?lido, sin segundos intercalares; no reemplazar adquisici?n por recepci?n. format requiere comprobaci?n expl?cita del validador."
+      },
+      "Estado": {
+        "type": "string",
+        "enum": [
+          "conectado",
+          "desconectado"
+        ]
+      },
+      "Variable": {
+        "type": "string",
+        "enum": [
+          "humedad",
+          "temperatura",
+          "conductividad",
+          "nitrogeno",
+          "fosforo",
+          "potasio"
+        ]
+      },
+      "TipoAlerta": {
+        "type": "string",
+        "enum": [
+          "tecnica",
+          "agronomica"
+        ]
+      },
+      "EstadoAlerta": {
+        "type": "string",
+        "enum": [
+          "activa",
+          "resuelta"
+        ]
+      },
+      "Severidad": {
+        "type": "string",
+        "enum": [
+          "alta",
+          "media",
+          "baja"
+        ]
+      },
+      "Medida": {
+        "type": "object",
+        "properties": {
+          "valor": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "unidad": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "valor",
+          "unidad"
+        ],
+        "additionalProperties": false,
+        "description": "Unidad viajando en el dato; sin enum ni conversión aprobada en BE-03. Ausencia=valor null, nunca cero ficticio."
+      },
+      "Ubicacion": {
+        "type": "object",
+        "properties": {
+          "lat": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "lon": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          }
+        },
+        "required": [
+          "lat",
+          "lon"
+        ],
+        "additionalProperties": false
+      },
+      "Cliente": {
+        "type": "object",
+        "properties": {
+          "cliente_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cliente_id",
+          "nombre"
+        ],
+        "additionalProperties": false
+      },
+      "Usuario": {
+        "type": "object",
+        "properties": {
+          "usuario_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "cliente_id": {
+            "$ref": "#/components/schemas/PublicId"
+          }
+        },
+        "required": [
+          "usuario_id",
+          "nombre",
+          "email",
+          "cliente_id"
+        ],
+        "additionalProperties": false
+      },
+      "UsuarioLogin": {
+        "type": "object",
+        "properties": {
+          "nombre": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "usuario_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "cliente_id": {
+            "$ref": "#/components/schemas/PublicId"
+          }
+        },
+        "required": [
+          "nombre",
+          "email"
+        ],
+        "additionalProperties": false
+      },
+      "Campo": {
+        "type": "object",
+        "properties": {
+          "campo_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "cliente_id": {
+            "$ref": "#/components/schemas/PublicId"
+          }
+        },
+        "required": [
+          "campo_id",
+          "nombre",
+          "cliente_id"
+        ],
+        "additionalProperties": false
+      },
+      "Area": {
+        "type": "object",
+        "properties": {
+          "area_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "campo_id": {
+            "$ref": "#/components/schemas/PublicId"
+          }
+        },
+        "required": [
+          "area_id",
+          "nombre",
+          "campo_id"
+        ],
+        "additionalProperties": false
+      },
+      "AreaApi": {
+        "type": "object",
+        "properties": {
+          "area_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "campo_id": {
+            "$ref": "#/components/schemas/PublicId"
+          }
+        },
+        "required": [
+          "area_id",
+          "nombre"
+        ],
+        "additionalProperties": false,
+        "description": "campo_id opcional por compatibilidad del DTO actual; el dominio exige validar su pertenencia."
+      },
+      "Sensor": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "area_id": {
+            "$ref": "#/components/schemas/PublicId"
+          }
+        },
+        "required": [
+          "device_id",
+          "nombre",
+          "area_id"
+        ],
+        "additionalProperties": false
+      },
+      "LoginRequest": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "additionalProperties": false,
+        "description": "Forma actual del cliente/MSW; pendiente definición del flujo real Google. No autoriza implementar login por contraseña."
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1
+          },
+          "usuario": {
+            "$ref": "#/components/schemas/UsuarioLogin"
+          },
+          "cliente": {
+            "$ref": "#/components/schemas/Cliente"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "IdentidadSesion": {
+        "type": "object",
+        "properties": {
+          "usuario": {
+            "$ref": "#/components/schemas/Usuario"
+          },
+          "cliente": {
+            "$ref": "#/components/schemas/Cliente"
+          }
+        },
+        "required": [
+          "usuario",
+          "cliente"
+        ],
+        "additionalProperties": false
+      },
+      "GetCamposResponse": {
+        "type": "object",
+        "properties": {
+          "campos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Campo"
+            }
+          }
+        },
+        "required": [
+          "campos"
+        ],
+        "additionalProperties": false,
+        "x-contract-status": "Solo forma de respuesta MSW; ruta real de campos pendiente"
+      },
+      "AreaResumen": {
+        "type": "object",
+        "properties": {
+          "area_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "campo_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "sensores": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "conectados": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "desconectados": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "alertas_activas": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ultima_actualizacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcDateTime"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "area_id",
+          "nombre",
+          "sensores",
+          "conectados",
+          "desconectados",
+          "alertas_activas",
+          "ultima_actualizacion"
+        ],
+        "additionalProperties": false
+      },
+      "GetAreasResponse": {
+        "type": "object",
+        "properties": {
+          "areas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AreaResumen"
+            }
+          }
+        },
+        "required": [
+          "areas"
+        ],
+        "additionalProperties": false
+      },
+      "GetAreaResponse": {
+        "$ref": "#/components/schemas/AreaApi"
+      },
+      "SensorDeArea": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/Estado"
+          },
+          "ultima_comunicacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcDateTime"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ubicacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ubicacion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "alertas_activas": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "device_id",
+          "nombre",
+          "estado",
+          "ultima_comunicacion",
+          "ubicacion",
+          "alertas_activas"
+        ],
+        "additionalProperties": false
+      },
+      "GetAreaSensoresResponse": {
+        "type": "object",
+        "properties": {
+          "sensores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SensorDeArea"
+            }
+          }
+        },
+        "required": [
+          "sensores"
+        ],
+        "additionalProperties": false
+      },
+      "UltimaMedicion": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "$ref": "#/components/schemas/UtcDateTime"
+          },
+          "humedad": {
+            "$ref": "#/components/schemas/Medida"
+          },
+          "temperatura": {
+            "$ref": "#/components/schemas/Medida"
+          },
+          "conductividad": {
+            "$ref": "#/components/schemas/Medida"
+          },
+          "nitrogeno": {
+            "$ref": "#/components/schemas/Medida"
+          },
+          "fosforo": {
+            "$ref": "#/components/schemas/Medida"
+          },
+          "potasio": {
+            "$ref": "#/components/schemas/Medida"
+          }
+        },
+        "required": [
+          "timestamp",
+          "humedad",
+          "temperatura",
+          "conductividad",
+          "nitrogeno",
+          "fosforo",
+          "potasio"
+        ],
+        "additionalProperties": false
+      },
+      "GetSensorResponse": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "area_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "area_nombre": {
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/Estado"
+          },
+          "ultima_comunicacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcDateTime"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ubicacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ubicacion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ultima_medicion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UltimaMedicion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "device_id",
+          "nombre",
+          "area_id",
+          "area_nombre",
+          "estado",
+          "ultima_comunicacion",
+          "ubicacion",
+          "ultima_medicion"
+        ],
+        "additionalProperties": false
+      },
+      "PuntoHistorico": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "$ref": "#/components/schemas/UtcDateTime"
+          },
+          "valor": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "timestamp",
+          "valor"
+        ],
+        "additionalProperties": false
+      },
+      "GetHistoricoResponse": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "area_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "area_nombre": {
+            "type": "string"
+          },
+          "variable": {
+            "$ref": "#/components/schemas/Variable"
+          },
+          "unidad": {
+            "type": "string"
+          },
+          "puntos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PuntoHistorico"
+            },
+            "maxItems": 1000
+          },
+          "truncado": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "device_id",
+          "nombre",
+          "area_id",
+          "area_nombre",
+          "variable",
+          "unidad",
+          "puntos",
+          "truncado"
+        ],
+        "additionalProperties": false,
+        "description": "Límites 500/1000 tomados del mock, pendientes de aprobación productiva. Orden ascendente; rango inclusivo propuesto, desde<hasta."
+      },
+      "UltimaMedicionMapa": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "$ref": "#/components/schemas/UtcDateTime"
+          },
+          "humedad": {
+            "$ref": "#/components/schemas/Medida"
+          },
+          "temperatura": {
+            "$ref": "#/components/schemas/Medida"
+          }
+        },
+        "required": [
+          "timestamp",
+          "humedad",
+          "temperatura"
+        ],
+        "additionalProperties": false
+      },
+      "SensorMapa": {
+        "type": "object",
+        "properties": {
+          "device_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "area_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "area_nombre": {
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/Estado"
+          },
+          "ubicacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ubicacion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ultima_comunicacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcDateTime"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ultima_medicion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UltimaMedicionMapa"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "device_id",
+          "nombre",
+          "area_id",
+          "area_nombre",
+          "estado",
+          "ubicacion",
+          "ultima_comunicacion",
+          "ultima_medicion"
+        ],
+        "additionalProperties": false
+      },
+      "GetMapaResponse": {
+        "type": "object",
+        "properties": {
+          "sensores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SensorMapa"
+            }
+          }
+        },
+        "required": [
+          "sensores"
+        ],
+        "additionalProperties": false
+      },
+      "Alerta": {
+        "type": "object",
+        "properties": {
+          "alerta_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "device_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "sensor_nombre": {
+            "type": "string"
+          },
+          "area_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "area_nombre": {
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoAlerta"
+          },
+          "severidad": {
+            "$ref": "#/components/schemas/Severidad"
+          },
+          "descripcion": {
+            "type": "string"
+          },
+          "timestamp": {
+            "$ref": "#/components/schemas/UtcDateTime"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoAlerta"
+          }
+        },
+        "required": [
+          "alerta_id",
+          "device_id",
+          "sensor_nombre",
+          "area_id",
+          "area_nombre",
+          "tipo",
+          "severidad",
+          "descripcion",
+          "timestamp",
+          "estado"
+        ],
+        "additionalProperties": false
+      },
+      "GetAlertasResponse": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "alertas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Alerta"
+            },
+            "maxItems": 200
+          }
+        },
+        "required": [
+          "total",
+          "limit",
+          "alertas"
+        ],
+        "additionalProperties": false,
+        "description": "total después de filtros y antes del límite; orden alta/media/baja y fecha descendente. Valores 50/200 observados en mock, no capacidad demostrada de Atlas."
+      },
+      "ResumenGeneral": {
+        "type": "object",
+        "properties": {
+          "areas": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sensores": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "conectados": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "desconectados": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "alertas_activas": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "areas",
+          "sensores",
+          "conectados",
+          "desconectados",
+          "alertas_activas"
+        ],
+        "additionalProperties": false
+      },
+      "AreaDashboard": {
+        "type": "object",
+        "properties": {
+          "area_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "nombre": {
+            "type": "string"
+          },
+          "campo_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "sensores": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "conectados": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "desconectados": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "alertas_activas": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "area_id",
+          "nombre",
+          "sensores",
+          "conectados",
+          "desconectados",
+          "alertas_activas"
+        ],
+        "additionalProperties": false
+      },
+      "GetDashboardResponse": {
+        "type": "object",
+        "properties": {
+          "resumen": {
+            "$ref": "#/components/schemas/ResumenGeneral"
+          },
+          "areas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AreaDashboard"
+            }
+          },
+          "ultimas_alertas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Alerta"
+            },
+            "maxItems": 5
+          },
+          "ultima_actualizacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtcDateTime"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "resumen",
+          "areas",
+          "ultimas_alertas",
+          "ultima_actualizacion"
+        ],
+        "additionalProperties": false,
+        "description": "El mock entrega cinco alertas por fecha descendente e incluye resueltas. No derivar alertas persistidas desde ausencia visual del navegador."
+      },
+      "GetHealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "ok"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "LegacyErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "description": "Forma real actual de health/CORS y del cliente/MSW; no es el formato objetivo de negocio."
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "VALIDATION_ERROR",
+          "UNAUTHENTICATED",
+          "ACCESS_DENIED",
+          "RESOURCE_NOT_FOUND",
+          "INTERNAL_ERROR"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false,
+        "description": "Objetivo acordado: incompatible con leerMensajeError actual de FE hasta adaptar su parser. Sin stack/queries/details."
+      },
+      "CampoQuery": {
+        "type": "object",
+        "properties": {
+          "campo_id": {
+            "$ref": "#/components/schemas/PublicId"
+          }
+        },
+        "required": [
+          "campo_id"
+        ],
+        "additionalProperties": false
+      },
+      "AreaParams": {
+        "type": "object",
+        "properties": {
+          "areaId": {
+            "$ref": "#/components/schemas/PublicId"
+          }
+        },
+        "required": [
+          "areaId"
+        ],
+        "additionalProperties": false
+      },
+      "SensorParams": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "$ref": "#/components/schemas/PublicId"
+          }
+        },
+        "required": [
+          "deviceId"
+        ],
+        "additionalProperties": false
+      },
+      "HistoricoQuery": {
+        "type": "object",
+        "properties": {
+          "campo_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "variable": {
+            "$ref": "#/components/schemas/Variable"
+          },
+          "desde": {
+            "$ref": "#/components/schemas/DateTimeWithZone"
+          },
+          "hasta": {
+            "$ref": "#/components/schemas/DateTimeWithZone"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 500
+          }
+        },
+        "required": [
+          "campo_id",
+          "variable",
+          "desde",
+          "hasta"
+        ],
+        "additionalProperties": false,
+        "x-cross-field-rule": "desde < hasta; máximo/default basados en mock y pendientes de aprobación. Rechazar repetidos y desconocidos como propuesta.",
+        "description": "Query decodificada antes de aplicar el default; par?metro HTTP limit opcional. default es anotaci?n, no transformaci?n del documento.",
+        "x-dto-stage": "decoded-before-default"
+      },
+      "AlertasQuery": {
+        "type": "object",
+        "properties": {
+          "campo_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "area_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoAlerta"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoAlerta"
+          },
+          "severidad": {
+            "$ref": "#/components/schemas/Severidad"
+          },
+          "desde": {
+            "$ref": "#/components/schemas/DateTimeWithZone"
+          },
+          "hasta": {
+            "$ref": "#/components/schemas/DateTimeWithZone"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50
+          }
+        },
+        "required": [
+          "campo_id"
+        ],
+        "additionalProperties": false,
+        "x-cross-field-rule": "Si ambas fechas existen: desde < hasta. Predicados opcionales se combinan con AND.",
+        "description": "Query decodificada antes de aplicar el default; par?metro HTTP limit opcional. default es anotaci?n, no transformaci?n del documento.",
+        "x-dto-stage": "decoded-before-default"
+      },
+      "PostLoginRequest": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/LoginRequest"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "GetDashboardRequest": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/CampoQuery"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "GetAreasRequest": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/CampoQuery"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "GetAreaRequest": {
+        "type": "object",
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/AreaParams"
+          },
+          "query": {
+            "$ref": "#/components/schemas/CampoQuery"
+          }
+        },
+        "required": [
+          "params",
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "GetAreaSensoresRequest": {
+        "type": "object",
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/AreaParams"
+          },
+          "query": {
+            "$ref": "#/components/schemas/CampoQuery"
+          }
+        },
+        "required": [
+          "params",
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "GetSensorRequest": {
+        "type": "object",
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/SensorParams"
+          },
+          "query": {
+            "$ref": "#/components/schemas/CampoQuery"
+          }
+        },
+        "required": [
+          "params",
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "GetHistoricoRequest": {
+        "type": "object",
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/SensorParams"
+          },
+          "query": {
+            "$ref": "#/components/schemas/HistoricoQueryNormalizada"
+          }
+        },
+        "required": [
+          "params",
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "GetMapaRequest": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/CampoQuery"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "GetAlertasRequest": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/AlertasQueryNormalizada"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "HistoricoQueryNormalizada": {
+        "type": "object",
+        "properties": {
+          "campo_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "variable": {
+            "$ref": "#/components/schemas/Variable"
+          },
+          "desde": {
+            "$ref": "#/components/schemas/DateTimeWithZone"
+          },
+          "hasta": {
+            "$ref": "#/components/schemas/DateTimeWithZone"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 500
+          }
+        },
+        "required": [
+          "campo_id",
+          "variable",
+          "desde",
+          "hasta",
+          "limit"
+        ],
+        "additionalProperties": false,
+        "x-cross-field-rule": "desde < hasta; máximo/default basados en mock y pendientes de aprobación. Rechazar repetidos y desconocidos como propuesta.",
+        "description": "DTO de aplicaci?n posterior al parseo y default. limit requerido number; no describe la query HTTP sin normalizar.",
+        "x-dto-stage": "normalized-output"
+      },
+      "AlertasQueryNormalizada": {
+        "type": "object",
+        "properties": {
+          "campo_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "area_id": {
+            "$ref": "#/components/schemas/PublicId"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoAlerta"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoAlerta"
+          },
+          "severidad": {
+            "$ref": "#/components/schemas/Severidad"
+          },
+          "desde": {
+            "$ref": "#/components/schemas/DateTimeWithZone"
+          },
+          "hasta": {
+            "$ref": "#/components/schemas/DateTimeWithZone"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 50
+          }
+        },
+        "required": [
+          "campo_id",
+          "limit"
+        ],
+        "additionalProperties": false,
+        "x-cross-field-rule": "Si ambas fechas existen: desde < hasta. Predicados opcionales se combinan con AND.",
+        "description": "DTO de aplicaci?n posterior al parseo y default. limit requerido number; no describe la query HTTP sin normalizar.",
+        "x-dto-stage": "normalized-output"
+      }
+    },
+    "parameters": {
+      "CampoId": {
+        "name": "campo_id",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/PublicId"
+        },
+        "description": "Selector dentro del cliente de sesión; una sola ocurrencia no vacía; nunca autoriza tenant."
+      },
+      "AreaId": {
+        "name": "areaId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/PublicId"
+        }
+      },
+      "DeviceId": {
+        "name": "deviceId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/PublicId"
+        }
+      }
+    },
+    "responses": {
+      "ValidationError": {
+        "description": "400: Solicitud inválida. ",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "VALIDATION_ERROR"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "error"
+              ],
+              "additionalProperties": false
+            },
+            "examples": {
+              "sintetico": {
+                "summary": "Ejemplo sintético",
+                "value": {
+                  "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Solicitud inválida"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Unauthenticated": {
+        "description": "401: Se requiere sesión válida. ",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "UNAUTHENTICATED"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "error"
+              ],
+              "additionalProperties": false
+            },
+            "examples": {
+              "sintetico": {
+                "summary": "Ejemplo sintético",
+                "value": {
+                  "error": {
+                    "code": "UNAUTHENTICATED",
+                    "message": "Se requiere sesión válida"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "AccessDenied": {
+        "description": "403: Acceso rechazado. Reservado para denegación explícita aprobada; no usar para revelar recursos de otro cliente. No hay roles por endpoint.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "ACCESS_DENIED"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "error"
+              ],
+              "additionalProperties": false
+            },
+            "examples": {
+              "sintetico": {
+                "summary": "Ejemplo sintético",
+                "value": {
+                  "error": {
+                    "code": "ACCESS_DENIED",
+                    "message": "Acceso rechazado"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "404: Recurso no disponible. ",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "RESOURCE_NOT_FOUND"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "error"
+              ],
+              "additionalProperties": false
+            },
+            "examples": {
+              "sintetico": {
+                "summary": "Ejemplo sintético",
+                "value": {
+                  "error": {
+                    "code": "RESOURCE_NOT_FOUND",
+                    "message": "Recurso no disponible"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "500: Error interno. ",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "const": "INTERNAL_ERROR"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "error"
+              ],
+              "additionalProperties": false
+            },
+            "examples": {
+              "sintetico": {
+                "summary": "Ejemplo sintético",
+                "value": {
+                  "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "Error interno"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "SessionBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Transporte observado en FE. No afirma JWT ni sesión segura implementada. Si se aprueba cookie, actualizar contrato y cliente; no aceptar Bearer y cookie como alternativas ya aprobadas."
+      }
+    }
+  },
+  "x-status": "DOCUMENTAL / PARCIAL / NO IMPLEMENTADO",
+  "x-pending-contracts": [
+    {
+      "id": "D03-01",
+      "scope": "Google real, sesión, recuperación, logout, expiración/CSRF/CORS; no hay endpoints definitivos confirmados"
+    },
+    {
+      "id": "D03-02",
+      "scope": "Campos",
+      "responseSchema": "#/components/schemas/GetCamposResponse",
+      "observedMock": "GET /api/v1/auth/demo/campos",
+      "candidateFromPlan": "GET /api/v1/campos (no aprobado como ruta definitiva, no incluido en paths)"
+    },
+    {
+      "id": "D03-03",
+      "scope": "Última medición",
+      "includedIn": "#/components/schemas/GetSensorResponse",
+      "note": "No crear /ultima-medicion: ruta independiente no aprobada."
+    }
+  ],
+  "x-excluded-mock-routes": [
+    "POST /api/v1/auth/google-demo",
+    "POST /api/v1/auth/demo/sesion",
+    "GET /api/v1/auth/demo/campos"
+  ],
+  "x-cross-field-invariants": [
+    "Cliente autorizado desde identidad confiable, nunca query/body/header público.",
+    "Validar cadena cliente→campo→área→sensor con IDs persistidos; ajeno=404.",
+    "Counts no negativos; conectados+desconectados=sensores; resumen/listas consistentes.",
+    "Historico: desde<hasta, límites inclusivos propuestos; orden ascendente estable y truncado por existencia de puntos adicionales.",
+    "Alertas: total antes de límite, alertas.length<=limit; filtro AND y orden semántico de severidad.",
+    "Sin mediciones: ultima_medicion=null; ausencia individual: valor=null; sin coordenadas válidas: ubicacion=null."
+  ],
+  "x-validation-scope": "Schemas y anotaciones documentales. default no normaliza; format necesita comprobaci?n; reglas cruzadas/tenant se verifican fuera de la forma JSON. No hay validaci?n runtime implementada."
+}
