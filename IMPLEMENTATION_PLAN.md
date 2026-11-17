@@ -1,6 +1,6 @@
 # Plan de implementación del backend be-agro
 
-**Actualizado:** 17/11/2026 · consolidación local BE-02 a BE-08, sin publicación.
+**Actualizado:** 17/11/2026 · recuperación BE-09 sobre dev consolidada mediante PR #10.
 **Fuente rectora:** Plan de Trabajo Backend A26T02 del 05/11/2026 §§7–11.
 **Contrato y evidencia:** [ESPECIFICACION.md](ESPECIFICACION.md), [INFORME_BE00_BE01.md](INFORME_BE00_BE01.md).
 
@@ -8,12 +8,12 @@
 
 - [ ] Pendiente; [/] trabajo local preparado/en revisión; [!] requiere decisión/evidencia; [x] PR integrado y criterios satisfechos.
 - Una entrega local o un PR abierto no está Done. No se completa ninguna etapa por haber redactado su propuesta.
-- Rama de integración acordada: `dev`, verificada junto con `main` en `1bb20f76b7a739f42c75b37b9a64315276560ec1`. La rama local `integration/be-02-a-be-08` prepara la consolidación; no se fusionó en remoto por falta de evidencia de separación Vercel/Production.
+- Rama de integración acordada: `dev`. Base de recuperación BE-09: `636c71731ee100f78c76c78b46753ccf1223ac39`, merge del PR #10. `main` permanece en `1bb20f76b7a739f42c75b37b9a64315276560ec1`. Los registros previos de consolidación describen su fase preparatoria, no un bloqueo actual de ese merge.
 - BE-00 y BE-01 fueron documentación integrada mediante PR #1; esto no completa automáticamente criterios externos ni etapas posteriores.
-- BE-05 a BE-08 ya tienen código publicado en PR Draft #5 a #9 y ahora reunido localmente; aún no integrado en `dev`. TypeScript, Mongoose, Zod, errores/logging y hardening cuentan con validación local, no validación Preview real.
-- BE-02/03/04 son propuestas documentales de PR Draft #2/#3/#4, incorporadas localmente sin aprobar Atlas, contratos o unidades. No se ejecutaron migraciones ni normalizadores.
-- BE-09.0/09.1 permanecen locales en su working tree original, fuera de esta consolidación. BE-09 real, modelos y endpoints de negocio no están implementados en esta rama.
-- Evidencia vigente: [informe de consolidación](INFORME_CONSOLIDACION_DEV_BE02_BE08.md). Ninguna casilla nueva se marca Done.
+- BE-05 a BE-08 tienen código integrado en `dev` mediante PR #10; PR #5 cerrado como incorporado y #6 a #9 cerrados como redundantes, con trazabilidad conservada. TypeScript, Mongoose, Zod, errores/logging y hardening cuentan con validación local, no validación HTTP Preview real. No se completan automáticamente sus criterios externos.
+- BE-02/03/04 son propuestas documentales de PR #2/#3/#4, ahora incorporadas en dev sin aprobar Atlas, contratos o unidades. No se ejecutaron migraciones ni normalizadores; sus criterios de cierre siguen pendientes.
+- BE-09.0/09.1 se recuperan selectivamente sobre esta base en `feature/be-09-infraestructura-sobre-dev`, conservando los originales locales y sus respaldos. Se prepara integración solo de infraestructura; login real, modelos y endpoints de negocio no están implementados. BE-09.2 no se inicia.
+- Evidencia: [consolidación histórica](INFORME_CONSOLIDACION_DEV_BE02_BE08.md) y [recuperación BE-09](INFORME_RECUPERACION_BE09_SOBRE_DEV.md). Ninguna casilla nueva se marca Done.
 - Las casillas anteriores E0…E4 no estaban completadas. Se reorganizan con los IDs del plan del 05/11, evitando colisiones con la numeración BE sugerida del antiguo documento.
 
 ## Backlog vigente y dependencias
@@ -29,7 +29,7 @@
 | [/] | BE-06 | 2 | Implementar capas por recurso y DTOs/mappers/adapters, sin consultas Mongo en controllers ni Express en services. | BE-05 |
 | [/] | BE-07 | 2 | Configurar Mongoose y Zod requests/env; conexión segura, fallos controlados y configuración validada. | BE-05/06; modelo aprobado |
 | [/] | BE-08 | 2 | Error handler/404 uniforme, logging con request ID, CORS, seguridad HTTP y límites; pruebas sin secretos. | BE-03 y base TS |
-| [ ] | BE-09 | 3 | Integrar Google/sesión aprobada, contexto de cliente, recuperación/logout y aislamiento de consultas por jerarquía. | BE-07/08; política auth cerrada |
+| [/] | BE-09 | 3 | Integrar Google/sesión aprobada, contexto de cliente, recuperación/logout y aislamiento de consultas por jerarquía. | BE-07/08; política auth cerrada |
 | [ ] | BE-10 | 4 | GET campos por cliente y catálogo áreas; campos vacíos, 400/401/404, filtro por cliente dentro de repository. | BE-02/03/09 |
 | [ ] | BE-11 | 4 | Dispositivos por área y detalle, mappers/ubicación/última comunicación, recursos ajenos 404; conservar rutas públicas acordadas. | BE-10 |
 | [ ] | BE-12 | 5 | Última medición por dispositivo autorizado, unidades/fuentes, nulls y sensor sin lecturas; ruta a acordar sin duplicar detalle innecesariamente. | BE-04/11 |

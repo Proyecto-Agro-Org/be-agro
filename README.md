@@ -2,6 +2,36 @@
 
 Minimal Express API prepared for Vercel.
 
+## BE-09 recuperada sobre dev consolidada — 17/11/2026
+
+La base de esta entrega es `origin/dev` en
+`636c71731ee100f78c76c78b46753ccf1223ac39`, que incorpora BE-02 a BE-08 mediante
+[PR #10](https://github.com/Proyecto-Agro-Org/be-agro/pull/10). Los apartados de
+consolidación local siguientes registran su preparación histórica; ese merge ya
+se completó. BE-02/03/04 siguen como propuestas documentales, sin aprobación física,
+científica o de contratos por su incorporación.
+
+Se recuperaron selectivamente diez entregables BE-09.0/09.1 en
+`feature/be-09-infraestructura-sobre-dev`. Los originales y el informe privado BE-05
+permanecen intactos en su working tree previo. No se trasladó ese informe, ni
+referencias locales, dependencias instaladas o compilados.
+
+BE-09.1 es **infraestructura interna, no autenticación productiva completa**:
+puertos de credenciales/identidad/pertenencia/sesión, capacidades con procedencia
+privada, contexto por request y lectura de referencias acotada al cliente.
+Los fakes solo viven en tests; la app default no monta esta infraestructura,
+no incorpora login/Google simulado ni endpoints nuevos. Health continúa público.
+No existen modelos definitivos ni consultas Atlas. La integración real requiere
+proveedor aprobado, catálogo confiable y decisiones de sesión/BE-02/03/FE.
+
+Evidencia y alcance de la recuperación:
+[informe BE-09 sobre dev](INFORME_RECUPERACION_BE09_SOBRE_DEV.md),
+[implementación](INFORME_BE09_1_INFRAESTRUCTURA_AUTORIZACION.md) y
+[auditoría](INFORME_BE09_1_AUDITORIA_SEGURIDAD.md). Los cuatro informes/matriz
+recuperados conservan la evidencia original de su fase local; el informe de
+recuperación distingue esa base histórica de la base consolidada vigente.
+No se declara BE-09 Done ni se inicia BE-09.2.
+
 ## Consolidación local BE-02 a BE-08 — 17/11/2026
 
 La rama `integration/be-02-a-be-08` reúne localmente los commits originales BE-05,
