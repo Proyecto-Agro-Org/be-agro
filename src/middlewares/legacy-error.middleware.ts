@@ -1,24 +1,37 @@
 import type { ErrorRequestHandler } from 'express';
+import { createRequestObservability } from '../http/request-observability.js';
 
-interface LegacyError {
-  statusCode?: number;
+function getLegacyStatus(error: unknown): number {
+  try {
+    if (typeof error === 'object' && error !== null && 'statusCode' in error) {
+      const status = (error as { statusCode: unknown }).statusCode;
+      if (typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599) {
+        return status;
+      }
+    }
+  } catch { /* Untrusted getters must not escape the HTTP error boundary. */ }
+  return 500;
 }
 
-// Preserve the inherited convention; this assertion is not runtime validation.
-// A uniform error contract and additional hardening belong to BE-08.
-export const legacyErrorHandler: ErrorRequestHandler = (
-  error: unknown, _request, response, _next,
-) => {
-  const statusCode = (error as LegacyError).statusCode ?? 500;
+// Keep the legacy HTTP envelope; the logging contract intentionally excludes raw errors.
+export function createLegacyErrorHandler(
+  observability = createRequestObservability(record => console.error(JSON.stringify(record))),
+): ErrorRequestHandler {
+  return (error: unknown, request, response, next) => {
+    const statusCode = getLegacyStatus(error);
+    const message = statusCode === 403 ? 'Origin not allowed by CORS' : 'Internal server error';
 
-  if (statusCode >= 500) {
-    console.error(error);
-  }
+    if (statusCode >= 500) {
+      observability.logError(request, response, statusCode, 'INTERNAL_ERROR');
+    }
 
-  response.status(statusCode).json({
-    error:
-      statusCode === 403
-        ? 'Origin not allowed by CORS'
-        : 'Internal server error',
-  });
-};
+    if (response.headersSent) {
+      next(Object.assign(new Error(message), { statusCode }));
+      return;
+    }
+    if (response.writableEnded || response.destroyed) return;
+    response.status(statusCode).json({ error: message });
+  };
+}
+
+export const legacyErrorHandler = createLegacyErrorHandler();

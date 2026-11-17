@@ -1,4 +1,5 @@
 import cors from 'cors';
+import { CorsOriginError } from '../errors/cors-origin.error.js';
 
 export function createCorsMiddleware(allowedOrigins: ReadonlySet<string>) {
   return cors({
@@ -11,10 +12,7 @@ export function createCorsMiddleware(allowedOrigins: ReadonlySet<string>) {
         return;
       }
 
-      const error = Object.assign(new Error('Origin not allowed by CORS'), {
-        statusCode: 403,
-      });
-      callback(error);
+      callback(new CorsOriginError());
     },
   });
 }

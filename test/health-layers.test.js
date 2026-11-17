@@ -53,6 +53,11 @@ test('extracted legacy middleware receives Express 5 async errors and conceals d
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), { error: 'Internal server error' });
     assert.equal(diagnostic.mock.callCount(), 1);
-    assert.equal(diagnostic.mock.calls[0].arguments[0], failure);
+    const record = JSON.parse(diagnostic.mock.calls[0].arguments[0]);
+    assert.equal(record.event, 'request.error');
+    assert.equal(record.status, 500);
+    assert.equal(record.errorCode, 'INTERNAL_ERROR');
+    assert.equal(record.requestId, response.headers.get('x-request-id'));
+    assert.ok(!JSON.stringify(record).includes(failure.message));
   });
 });

@@ -2,7 +2,7 @@
 
 Minimal Express API prepared for Vercel.
 
-Estado local BE-07.2 al 17/11/2026: TypeScript ESM compilado, Node 24.x, Express 5, CORS y
+Estado local BE-08.5 al 17/11/2026: TypeScript ESM compilado, Node 24.x, Express 5, CORS y
 `GET /health` (salud del proceso; no verifica MongoDB). Las rutas de negocio
 `/api/v1`, autenticación, acceso a Atlas y aislamiento por cliente aún no están
 implementados. Mongoose y Zod están incorporados para infraestructura MongoDB
@@ -73,9 +73,10 @@ no se crean carpetas vacías ni consultas ficticias. El service no conoce HTTP.
 Los DTOs son tipos estáticos; no validan entradas HTTP en runtime. Health no
 consume params, query ni body y continúa público, sin comprobar Atlas.
 
-El orden global sigue siendo CORS → rutas → handler legacy. Se conserva el
-404 HTML de Express; errores uniformes, autenticación, logging nuevo y
-validación de entorno quedan para sus etapas. Comandos y entrada prevista
+El perfil default actual usa contexto UUID → CORS → rutas → 404 → handler legacy
+→ frontera terminal, con callback final de dispatch protegido. Se conserva el
+404 HTML genérico sin pathname; el perfil optativo BE-08 se describe más abajo. Autenticación
+y contrato uniforme definitivo siguen pendientes. Comandos y entrada prevista
 de Vercel no cambian. BE-06 parte de la rama BE-05 aún no integrada, por lo
 que una futura publicación deberá revisar esa dependencia y el autodeploy.
 
@@ -162,10 +163,63 @@ lista estática de nombres autorizados: los demás segmentos se redactan como
 datos sensibles. El array path vacío identifica el error de la parte completa.
 
 El middleware solo llama a next; no elige status, serializa errores ni modifica
-el handler legacy. BE-08 deberá integrar estos errores antes de conectar esta
-infraestructura a rutas reales. El parser JSON y los límites de entrada también
-deben acordarse por operación. Health no recibe este middleware. No se agregan
+el handler legacy. BE-08 integra estos errores en un perfil HTTP optativo antes
+de conectar esta infraestructura a rutas reales. El parser JSON y los límites de entrada
+deben acordarse por operación. Health no recibe validación Zod. No se agregan
 esquemas ni endpoints de negocio ni dependencia MongoDB.
+
+## Errores, logging y seguridad — BE-08 local
+
+La evaluación [BE-08.3/08.4/08.5](INFORME_BE08_3_HARDENING_SEGURIDAD.md)
+cerró los hallazgos de logging raw y 404 reflectante. **Apta técnicamente para
+PR Draft**, sin publicar y sin marcar BE-08 Done. Ver la
+[matriz de seguridad y regresión](MATRIZ_BE08_SEGURIDAD_Y_REGRESION.md).
+
+Validación local: **120/120 pruebas**, 18 nuevas sobre BE-08.2; npm ci,
+typecheck, build y diff check aprobados. Diferencial contra BE-07.2: **11 escenarios
+compatibles y 2 cambios intencionales de seguridad**, no 13 respuestas idénticas.
+Sin dependencias nuevas ni acceso a Atlas.
+
+El default incorpora UUID servidor y logs de error mediante DTO nuevo, congelado
+y de campos primitivos permitidos. No llegan Error/Request/Response, stack, cause,
+headers, body, query, pathname ni metadata extra a sus sinks. La consola recibe
+su JSON. No se adoptan IDs externos ni cambia trust proxy. Un logger lento/fallido
+no bloquea HTTP; es best effort, sin garantía de persistencia o flush serverless.
+El default no agrega logs globales de inicio/final.
+
+Su 404 conserva HTML y status 404 con body genérico constante. Los antiguos textos
+Cannot GET/POST con la ruta fueron eliminados. GET/HEAD health, CORS y errores
+HTTP 403/500 mantienen status y body. X-Request-ID es una adición intencional;
+no se agregó Expose-Headers para leerlo desde JavaScript cross-origin.
+
+El perfil completo continúa optativo para no imponer parser ni contratos pendientes:
+
+```ts
+import { createApp } from './app.js';
+import { createHttpInfrastructure } from './http/infrastructure.js';
+
+const app = createApp({ httpInfrastructure: createHttpInfrastructure() });
+// No inicia listener ni conecta MongoDB. No reemplaza la exportación default.
+```
+
+Ese perfil ofrece logs start/finish/error, 400 Zod, 404 JSON, nosniff, no-referrer,
+no-store y CSP; parser JSON estricto, 16 KiB propuestos configurables mediante
+bodyLimitBytes de 1 byte a 1 MiB, y 400/413/415 controlados. CORS se conserva
+sin credentials globales. El default mantiene x-powered-by deshabilitado y refuerza
+headers del 404, sin activar globalmente ese parser.
+
+Ambos modos tienen frontera terminal y callback final de dispatch propios:
+un stream parcial se cierra sin error original y múltiples next(error) tardíos
+no llegan al logger raw de Express. Se valida handle en runtime; la dependencia
+de Express instalado debe revalidarse al actualizarlo y en Preview.
+Apps aisladas que monten los módulos deben usar http.protectApplication(app)
+y http.terminalErrorHandler, como los fixtures.
+
+El adaptador usa provisionalmente error:string, sin aprobar el DTO uniforme final
+BE-03. Faltan revisión FE/BE, límites/media types por operación, activación acordada
+del perfil completo, Preview Vercel autorizado e integración. Un rollback debe
+conservar logging sanitizado y 404 no reflectante. Publicar puede generar Preview;
+esta tarea no hizo commit, push ni deploy.
 
 ## Local development
 
