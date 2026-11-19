@@ -409,3 +409,27 @@ idle concurrente. Sin autenticación productiva habilitada ni dependencias nueva
 Ver [auditoría final](INFORME_BE09_2C_AUDITORIA_FINAL.md) y
 [trazabilidad](MATRIZ_BE09_2C_TRAZABILIDAD.md). Gates externos abiertos;
 infraestructura apta para revisión/integración deshabilitada, BE-09 no Done.
+
+## BE-09.3 — Persistencia y catálogo (local, sin activar)
+
+Se preparó un repositorio Mongoose de challenges/sesiones sobre schemas técnicos
+propuestos: namespace explícito, verificación de índices únicos existentes, consumo
+condicional, max de actividad y revocación. No crea conexiones, colecciones o índices
+automáticamente. Su uso real requiere aprobación física y una conexión autorizada;
+no se invoca desde la app default. El adaptador de catálogo solo lee puertos lógicos;
+su store físico y aprovisionamiento siguen bloqueados por BE-02.
+
+Validación local: **252/252** pruebas (220 anteriores + 32 nuevas), typecheck/build
+correctos y 13/13 HTTP equivalentes. Mongoose real sobre driver simulado en tests;
+no se prueba atomicidad/durabilidad distribuida ni TTL de un servidor MongoDB.
+Sin Atlas, usuarios reales, cambios FE, dependencias nuevas o autenticación productiva.
+Véanse [informe](INFORME_BE09_3_PERSISTENCIA_Y_CATALOGO.md) y
+[matriz de seguridad](MATRIZ_BE09_3_PERSISTENCIA_SEGURIDAD.md).
+
+Auditoría BE-09.3A: **266/266** y 13/13 HTTP; se reforzaron filtros escalares/BSON y
+confirmaciones de insert. No hay instancia MongoDB local autorizada identificada.
+La sonda manual para una futura DB local exclusiva requiere opt-in y no se ejecutó
+contra un servidor. La consistencia entre catálogo/sesión y los duplicados físicos
+continúan como gates, junto con BE-02/03 y la integración real. Ver
+[informe A](INFORME_BE09_3A_AUDITORIA_FINAL.md) y
+[trazabilidad A](MATRIZ_BE09_3A_TRAZABILIDAD.md). Auth productiva deshabilitada.
