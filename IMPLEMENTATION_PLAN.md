@@ -1,10 +1,21 @@
 # Plan de implementación del backend be-agro
 
-**Actualizado:** 17/11/2026 · recuperación BE-09 sobre dev consolidada mediante PR #10.
+**Actualizado:** 19/11/2026 · BE-09.5/09.5A implementadas y auditadas, autenticación sin activar.
 **Fuente rectora:** Plan de Trabajo Backend A26T02 del 05/11/2026 §§7–11.
 **Contrato y evidencia:** [ESPECIFICACION.md](ESPECIFICACION.md), [INFORME_BE00_BE01.md](INFORME_BE00_BE01.md).
 
 ## Uso y estado
+
+Estado vigente BE-09 al 19/11: BE-09.2/09.3 y documentación BE-09.4 ya integradas en dev
+(PR #13/#14 como evidencia reciente). BE-09.5 agrega localmente catálogo físico auth aislado,
+writer CAS, generaciones para reactivación y revocación posterior; auditoría BE-09.5A con **320/320 pruebas** y
+**13/13 escenarios HTTP** aprobados. MongoDB real, aprobación externa/mapeo BE-02,
+contratos FE/GIS, operación y activación siguen pendientes. No se completan casillas Done por
+integrar infraestructura deshabilitada. Publicación/integración sujetas a controles GitHub.
+Auditoría: [BE-09.5A](INFORME_BE09_5A_AUDITORIA_FINAL.md); recibos de persistencia explícitos
+y checkpoints de revocación, sin retorno void interpretado como confirmación.
+Detalle: [implementación BE-09.5](INFORME_BE09_5_IMPLEMENTACION_CATALOGO.md) y
+[seguridad/concurrencia](MATRIZ_BE09_5_SEGURIDAD_CONCURRENCIA.md).
 
 - [ ] Pendiente; [/] trabajo local preparado/en revisión; [!] requiere decisión/evidencia; [x] PR integrado y criterios satisfechos.
 - Una entrega local o un PR abierto no está Done. No se completa ninguna etapa por haber redactado su propuesta.
@@ -12,7 +23,7 @@
 - BE-00 y BE-01 fueron documentación integrada mediante PR #1; esto no completa automáticamente criterios externos ni etapas posteriores.
 - BE-05 a BE-08 tienen código integrado en `dev` mediante PR #10; PR #5 cerrado como incorporado y #6 a #9 cerrados como redundantes, con trazabilidad conservada. TypeScript, Mongoose, Zod, errores/logging y hardening cuentan con validación local, no validación HTTP Preview real. No se completan automáticamente sus criterios externos.
 - BE-02/03/04 son propuestas documentales de PR #2/#3/#4, ahora incorporadas en dev sin aprobar Atlas, contratos o unidades. No se ejecutaron migraciones ni normalizadores; sus criterios de cierre siguen pendientes.
-- BE-09.0/09.1 se recuperan selectivamente sobre esta base en `feature/be-09-infraestructura-sobre-dev`, conservando los originales locales y sus respaldos. Se prepara integración solo de infraestructura; login real, modelos y endpoints de negocio no están implementados. BE-09.2 no se inicia.
+- Historial del 17/11: BE-09.0/09.1 se recuperaron sobre esta base en `feature/be-09-infraestructura-sobre-dev`, conservando originales y respaldos. Entonces BE-09.2 aún no se iniciaba. El estado vigente posterior es el apartado BE-09.5 anterior; autenticación productiva y endpoints de negocio siguen sin habilitar.
 - Evidencia: [consolidación histórica](INFORME_CONSOLIDACION_DEV_BE02_BE08.md) y [recuperación BE-09](INFORME_RECUPERACION_BE09_SOBRE_DEV.md). Ninguna casilla nueva se marca Done.
 - Las casillas anteriores E0…E4 no estaban completadas. Se reorganizan con los IDs del plan del 05/11, evitando colisiones con la numeración BE sugerida del antiguo documento.
 
