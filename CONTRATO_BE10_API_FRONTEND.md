@@ -11,7 +11,7 @@ No se expone registro de clientes, roles o administración global.
 | Campo | /campos | POST | {nombre,descripcion?} | CampoResponse, 201 | Aislado; propietario del contexto |
 | Campo | /campos/:campoId | GET | ID opaco | CampoResponse | Aislado; recurso propio |
 | Campo | /campos/:campoId | PATCH | {nombre?,descripcion?,version} | CampoResponse | Aislado; propio y CAS |
-| Campo | /campos/:campoId | DELETE | query version | 204 sin body | Aislado; sin dependencias verificadas |
+| Campo | /campos/:campoId | DELETE | query version | 204 sin body | Aislado; ausencia de dependencias verificada y CAS |
 | Área / AreaRecord | /areas | GET | campo_id, limit?, after? | {areas,next} | Aislado; campo propio |
 | Área | /campos/:campoId/areas | POST | {nombre,descripcion?} | AreaResponse, 201 | Aislado; padre activo propio |
 | Área | /areas/:areaId | GET | query campo_id | AreaResponse | Aislado; área→campo→cliente |

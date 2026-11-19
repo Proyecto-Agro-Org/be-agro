@@ -42,7 +42,7 @@ en la base BE-08; no se vuelve a la respuesta antigua que reflejaba rutas en los
 | M07 | Bloqueo por dependencias; baja lógica sin destruir documentos |
 | M08 | Evidencia desconocida impide bajas de campo y área |
 | M09 | Cinco carreras crear área/desactivar padre, un ganador por carrera, sin huérfano |
-| M10 | Campo sin dependencias verificadas se desactiva; baja ajena falla |
+| M10 | Campo con ausencia de dependencias verificada se desactiva; baja ajena falla |
 | M11 | Quitar índice bloquea factory nueva y repository existente; restauración explícita solo local |
 | M12 | Conexión cerrada devuelve error sanitizado |
 | M13 | Reloj regresivo impide corromper fechas de baja; registro/version intactos |
