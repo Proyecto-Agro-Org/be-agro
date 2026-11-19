@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { validateDb02Request, validateDb02Database, db02Uri, localDockerEndpoint, validateOwnedContainer } from '../dist/scripts/agro-db02/guard.js';
+import { persistence } from '../dist/scripts/agro-db02/resources.js';
 
 const environment = { AGRO_DB02_ENABLE: 'AUTHORIZED_DISPOSABLE_DB02_ONLY', AGRO_DB02_RUN_ID: 'a'.repeat(24),
   AGRO_DB02_CONTAINER: 'b'.repeat(64), AGRO_DB02_PORT: '27029', AGRO_DB02_TOPOLOGY: 'single-node-replica-set' };
@@ -11,7 +12,8 @@ const container = () => ({ Id: environment.AGRO_DB02_CONTAINER, State: { Running
   HostConfig: { NetworkMode: 'agro-db02-' + environment.AGRO_DB02_RUN_ID, Privileged: false, Binds: null,
     PortBindings: { '27017/tcp': [{ HostIp: '127.0.0.1', HostPort: '27029' }] } },
   Mounts: [{ Type: 'tmpfs', Destination: '/data/db' }, { Type: 'tmpfs', Destination: '/data/configdb' }],
-  NetworkSettings: { Networks: { ['agro-db02-' + environment.AGRO_DB02_RUN_ID]: {} } } });
+  NetworkSettings: { Networks: { ['agro-db02-' + environment.AGRO_DB02_RUN_ID]: {} },
+    Ports: { '27017/tcp': [{ HostIp: '127.0.0.1', HostPort: '27029' }] } } });
 
 test('DB02-G01 explicit opt-in and complete owned resource identity are required before any I/O', () => {
   assert.throws(() => validateDb02Request({}));
@@ -73,4 +75,27 @@ test('DB03-G09 importing the integration worker has no execution or process side
   assert.equal(child.status, 0);
   assert.equal(child.stdout.trim(), 'IMPORT_ONLY');
   assert.equal(child.stderr, '');
+});
+
+test('DB02-D10 Docker --tmpfs is verified from HostConfig while absent or foreign storage remains rejected', () => {
+  const c = container(); c.Mounts = [];
+  c.HostConfig.Tmpfs = { '/data/db': 'rw,size=512m,mode=1777', '/data/configdb': 'rw,size=32m,mode=1777' };
+  assert.doesNotThrow(() => validateOwnedContainer(c, request()));
+  for (const configuration of [{}, { '/data/db': 'rw,size=512m' },
+    { '/foreign': 'rw', '/data/db': 'rw' }, { '/data/db': 'ro', '/data/configdb': 'rw' }]) {
+    c.HostConfig.Tmpfs = configuration;
+    assert.throws(() => validateOwnedContainer(c, request()));
+  }
+});
+
+test('DB02-D11 actual published ports must match loopback request, not merely HostConfig', () => {
+  for (const mapping of [null, [], [{ HostIp: '0.0.0.0', HostPort: '27029' }], [{ HostIp: '127.0.0.1', HostPort: '27017' }]]) {
+    const c = container(); c.NetworkSettings.Ports['27017/tcp'] = mapping;
+    assert.throws(() => validateOwnedContainer(c, request()));
+  }
+});
+
+test('DB02-D12 fixture auth namespace satisfies the existing production configuration validator', () => {
+  assert.equal(persistence().collectionPrefix, 'agro_auth_db02');
+  assert.equal(persistence().realm, 'test');
 });

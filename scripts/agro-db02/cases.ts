@@ -45,17 +45,17 @@ export async function runDatabaseCases(connection: Connection, record: (result: 
     await p.admin.createUser(principal('user-b', 'client-b'));
     await assert.rejects(p.admin.createUser({ ...principal('duplicate-user'), subject: 'synthetic-user-a' }), failure('CONFLICT'));
     await assert.rejects(p.admin.createClient({ id: 'client-a', name: 'duplicate' }), failure('CONFLICT'));
-    const users = db.collection<CatalogueUserDocument>('db02_auth_users'), row = await users.findOne({ id: 'user-a' }); assert.ok(row);
+    const users = db.collection<CatalogueUserDocument>('agro_auth_db02_users'), row = await users.findOne({ id: 'user-a' }); assert.ok(row);
     await assert.rejects(users.insertOne({ ...row, _id: 'test:other-id', id: 'other-id' }), duplicate);
-    const clients = db.collection<CatalogueClientDocument>('db02_auth_clients');
+    const clients = db.collection<CatalogueClientDocument>('agro_auth_db02_clients');
     await clients.insertOne({ _id: 'test:CLIENT-A', realm: 'test', id: 'CLIENT-A', name: 'Case-sensitive', active: true, securityVersion: 0, updatedAt: new Date(at) });
     assert.equal(await clients.countDocuments({ realm: 'test', id: 'client-a' }), 1);
     assert.equal(await clients.countDocuments({ realm: 'test', id: 'CLIENT-A' }), 1);
   });
   await test('R03-server-bson-validation', async () => {
-    for (const value of [null, ['bad'], 5]) await assert.rejects(db.collection('db02_auth_users').updateOne({ id: 'user-a', realm: 'test' }, { $set: { subject: value } }),
+    for (const value of [null, ['bad'], 5]) await assert.rejects(db.collection('agro_auth_db02_users').updateOne({ id: 'user-a', realm: 'test' }, { $set: { subject: value } }),
       (error: unknown) => error instanceof mongo.MongoServerError && error.code === 121);
-    await assert.rejects(db.collection('db02_auth_users').updateOne({ id: 'user-a', realm: 'test' }, { $unset: { subject: '' } }),
+    await assert.rejects(db.collection('agro_auth_db02_users').updateOne({ id: 'user-a', realm: 'test' }, { $unset: { subject: '' } }),
       (error: unknown) => error instanceof mongo.MongoServerError && error.code === 121);
   });
   await test('R04-two-process-cas', async () => raceProcesses({ operation: 'cas' }));
@@ -75,7 +75,7 @@ export async function runDatabaseCases(connection: Connection, record: (result: 
     await assert.rejects(p.repository.insertChallenge({ realm: 'test', digest, nonceDigest: nonce, audience, expiresAt: at + 60000, consumedAt: null }));
     const malformed = digestSecret('synthetic-malformed-null');
     await p.repository.insertChallenge({ realm: 'test', digest: malformed, nonceDigest: nonce, audience, expiresAt: at + 60000, consumedAt: null });
-    await db.collection('db02_auth_challenges').updateOne({ realm: 'test', digest: malformed }, { $set: { consumedAt: [null] } });
+    await db.collection('agro_auth_db02_challenges').updateOne({ realm: 'test', digest: malformed }, { $set: { consumedAt: [null] } });
     assert.equal(await p.repository.consumeChallenge(malformed, nonce, 'test', at), false);
     return result;
   });
@@ -83,13 +83,13 @@ export async function runDatabaseCases(connection: Connection, record: (result: 
     const digest = digestSecret('synthetic-expiry'), nonce = digestSecret('synthetic-nonce');
     await p.repository.insertChallenge({ realm: 'test', digest, nonceDigest: nonce, audience, expiresAt: at + 1000, consumedAt: null });
     assert.equal(await p.repository.consumeChallenge(digest, nonce, 'test', at + 1000), false);
-    assert.equal(await db.collection('db02_auth_challenges').countDocuments({ digest, realm: 'test' }), 1);
+    assert.equal(await db.collection('agro_auth_db02_challenges').countDocuments({ digest, realm: 'test' }), 1);
   });
   await test('R08-session-hash-touch-logout', async () => {
     const { s, session } = await login('user-b');
     const record = await p.repository.findSessionByDigest(digestSecret(session.token), 'test'); assert.ok(record);
     await assert.rejects(p.repository.insertSession({ ...record, id: randomBytes(32).toString('hex') }));
-    const raw = await db.collection('db02_auth_sessions').findOne({ digest: digestSecret(session.token) });
+    const raw = await db.collection('agro_auth_db02_sessions').findOne({ digest: digestSecret(session.token) });
     assert.equal(JSON.stringify(raw).includes(session.token), false);
     at += 1000;
     await s.authorization.authenticate(session.token);
@@ -101,12 +101,12 @@ export async function runDatabaseCases(connection: Connection, record: (result: 
   await test('R09-idle-and-absolute-expiry-before-ttl', async () => {
     const idle = await login('expiry-user'); at += 60000;
     await assert.rejects(idle.s.authorization.authenticate(idle.session.token));
-    assert.equal(await db.collection('db02_auth_sessions').countDocuments({ digest: digestSecret(idle.session.token) }), 1);
+    assert.equal(await db.collection('agro_auth_db02_sessions').countDocuments({ digest: digestSecret(idle.session.token) }), 1);
     const absolute = await login('expiry-user');
     for (let i = 0; i < 19; i++) { at += 30000; await absolute.s.authorization.authenticate(absolute.session.token); }
     at += 30000;
     await assert.rejects(absolute.s.authorization.authenticate(absolute.session.token));
-    assert.equal(await db.collection('db02_auth_sessions').countDocuments({ digest: digestSecret(absolute.session.token) }), 1);
+    assert.equal(await db.collection('agro_auth_db02_sessions').countDocuments({ digest: digestSecret(absolute.session.token) }), 1);
   });
   await test('R10-disable-reactivate-and-realm', async () => {
     const old = await login('user-a');
@@ -126,6 +126,10 @@ export async function runDatabaseCases(connection: Connection, record: (result: 
     await assert.rejects(current.s.authorization.authenticate(current.session.token));
   });
   await test('R11-pending-revocation-checkpoint', async () => {
+    const crossProcess = await login('user-b');
+    await crossProcess.s.authorization.authenticate(crossProcess.session.token);
+    const revocationProcesses = await raceProcesses({ operation: 'revocation', token: crossProcess.session.token, at });
+    await assert.rejects(crossProcess.s.authorization.authenticate(crossProcess.session.token));
     await p.admin.changeMembership({ userId: 'pending-user', expectedVersion: 0, clientId: 'client-a' });
     const old = await login('pending-user');
     const injected = createIdentityCatalogueAdministration({ store: p.administration,
@@ -162,7 +166,7 @@ export async function runDatabaseCases(connection: Connection, record: (result: 
     const invalidReceipt = await wrongReceipt.invalidateUser({ userId: recovered.id, expectedVersion: recovered.securityVersion });
     assert.equal(invalidReceipt.revocation, 'pending');
     assert.equal((await p.admin.retryRevocation({ userId: recovered.id, version: invalidReceipt.checkpoint.beforeVersion })).revocation, 'confirmed');
-    return { fault: 'injected port failures/receipts after real writes; not real network loss', checkpointRecovered: true };
+    return { fault: 'injected port failures/receipts after real writes; not real network loss', checkpointRecovered: true, revocationProcesses };
   });
   await test('R12-temporal-planner-real-storage', async () => {
     const source = { sourceId: 'synthetic-source', clockId: 'synthetic-clock', deviceKind: 'mqtt-clientid' as const,

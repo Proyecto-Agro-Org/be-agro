@@ -17,7 +17,12 @@ async function auditOwnedDatabase() {
     const info = await connection.db!.command({ buildInfo: 1 }, { timeoutMS: 3000 });
     console.log(JSON.stringify({ event: 'db02-server', version: info.version, topology: request.topology,
       failoverProven: false, multiNodeDurabilityProven: false }));
-    await provisionOwned(connection, created);
+    try { await provisionOwned(connection, created); }
+    catch (error: unknown) {
+      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'number' ? error.code : null;
+      const codeName = typeof error === 'object' && error !== null && 'codeName' in error && typeof error.codeName === 'string' && /^[A-Za-z0-9_]+$/.test(error.codeName) ? error.codeName : null;
+      console.info(JSON.stringify({ event: 'db02-provision-error', code, codeName })); throw error;
+    }
     console.log(JSON.stringify({ event: 'db02-created', database, collections: created }));
     await runDatabaseCases(connection, result => {
       results.push(result); console.log(JSON.stringify({ event: 'db02-case', ...result }));

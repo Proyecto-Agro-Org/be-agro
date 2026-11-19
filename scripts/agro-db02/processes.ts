@@ -3,7 +3,8 @@ import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
-export async function raceProcesses(command: { operation: 'cas' } | { operation: 'claim'; digest: string; nonce: string; at: number }) {
+export async function raceProcesses(command: { operation: 'cas' } | { operation: 'claim'; digest: string; nonce: string; at: number }
+  | { operation: 'revocation'; token: string; at: number }) {
   const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
     /^(PATH|Path|SystemRoot|WINDIR|TEMP|TMP|HOME|USERPROFILE|DOCKER_HOST|DOCKER_CONTEXT|DOCKER_CONFIG|AGRO_DB02_.*)$/.test(key)));
   const children = [0, 1].map(() => fork(fileURLToPath(new URL('./worker.js', import.meta.url)), [],
@@ -16,10 +17,22 @@ export async function raceProcesses(command: { operation: 'cas' } | { operation:
       child.on('message', input => {
         const parsed = messageSchema.safeParse(input);
         if (!parsed.success || parsed.data.status === 'failed' || parsed.data.pid !== child.pid) { reject(new Error('DB02_CHILD_PROTOCOL')); return; }
-        if (parsed.data.status === 'ready') { ready.add(child); if (ready.size === 2) for (const c of children) c.send(command); }
+        if (parsed.data.status === 'ready') {
+          ready.add(child);
+          if (ready.size === 2) {
+            if (command.operation === 'revocation') children[0].send({ ...command, operation: 'revoke' });
+            else for (const c of children) c.send(command);
+          }
+        }
         if (parsed.data.status === 'done') {
           if (typeof parsed.data.won !== 'boolean') reject(new Error('DB02_CHILD_PROTOCOL'));
-          else resolve({ won: parsed.data.won, pid: parsed.data.pid });
+          else {
+            if (command.operation === 'revocation' && child === children[0]) {
+              if (!parsed.data.won) { reject(new Error('DB02_REVOCATION_UNCONFIRMED')); return; }
+              children[1].send({ ...command, operation: 'inspect-revoked' });
+            }
+            resolve({ won: parsed.data.won, pid: parsed.data.pid });
+          }
         }
       });
     }));
@@ -31,6 +44,10 @@ export async function raceProcesses(command: { operation: 'cas' } | { operation:
       })]);
       assert.equal(new Set(outcome.map(r => r.pid)).size, 2);
       assert.ok(outcome.every(r => r.pid !== process.pid));
+      if (command.operation === 'revocation') {
+        assert.ok(outcome.every(r => r.won));
+        return { pids: outcome.map(r => r.pid), revokedByFirst: true, rejectedBySecondAfterAck: true };
+      }
       assert.equal(outcome.filter(r => r.won).length, 1);
       return { pids: outcome.map(r => r.pid), winners: 1 };
     } finally { clearTimeout(timer); }
