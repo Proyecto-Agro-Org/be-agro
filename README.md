@@ -2,6 +2,28 @@
 
 Minimal Express API prepared for Vercel.
 
+## BE-09.5 / BE-09.5A — catálogo de autenticación, sin activación
+
+Catálogo Mongoose aislado de usuarios/clientes, validación BSON/Zod, índices únicos
+declarados y verificados por metadata, writer administrativo interno con CAS y
+versionado, generación de cliente para impedir reactivación de sesiones antiguas,
+y limpieza posterior de sesiones con estado confirmed/pending. No hay endpoints
+administrativos, alta automática Google ni cambios de contratos HTTP.
+
+Validación local actual: **320/320 pruebas** (312 conservadas +8 de auditoría), typecheck,
+build y **13/13 escenarios HTTP** equivalentes. Sin prueba positiva de MongoDB real.
+La app default mantiene health público, sin importar/montar auth ni conectar Atlas.
+No se crearon colecciones/índices ni se hicieron migraciones/despliegues reales.
+La sonda manual requiere doble opt-in y una instancia local descartable expresamente
+autorizada; nunca debe usarse como receta sobre Atlas/producción.
+
+[Implementación y límites](INFORME_BE09_5_IMPLEMENTACION_CATALOGO.md) ·
+[Matriz de seguridad/concurrencia](MATRIZ_BE09_5_SEGURIDAD_CONCURRENCIA.md).
+Auditoría final: [BE-09.5A](INFORME_BE09_5A_AUDITORIA_FINAL.md). Altas y barridos requieren
+recibos persistentes explícitos, no void; cleanup incluye checkpoint recuperable por versión.
+La integración de código en dev no implica aprobación externa ni activación; BE-09 sigue parcial.
+Los apartados anteriores en el tiempo que siguen conservan su carácter histórico.
+
 ## BE-09 recuperada sobre dev consolidada — 17/11/2026
 
 La base de esta entrega es `origin/dev` en

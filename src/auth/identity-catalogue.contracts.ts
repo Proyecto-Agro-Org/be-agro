@@ -4,10 +4,12 @@ import type { ExternalIdentity } from './session.contracts.js';
 export interface CatalogueUserRecord extends ExternalIdentity {
   readonly id: string; readonly name: string; readonly email: string; readonly active: boolean;
   readonly securityVersion: number; readonly updatedAt: number;
-  readonly membership: { readonly clientId: string; readonly active: boolean; readonly updatedAt: number } | null;
+  readonly membership: { readonly clientId: string; readonly active: boolean; readonly updatedAt: number;
+    readonly clientSecurityVersion?: number } | null;
 }
 export interface CatalogueClientRecord {
   readonly id: string; readonly name: string; readonly active: boolean; readonly updatedAt: number;
+  readonly securityVersion?: number;
 }
 export interface IdentityCatalogueStore {
   // Physical store must guarantee scoped uniqueness (or reject ambiguity), never
