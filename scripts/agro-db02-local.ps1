@@ -27,13 +27,13 @@ try {
     docker pull $image
     if ($LASTEXITCODE -ne 0) { throw 'Official image unavailable; stop' }
     $imagePulled = $true
-    docker network create --internal --label "agro.db02.run=$runId" $resourceName | Out-Null
+    docker network create --driver bridge --opt com.docker.network.bridge.gateway_mode_ipv4=nat --opt com.docker.network.bridge.host_binding_ipv4=127.0.0.1 --opt com.docker.network.bridge.enable_ip_masquerade=false --label "agro.db02.run=$runId" $resourceName | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Dedicated network creation failed' }
     $networkCreated = $true
     @{runId=$runId;network=$resourceName;state='network-created';image=$image;port=$Port} | ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath $manifest
     $arguments = @('create','--name',$resourceName,'--label',"agro.db02.run=$runId",'--network',$resourceName,
-        '--publish',"127.0.0.1:${Port}:27017",'--memory','768m','--cpus','1',
-        '--tmpfs','/data/db:rw,size=512m','--tmpfs','/data/configdb:rw,size=32m',$image,'--bind_ip_all')
+        '--publish',"127.0.0.1:${Port}:27017",'--memory','1536m','--cpus','1',
+        '--tmpfs','/data/db:rw,size=1024m,mode=1777','--tmpfs','/data/configdb:rw,size=32m,mode=1777',$image,'--bind_ip_all')
     if ($Topology -eq 'single-node-replica-set') { $arguments += @('--replSet','agro_db02') }
     $createdId = docker @arguments
     if ($LASTEXITCODE -ne 0 -or $createdId -notmatch '^[a-f0-9]{64}$') { throw 'Container creation failed; inspect only this run label' }
@@ -43,7 +43,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Owned container start failed' }
     $ready = $false
     for ($attempt = 0; $attempt -lt 45; $attempt++) {
-        docker exec $containerId mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok === 1 ? 0 : 1)' *> $null
+        $previousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { docker exec $containerId mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok === 1 ? 0 : 1)' *> $null }
+        finally { $ErrorActionPreference = $previousErrorAction }
         if ($LASTEXITCODE -eq 0) { $ready = $true; break }
         Start-Sleep -Seconds 1
     }
@@ -53,7 +56,10 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Replica set initialization failed' }
         $ready = $false
         for ($attempt = 0; $attempt -lt 30; $attempt++) {
-            docker exec $containerId mongosh --quiet --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)' *> $null
+            $previousErrorAction = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try { docker exec $containerId mongosh --quiet --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)' *> $null }
+            finally { $ErrorActionPreference = $previousErrorAction }
             if ($LASTEXITCODE -eq 0) { $ready = $true; break }
             Start-Sleep -Seconds 1
         }
@@ -75,6 +81,11 @@ try {
     if ($containerId) {
         $owned = docker inspect $containerId | ConvertFrom-Json
         if ($LASTEXITCODE -eq 0 -and $owned.Id -eq $containerId -and $owned.Config.Labels.'agro.db02.run' -eq $runId) {
+            $owned | Select-Object Id,State,Mounts,@{Name='PortBindings';Expression={$_.HostConfig.PortBindings}},@{Name='ActualPorts';Expression={$_.NetworkSettings.Ports}},@{Name='Tmpfs';Expression={$_.HostConfig.Tmpfs}} | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 -LiteralPath ($manifest -replace 'resources-','inspect-')
+            $previousErrorAction = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try { docker logs $containerId *> ($manifest -replace 'resources-','server-' -replace '\.json$','.log') }
+            finally { $ErrorActionPreference = $previousErrorAction }
             docker rm --force $containerId | Out-Null
             if ($LASTEXITCODE -ne 0) { $cleanupOk = $false }
         } else { $cleanupOk = $false }

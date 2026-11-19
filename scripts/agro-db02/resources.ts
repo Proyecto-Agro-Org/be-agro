@@ -11,9 +11,9 @@ import { createMongooseCatalogueSessionInvalidator } from '../../src/repositorie
 import { createIdentityCatalogueAdministration } from '../../src/services/identity-catalogue-admin.service.js';
 import { createIdentityCatalogue } from '../../src/repositories/identity-catalogue.repository.js';
 
-export const collectionNames = ['db02_auth_users', 'db02_auth_clients', 'db02_auth_sessions', 'db02_auth_challenges',
+export const collectionNames = ['agro_auth_db02_users', 'agro_auth_db02_clients', 'agro_auth_db02_sessions', 'agro_auth_db02_challenges',
   'db02_business_associations', 'db02_ingest_devices', 'db02_ingest_measurements'] as const;
-export const persistence = (realm = 'test') => validateAuthenticationPersistenceConfig({ collectionPrefix: 'db02_auth', realm });
+export const persistence = (realm = 'test') => validateAuthenticationPersistenceConfig({ collectionPrefix: 'agro_auth_db02', realm });
 export async function connectOwned(request: LocalRequest, database: string) {
   validateDb02Database(database, request);
   const connection = new Mongoose().createConnection(); connection.on('error', () => {});
@@ -27,7 +27,14 @@ export async function connectOwned(request: LocalRequest, database: string) {
     if (request.topology === 'single-node-replica-set') { assert.equal(hello.setName, 'agro_db02'); assert.equal(hello.isWritablePrimary, true); }
     else assert.equal(hello.setName, undefined);
     return connection;
-  } catch { await connection.close().catch(() => {}); throw new Error('DB02_OWNED_CONNECTION_FAILED'); }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : '';
+    const category = message.includes('ECONNREFUSED') ? 'connection-refused' : message.includes('ETIMEDOUT') ? 'connection-timeout' :
+      message === 'DB02_REDIRECTED_TOPOLOGY' ? 'unexpected-topology' : 'connection-or-hello-failed';
+    console.info(JSON.stringify({ event: 'db02-connection-error', category,
+      errorClass: error instanceof Error && /^[A-Za-z]+$/.test(error.name) ? error.name : 'UnknownError' }));
+    await connection.close().catch(() => {}); throw new Error('DB02_OWNED_CONNECTION_FAILED');
+  }
 }
 export async function provisionOwned(connection: Connection, created: string[]) {
   const db = connection.db!;
@@ -37,9 +44,11 @@ export async function provisionOwned(connection: Connection, created: string[]) 
     const name = model.collection.name;
     assert.ok(collectionNames.includes(name as typeof collectionNames[number]));
     const validator = name.endsWith('_users') ? catalogueCollectionValidators.users : name.endsWith('_clients') ? catalogueCollectionValidators.clients : undefined;
+    console.info(JSON.stringify({ event: 'db02-provision', collection: name, action: 'createCollection' }));
     await db.createCollection(name, { collation: { locale: 'simple' }, ...(validator ? { validator, validationLevel: 'strict', validationAction: 'error' } : {}) });
     created.push(name);
     for (const [keys, settings] of model.schema.indexes()) {
+      console.info(JSON.stringify({ event: 'db02-provision', collection: name, index: settings.name, action: 'createIndex' }));
       const key = Object.fromEntries(Object.entries(keys).map(([k, direction]) => { assert.equal(direction, 1); return [k, 1 as const]; }));
       await db.collection(name).createIndex(key, { name: settings.name, unique: settings.unique === true,
         collation: { locale: 'simple' }, ...(typeof settings.expireAfterSeconds === 'number' ? { expireAfterSeconds: settings.expireAfterSeconds } : {}) });
