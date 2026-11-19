@@ -24,16 +24,26 @@ export type SessionStatus =
 export interface CredentialVerifier { verify(credential: string): Promise<CredentialVerification> }
 export interface IdentityResolver { resolve(principal: VerifiedPrincipal): Promise<ResolvedUser | null> }
 export interface MembershipResolver { resolve(userId: UserId): Promise<ResolvedMembership | null> }
+export type SessionMembershipResolution =
+  | { readonly status: 'authorized'; readonly membership: ResolvedMembership }
+  | { readonly status: 'invalid-session' | 'no-membership' };
+export interface SessionBoundMembershipResolver {
+  resolve(userId: UserId, session: SessionReference): Promise<SessionMembershipResolution>;
+}
 export interface SessionLifecycle {
   inspect(session: SessionReference): Promise<SessionStatus>;
   revoke(session: SessionReference): Promise<void>;
 }
-export interface AuthorizationPorts {
+interface AuthorizationBasePorts {
   readonly verifier: CredentialVerifier;
   readonly identities: IdentityResolver;
-  readonly memberships: MembershipResolver;
   readonly sessions: SessionLifecycle;
 }
+// Existing consumers remain supported; real sessions must choose the bound port.
+export type AuthorizationPorts = AuthorizationBasePorts & (
+  | { readonly memberships: MembershipResolver; readonly sessionMemberships?: never }
+  | { readonly sessionMemberships: SessionBoundMembershipResolver; readonly memberships?: never }
+);
 
 export interface AuthenticatedIdentity {
   readonly [identityKey]: true;

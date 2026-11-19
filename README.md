@@ -381,3 +381,31 @@ entry detection and HTTP/CORS behavior before integration. No deploy or platform
 configuration change was performed as part of the local migration. Publishing
 a branch can trigger automatic Vercel deployments; review and authorize that
 effect before a future push. Production promotion is outside this task.
+
+## BE-09.2B — Infraestructura de sesiones (local, sin activar)
+
+Se implementaron el adaptador oficial Google, challenge/nonce de un uso, sesiones
+opacas con digest, expiración/revocación y vinculación con capacidades BE-09.1.
+La aplicación default conserva únicamente sus rutas anteriores: no monta login,
+challenge, consulta de sesión ni logout. Las cuatro operaciones se prueban en apps
+Express aisladas, con puertos explícitos y dobles solo en tests.
+
+`google-auth-library` 11.3.4 es la única dependencia directa nueva. `.env.example`
+documenta configuración opt-in; no habilita autenticación. Persistencia durable,
+catálogo usuario-cliente BE-02, configuración GIS, admisión distribuida y contratos
+FE/BE-03 están pendientes. Los puertos de almacenamiento requieren atomicidad,
+coherencia y deadlines; no existe un store productivo en memoria como fallback.
+
+Validación local: 206/206 pruebas (160 anteriores + 46 nuevas), typecheck/build
+correctos y 13/13 escenarios HTTP conservados. Sin Atlas, credenciales reales ni
+Preview. BE-09 no Done; lista para auditoría local BE-09.2C.
+Ver [implementación](INFORME_BE09_2B_IMPLEMENTACION_SESIONES.md),
+[auditoría](INFORME_BE09_2B_AUDITORIA_SEGURIDAD.md) y
+[matriz con estados](MATRIZ_BE09_2A_DECISIONES_Y_PRUEBAS.md).
+
+Auditoría posterior BE-09.2C: **220/220 pruebas**, 14 nuevas, typecheck/build y
+13/13 HTTP conservados. Se corrigieron retries efectivos del SDK y renovación
+idle concurrente. Sin autenticación productiva habilitada ni dependencias nuevas.
+Ver [auditoría final](INFORME_BE09_2C_AUDITORIA_FINAL.md) y
+[trazabilidad](MATRIZ_BE09_2C_TRAZABILIDAD.md). Gates externos abiertos;
+infraestructura apta para revisión/integración deshabilitada, BE-09 no Done.
