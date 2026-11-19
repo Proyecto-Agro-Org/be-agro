@@ -231,7 +231,8 @@
             "$ref": "#/components/responses/InternalError"
           }
         }
-      }
+      },
+      "x-be10-contract-document": "openapi-be10.json"
     },
     "/api/v1/areas/{areaId}": {
       "get": {
@@ -287,7 +288,8 @@
             "$ref": "#/components/responses/InternalError"
           }
         }
-      }
+      },
+      "x-be10-contract-document": "openapi-be10.json"
     },
     "/api/v1/areas/{areaId}/sensores": {
       "get": {
@@ -2205,5 +2207,7 @@
     "Alertas: total antes de límite, alertas.length<=limit; filtro AND y orden semántico de severidad.",
     "Sin mediciones: ultima_medicion=null; ausencia individual: valor=null; sin coordenadas válidas: ubicacion=null."
   ],
-  "x-validation-scope": "Schemas y anotaciones documentales. default no normaliza; format necesita comprobaci?n; reglas cruzadas/tenant se verifican fuera de la forma JSON. No hay validaci?n runtime implementada."
+  "x-validation-scope": "Schemas y anotaciones documentales. default no normaliza; format necesita comprobaci?n; reglas cruzadas/tenant se verifican fuera de la forma JSON. No hay validaci?n runtime implementada.",
+  "x-be10-contract-document": "openapi-be10.json",
+  "x-be10-status": "Factory implementada y deshabilitada. Contratos FE históricos y agregados siguen propuestos; solo health público."
 }
