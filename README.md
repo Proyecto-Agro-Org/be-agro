@@ -455,3 +455,20 @@ contra un servidor. La consistencia entre catálogo/sesión y los duplicados fí
 continúan como gates, junto con BE-02/03 y la integración real. Ver
 [informe A](INFORME_BE09_3A_AUDITORIA_FINAL.md) y
 [trazabilidad A](MATRIZ_BE09_3A_TRAZABILIDAD.md). Auth productiva deshabilitada.
+
+## BE-10 — Clientes, campos y áreas (local, deshabilitado)
+
+Implementación aislada Route → Controller → Service → Repository/Model, con catálogo de
+cliente reutilizado, CRUD de campos/áreas, DTOs/Zod, CAS, paginación y baja lógica sin cascadas.
+La aplicación pública no monta las once rutas ni abre conexiones por importar el módulo.
+Las bajas con evidencia desconocida de sensores/asociaciones se bloquean; no hay fake productivo.
+
+Validación ejecutada: **374/374 offline** (360 previas +14), **13/13 MongoDB 8.0.38** sobre
+replica set local de un nodo y dos conexiones, y **13/13 escenarios HTTP equivalentes** a dev base.
+No se demuestra failover multinodo. Sin dependencias nuevas, Atlas, cambios FE/ingesta o despliegue.
+
+La forma base de Área no incluye los contadores AreaResumen del frontend: falta acuerdo/implementación
+real de agregados. No se completaron con ceros. Sin sesiones/dependencias/mapeo final aprobados no se activa.
+Ver [informe](INFORME_BE10_CLIENTES_CAMPOS_AREAS.md), [contrato FE/BE](CONTRATO_BE10_API_FRONTEND.md),
+[matriz](MATRIZ_BE10_PRUEBAS.md) y [OpenAPI local](docs/openapi-be10.json).
+BE-10 no Done; pendiente revisión e integración. No se hizo push ni PR.

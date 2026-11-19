@@ -41,7 +41,7 @@ Detalle: [implementación BE-09.5](INFORME_BE09_5_IMPLEMENTACION_CATALOGO.md) y
 | [/] | BE-07 | 2 | Configurar Mongoose y Zod requests/env; conexión segura, fallos controlados y configuración validada. | BE-05/06; modelo aprobado |
 | [/] | BE-08 | 2 | Error handler/404 uniforme, logging con request ID, CORS, seguridad HTTP y límites; pruebas sin secretos. | BE-03 y base TS |
 | [/] | BE-09 | 3 | Integrar Google/sesión aprobada, contexto de cliente, recuperación/logout y aislamiento de consultas por jerarquía. | BE-07/08; política auth cerrada |
-| [ ] | BE-10 | 4 | GET campos por cliente y catálogo áreas; campos vacíos, 400/401/404, filtro por cliente dentro de repository. | BE-02/03/09 |
+| [/] | BE-10 | 4 | GET campos por cliente y catálogo áreas; campos vacíos, 400/401/404, filtro por cliente dentro de repository. | BE-02/03/09 |
 | [ ] | BE-11 | 4 | Dispositivos por área y detalle, mappers/ubicación/última comunicación, recursos ajenos 404; conservar rutas públicas acordadas. | BE-10 |
 | [ ] | BE-12 | 5 | Última medición por dispositivo autorizado, unidades/fuentes, nulls y sensor sin lecturas; ruta a acordar sin duplicar detalle innecesariamente. | BE-04/11 |
 | [ ] | BE-13 | 5 | Históricos con Zod, ISO/zona, rango válido, límite, orden y truncamiento; cliente y dispositivo verificados e índices evaluados. | BE-04/12 |
@@ -125,3 +125,7 @@ INT-01/DEP-01/E2E-01 validan recorrido real con usuarios de prueba, dos clientes
 | E4.1…E4.5 | INT-01, DEP-01, E2E-01 y documentación/DoD por entrega |
 
 Se conserva esta trazabilidad y los criterios útiles; el plan anterior completo está en Git base 9cab86f. Las propuestas de Time Series, hosting alternativo y cookie obligatoria no rigen como acuerdos. Para cierre usar [DEFINITION_OF_DONE.md](DEFINITION_OF_DONE.md).
+
+
+### BE-10 local — 19/11/2026
+CRUD de cliente actual/campos/áreas preparado y deshabilitado, con 374/374 offline, 13/13 Mongo local y 13/13 HTTP. La consigna BE-10 amplía el alcance histórico de consulta a CRUD aislado. Contratos CRUD, mapeo físico, integración de sesiones/dependencias y agregados FE pendientes; no se marca Done. Ver INFORME_BE10_CLIENTES_CAMPOS_AREAS.md y CONTRATO_BE10_API_FRONTEND.md.

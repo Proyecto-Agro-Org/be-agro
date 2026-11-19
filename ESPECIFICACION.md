@@ -161,3 +161,14 @@ Flujo Git: solo main comprobada local y remota; acordar develop/dev antes de usa
 Los borradores del 30/10 y 02/11/2026 proponían Time Series, campo→dispositivo sin Área, cookie JWT y alternativas Render/Railway; trataban runtime validation como fuera de alcance. Quedan sustituidos por el acuerdo del 05/11. Se conserva el inventario histórico, los contratos de consulta y pendientes útiles, sin convertir propuestas en hechos.
 
 La numeración BE-01…BE-15 del antiguo §11 era sugerida y difería del plan del 05/11. Rige el backlog de [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md); versiones anteriores completas disponibles en Git, commit base 9cab86f. Ver [informe de auditoría](INFORME_BE00_BE01.md) para evidencias y limitaciones.
+
+## BE-10 — Extensión local deshabilitada (19/11/2026)
+
+La consigna BE-10 autoriza implementar CRUD de campos/áreas y lectura del cliente actual
+exclusivamente en composición aislada. No aprueba administración global, mapeo Atlas ni exposición
+productiva. La aplicación pública permanece sin nuevas rutas. Cliente → Campo → Área → Sensor lógico
+se preserva; las asociaciones con dispositivo físico/mediciones siguen en sus contratos específicos.
+El contrato implementado para revisión está en [CONTRATO_BE10_API_FRONTEND.md](CONTRATO_BE10_API_FRONTEND.md)
+y [docs/openapi-be10.json](docs/openapi-be10.json). No sustituye por inferencia contratos FE aprobados.
+GET /areas BE10 devuelve entidades base, no AreaResumen con contadores todavía no implementados.
+No utilizarlo como reemplazo directo del mock actual. No se activa login ni se modifican otros repositorios.

@@ -1,0 +1,1059 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Agro BE10 — CRUD aislado y deshabilitado",
+    "version": "0.1.0-local",
+    "description": "Contrato implementado en tests; no aprobación ni inventario desplegado. GET /areas devuelve entidades base, NO AreaResumen con contadores FE. Baja requiere evidencia de dependencias y CAS. Sin login productivo."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "SessionBearer": []
+    }
+  ],
+  "paths": {
+    "/api/v1/clientes/actual": {
+      "get": {
+        "operationId": "GetCurrentCliente",
+        "tags": [
+          "BE10 aislado"
+        ],
+        "x-implementation": "factory-only-disabled-default",
+        "description": "Cliente desde capacidad privada; query desconocida rechazada; no body en GET/DELETE.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Factory aislada, no desplegada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cliente"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "403": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "404": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "409": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "413": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "415": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "500": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "503": {
+            "$ref": "#/components/responses/SafeError"
+          }
+        }
+      }
+    },
+    "/api/v1/campos": {
+      "get": {
+        "operationId": "ListCampos",
+        "tags": [
+          "BE10 aislado"
+        ],
+        "x-implementation": "factory-only-disabled-default",
+        "description": "Cliente desde capacidad privada; query desconocida rechazada; no body en GET/DELETE.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[1-9]|[1-9][0-9]|100)$",
+              "default": "50"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Factory aislada, no desplegada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campos"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "403": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "404": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "409": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "413": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "415": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "500": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "503": {
+            "$ref": "#/components/responses/SafeError"
+          }
+        }
+      },
+      "post": {
+        "operationId": "CreateCampo",
+        "tags": [
+          "BE10 aislado"
+        ],
+        "x-implementation": "factory-only-disabled-default",
+        "description": "Cliente desde capacidad privada; query desconocida rechazada; no body en GET/DELETE.",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "Factory aislada, no desplegada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "403": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "404": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "409": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "413": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "415": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "500": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "503": {
+            "$ref": "#/components/responses/SafeError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Create"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/campos/{campoId}": {
+      "get": {
+        "operationId": "GetCampo",
+        "tags": [
+          "BE10 aislado"
+        ],
+        "x-implementation": "factory-only-disabled-default",
+        "description": "Cliente desde capacidad privada; query desconocida rechazada; no body en GET/DELETE.",
+        "parameters": [
+          {
+            "name": "campoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Factory aislada, no desplegada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "403": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "404": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "409": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "413": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "415": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "500": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "503": {
+            "$ref": "#/components/responses/SafeError"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "UpdateCampo",
+        "tags": [
+          "BE10 aislado"
+        ],
+        "x-implementation": "factory-only-disabled-default",
+        "description": "Cliente desde capacidad privada; query desconocida rechazada; no body en GET/DELETE.",
+        "parameters": [
+          {
+            "name": "campoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Factory aislada, no desplegada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campo"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "403": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "404": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "409": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "413": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "415": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "500": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "503": {
+            "$ref": "#/components/responses/SafeError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Patch"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "DeactivateCampo",
+        "tags": [
+          "BE10 aislado"
+        ],
+        "x-implementation": "factory-only-disabled-default",
+        "description": "Cliente desde capacidad privada; query desconocida rechazada; no body en GET/DELETE.",
+        "parameters": [
+          {
+            "name": "campoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,15})$",
+              "description": "Entero hasta 9007199254740990."
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Baja lógica; sin contenido"
+          },
+          "400": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "403": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "404": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "409": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "413": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "415": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "500": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "503": {
+            "$ref": "#/components/responses/SafeError"
+          }
+        }
+      }
+    },
+    "/api/v1/areas": {
+      "get": {
+        "operationId": "ListAreasBE10",
+        "tags": [
+          "BE10 aislado"
+        ],
+        "x-implementation": "factory-only-disabled-default",
+        "description": "Cliente desde capacidad privada; query desconocida rechazada; no body en GET/DELETE.",
+        "parameters": [
+          {
+            "name": "campo_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[1-9]|[1-9][0-9]|100)$",
+              "default": "50"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Factory aislada, no desplegada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Areas"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "403": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "404": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "409": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "413": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "415": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "500": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "503": {
+            "$ref": "#/components/responses/SafeError"
+          }
+        }
+      }
+    },
+    "/api/v1/campos/{campoId}/areas": {
+      "post": {
+        "operationId": "CreateArea",
+        "tags": [
+          "BE10 aislado"
+        ],
+        "x-implementation": "factory-only-disabled-default",
+        "description": "Cliente desde capacidad privada; query desconocida rechazada; no body en GET/DELETE.",
+        "parameters": [
+          {
+            "name": "campoId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Factory aislada, no desplegada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Area"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "403": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "404": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "409": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "413": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "415": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "500": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "503": {
+            "$ref": "#/components/responses/SafeError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Create"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/areas/{areaId}": {
+      "get": {
+        "operationId": "GetAreaBE10",
+        "tags": [
+          "BE10 aislado"
+        ],
+        "x-implementation": "factory-only-disabled-default",
+        "description": "Cliente desde capacidad privada; query desconocida rechazada; no body en GET/DELETE.",
+        "parameters": [
+          {
+            "name": "areaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "campo_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Factory aislada, no desplegada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Area"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "403": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "404": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "409": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "413": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "415": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "500": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "503": {
+            "$ref": "#/components/responses/SafeError"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "UpdateArea",
+        "tags": [
+          "BE10 aislado"
+        ],
+        "x-implementation": "factory-only-disabled-default",
+        "description": "Cliente desde capacidad privada; query desconocida rechazada; no body en GET/DELETE.",
+        "parameters": [
+          {
+            "name": "areaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "campo_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Factory aislada, no desplegada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Area"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "403": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "404": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "409": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "413": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "415": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "500": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "503": {
+            "$ref": "#/components/responses/SafeError"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Patch"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "DeactivateArea",
+        "tags": [
+          "BE10 aislado"
+        ],
+        "x-implementation": "factory-only-disabled-default",
+        "description": "Cliente desde capacidad privada; query desconocida rechazada; no body en GET/DELETE.",
+        "parameters": [
+          {
+            "name": "areaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "campo_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]{0,15})$",
+              "description": "Entero hasta 9007199254740990."
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Baja lógica; sin contenido"
+          },
+          "400": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "401": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "403": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "404": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "409": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "413": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "415": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "500": {
+            "$ref": "#/components/responses/SafeError"
+          },
+          "503": {
+            "$ref": "#/components/responses/SafeError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "SessionBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Sesión existente; nunca identidad de body/query/headers de cliente."
+      }
+    },
+    "schemas": {
+      "Create": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "nombre": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "Se aplica trim y se rechazan controles Unicode."
+          },
+          "descripcion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "nombre"
+        ]
+      },
+      "Patch": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "nombre": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "Se aplica trim y se rechazan controles Unicode."
+          },
+          "descripcion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740990
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "nombre"
+            ]
+          },
+          {
+            "required": [
+              "descripcion"
+            ]
+          }
+        ]
+      },
+      "Campo": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "nombre": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "Se aplica trim y se rechazan controles Unicode."
+          },
+          "descripcion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000
+          },
+          "activo": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740990
+          },
+          "campo_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "cliente_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "nombre",
+          "descripcion",
+          "activo",
+          "created_at",
+          "updated_at",
+          "version",
+          "campo_id",
+          "cliente_id"
+        ]
+      },
+      "Area": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "nombre": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120,
+            "description": "Se aplica trim y se rechazan controles Unicode."
+          },
+          "descripcion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 2000
+          },
+          "activo": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740990
+          },
+          "area_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "campo_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "nombre",
+          "descripcion",
+          "activo",
+          "created_at",
+          "updated_at",
+          "version",
+          "area_id",
+          "campo_id"
+        ]
+      },
+      "Cliente": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cliente_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "nombre": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "activo": {
+            "type": "boolean"
+          },
+          "campos_url": {
+            "type": "string",
+            "const": "/api/v1/campos"
+          }
+        },
+        "required": [
+          "cliente_id",
+          "nombre",
+          "activo",
+          "campos_url"
+        ]
+      },
+      "Campos": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "campos": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/Campo"
+            }
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "campos",
+          "next"
+        ]
+      },
+      "Areas": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "areas": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/Area"
+            }
+          },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "areas",
+          "next"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      }
+    },
+    "responses": {
+      "SafeError": {
+        "description": "Error seguro, según operación y semántica del código HTTP.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}
