@@ -26,32 +26,44 @@ export function localDockerEndpoint(input: string) {
   if (!['npipe:////./pipe/docker_engine', 'npipe:////./pipe/dockerDesktopLinuxEngine',
     'unix:///var/run/docker.sock', 'unix:///run/docker.sock'].includes(input)) throw new Error('DB02_DOCKER_ENDPOINT_NOT_LOCAL');
 }
-const inspectSchema = z.object({ Id: z.string(), State: z.object({ Running: z.literal(true) }),
-  Config: z.object({ Image: z.string().regex(/^mongodb\/mongodb-community-server:8\.0(?:\.\d+)?(?:-ubi\d+)?$/),
+const inspectSchema = z.object({ Id: z.string(), State: z.object({ Running: z.boolean() }),
+  Config: z.object({ Image: z.string(),
     Labels: z.record(z.string(), z.string()), Cmd: z.array(z.string()) }),
-  HostConfig: z.object({ NetworkMode: z.string(), Privileged: z.literal(false),
+  HostConfig: z.object({ NetworkMode: z.string(), Privileged: z.boolean(),
     Tmpfs: z.record(z.string(), z.string()).optional(),
     Binds: z.array(z.string()).nullable(), PortBindings: z.record(z.string(), z.array(z.object({ HostIp: z.string(), HostPort: z.string() }))) }),
   Mounts: z.array(z.object({ Type: z.string(), Destination: z.string() })),
   NetworkSettings: z.object({ Networks: z.record(z.string(), z.unknown()),
     Ports: z.record(z.string(), z.array(z.object({ HostIp: z.string(), HostPort: z.string() })).nullable()) }) });
 export function validateOwnedContainer(input: unknown, request: LocalRequest) {
-  const c = inspectSchema.parse(input), network = 'agro-db02-' + request.runId;
+  const parsed = inspectSchema.safeParse(input);
+  if (!parsed.success) throw new Error('DB02_INSPECT_SHAPE_MISMATCH');
+  const c = parsed.data, network = 'agro-db02-' + request.runId;
   const expectedMounts = ['/data/db', '/data/configdb'];
   const configured = Object.entries(c.HostConfig.Tmpfs ?? {});
   const configuredValid = configured.length === 2 && configured.every(([destination, options]) =>
     expectedMounts.includes(destination) && options.split(',').includes('rw') && !options.split(',').includes('ro'));
   const mountRecordsValid = c.Mounts.length === 2 && new Set(c.Mounts.map(m => m.Destination)).size === 2 &&
     c.Mounts.every(m => m.Type === 'tmpfs' && expectedMounts.includes(m.Destination));
-  if (c.Id !== request.container || c.Config.Labels['agro.db02.run'] !== request.runId || c.HostConfig.NetworkMode !== network ||
-    JSON.stringify(Object.keys(c.NetworkSettings.Networks)) !== JSON.stringify([network]) || c.HostConfig.Binds?.length ||
-    (configured.length > 0 && !configuredValid) || (!configuredValid && !mountRecordsValid) ||
-    c.Mounts.some(m => m.Type !== 'tmpfs' || !['/data/db', '/data/configdb'].includes(m.Destination))) throw new Error('DB02_CONTAINER_NOT_OWNED_ISOLATED');
+  if (c.Id !== request.container) throw new Error('DB02_CONTAINER_IDENTITY_MISMATCH');
+  if (!c.State.Running) throw new Error('DB02_CONTAINER_NOT_RUNNING');
+  if (!/^mongodb\/mongodb-community-server:8\.0(?:\.\d+)?(?:-ubi\d+)?$/.test(c.Config.Image))
+    throw new Error('DB02_IMAGE_IDENTITY_MISMATCH');
+  if (c.Config.Labels['agro.db02.run'] !== request.runId) throw new Error('DB02_OWNERSHIP_LABEL_MISMATCH');
+  if (c.HostConfig.Privileged) throw new Error('DB02_PRIVILEGED_CONTAINER');
+  if (c.HostConfig.NetworkMode !== network ||
+    JSON.stringify(Object.keys(c.NetworkSettings.Networks)) !== JSON.stringify([network]))
+    throw new Error('DB02_NETWORK_IDENTITY_MISMATCH');
+  if (c.HostConfig.Binds?.length) throw new Error('DB02_UNEXPECTED_BIND');
+  if (c.Mounts.some(m => m.Type !== 'tmpfs' || !expectedMounts.includes(m.Destination)))
+    throw new Error('DB02_UNEXPECTED_MOUNT');
+  if ((configured.length > 0 && !configuredValid) || (!configuredValid && !mountRecordsValid))
+    throw new Error('DB02_TMPFS_MISMATCH');
   const bindings = c.HostConfig.PortBindings;
   if (Object.keys(bindings).length !== 1 || JSON.stringify(bindings['27017/tcp']) !== JSON.stringify([{ HostIp: '127.0.0.1', HostPort: String(request.port) }]))
-    throw new Error('DB02_LOOPBACK_BINDING_REQUIRED');
+    throw new Error('DB02_LOOPBACK_BINDING_MISMATCH');
   if (Object.keys(c.NetworkSettings.Ports).length !== 1 || JSON.stringify(c.NetworkSettings.Ports['27017/tcp']) !== JSON.stringify(bindings['27017/tcp']))
-    throw new Error('DB02_EFFECTIVE_LOOPBACK_BINDING_REQUIRED');
+    throw new Error('DB02_EFFECTIVE_LOOPBACK_BINDING_MISMATCH');
   const cmd = c.Config.Cmd;
   if (!cmd.includes('--bind_ip_all') || (request.topology === 'single-node-replica-set'
     ? !cmd.includes('--replSet') || cmd[cmd.indexOf('--replSet') + 1] !== 'agro_db02' : cmd.includes('--replSet'))) throw new Error('DB02_TOPOLOGY_MISMATCH');
@@ -68,11 +80,16 @@ export function verifyOwnedDocker(request: LocalRequest) {
   localDockerEndpoint(contexts[0].Endpoints.docker.Host);
   const containers = z.array(z.unknown()).length(1).parse(docker(['inspect', request.container]));
   const name = validateOwnedContainer(containers[0], request);
-  const imageId = z.object({ Image: z.string().regex(/^sha256:[a-f0-9]{64}$/) }).parse(containers[0]).Image;
-  const network = z.array(z.object({ Driver: z.literal('bridge'), Internal: z.literal(false), Options: z.record(z.string(), z.string()), Labels: z.record(z.string(), z.string()),
-    Containers: z.record(z.string(), z.unknown()) })).length(1).parse(docker(['network', 'inspect', name]))[0];
-  if (network.Labels['agro.db02.run'] !== request.runId || Object.keys(network.Containers).some(id => id !== request.container))
-    throw new Error('DB02_SHARED_OR_UNKNOWN_NETWORK');
+  const image = z.object({ Image: z.string() }).safeParse(containers[0]);
+  if (!image.success || !/^sha256:[a-f0-9]{64}$/.test(image.data.Image)) throw new Error('DB02_IMAGE_IDENTITY_MISMATCH');
+  const imageId = image.data.Image;
+  const networkResult = z.array(z.object({ Driver: z.string(), Internal: z.boolean(), Options: z.record(z.string(), z.string()), Labels: z.record(z.string(), z.string()),
+    Containers: z.record(z.string(), z.unknown()) })).length(1).safeParse(docker(['network', 'inspect', name]));
+  if (!networkResult.success) throw new Error('DB02_NETWORK_INSPECT_SHAPE_MISMATCH');
+  const network = networkResult.data[0];
+  if (network.Driver !== 'bridge' || network.Internal) throw new Error('DB02_NETWORK_IDENTITY_MISMATCH');
+  if (network.Labels['agro.db02.run'] !== request.runId) throw new Error('DB02_OWNERSHIP_LABEL_MISMATCH');
+  if (Object.keys(network.Containers).some(id => id !== request.container)) throw new Error('DB02_SHARED_OR_UNKNOWN_NETWORK');
   if (network.Options['com.docker.network.bridge.gateway_mode_ipv4'] !== 'nat' ||
     network.Options['com.docker.network.bridge.host_binding_ipv4'] !== '127.0.0.1' ||
     network.Options['com.docker.network.bridge.enable_ip_masquerade'] !== 'false') throw new Error('DB02_NETWORK_POLICY_MISMATCH');

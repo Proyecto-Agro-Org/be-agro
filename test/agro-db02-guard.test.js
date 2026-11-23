@@ -46,6 +46,22 @@ test('DB02-G05 container ownership, official image and actual exclusive network 
     const c = container(); mutate(c); assert.throws(() => validateOwnedContainer(c, request()));
   }
 });
+test('DB02-G05B ownership failures expose only a specific controlled diagnostic code', () => {
+  const cases = [
+    [c => { c.Id = 'c'.repeat(64); }, 'DB02_CONTAINER_IDENTITY_MISMATCH'],
+    [c => { c.Config.Image = 'unknown/mongodb'; }, 'DB02_IMAGE_IDENTITY_MISMATCH'],
+    [c => { c.Config.Labels['agro.db02.run'] = 'foreign'; }, 'DB02_OWNERSHIP_LABEL_MISMATCH'],
+    [c => { c.HostConfig.NetworkMode = 'agro-be11-' + environment.AGRO_DB02_RUN_ID; }, 'DB02_NETWORK_IDENTITY_MISMATCH'],
+    [c => { c.HostConfig.Binds = ['C:/foreign:/data/db']; }, 'DB02_UNEXPECTED_BIND'],
+    [c => { c.Mounts[0].Type = 'volume'; }, 'DB02_UNEXPECTED_MOUNT'],
+    [c => { c.Mounts = []; }, 'DB02_TMPFS_MISMATCH'],
+    [c => { c.HostConfig.PortBindings['27017/tcp'][0].HostIp = '0.0.0.0'; }, 'DB02_LOOPBACK_BINDING_MISMATCH'],
+  ];
+  for (const [mutate, code] of cases) {
+    const c = container(); mutate(c);
+    assert.throws(() => validateOwnedContainer(c, request()), error => error instanceof Error && error.message === code);
+  }
+});
 test('DB02-G06 public ports, remapped destinations, persistent mounts and privileged mode are rejected', () => {
   for (const mutate of [c => { c.HostConfig.PortBindings['27017/tcp'][0].HostIp = '0.0.0.0'; },
     c => { c.HostConfig.PortBindings['27017/tcp'][0].HostPort = '27017'; },

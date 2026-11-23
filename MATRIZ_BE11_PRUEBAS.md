@@ -10,10 +10,10 @@
 | DTO | mappers explícitos sin campos Mongo/propiedad interna | APROBADO |
 | Modelos | sin DDL/conexión al importar; identidad lógica/física separada | APROBADO |
 | Aislamiento público | rutas BE-11 devuelven 404 en `createApp()` | APROBADO |
-| Regresión general | suite completa | 388/388 |
+| Regresión general | suite completa | 390/390 |
 | HTTP legacy | health, CORS, 404 y 500 contra base | 13/13 |
 
-Las 388 pruebas incluyen las 374 heredadas, 8 pruebas del núcleo BE-11 y 6 regresiones del launcher: clasificación sanitizada, errores hostiles, creación del directorio de evidencia, cronología válida de M06/M15, readiness acotado en Windows y captura de diagnóstico antes de limpiar.
+Las 390 pruebas incluyen las 374 heredadas, 8 pruebas del núcleo BE-11 y 8 regresiones del launcher/guard: clasificación sanitizada, errores hostiles, creación del directorio de evidencia, cronología válida de M06/M15, readiness acotado en Windows, captura de diagnóstico antes de limpiar, contrato de nombre de red y códigos controlados para cada control de aislamiento.
 
 ## MongoDB real preparada
 

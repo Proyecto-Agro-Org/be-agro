@@ -19,6 +19,13 @@ test('BE11 diagnostics survive hostile errors without invoking string coercion',
   assert.deepEqual(classifyBe11Failure('stage',hostile),{stage:'stage',category:'unreadable-error',errorClass:'UnknownError'});
 });
 
+test('BE11 diagnostics classify owned Docker guard failures without exposing arbitrary messages',()=>{
+  assert.deepEqual(classifyBe11Failure('validate-owned-docker',new Error('DB02_NETWORK_IDENTITY_MISMATCH')),
+    {stage:'validate-owned-docker',category:'network-identity-mismatch',errorClass:'Error'});
+  assert.deepEqual(classifyBe11Failure('validate-owned-docker',new Error('mongodb://private.invalid')),
+    {stage:'validate-owned-docker',category:'unexpected-error',errorClass:'Error'});
+});
+
 test('BE11 evidence writer creates the missing local directory without changing its payload',()=>{
   const root=mkdtempSync(join(tmpdir(),'be11-evidence-'));
   try{const path=writeBe11Evidence(root,'be11-mongodb-failure.json',{failure:{stage:'M06',category:'CONFLICT'}});assert.deepEqual(JSON.parse(readFileSync(path,'utf8')),{failure:{stage:'M06',category:'CONFLICT'}});}
@@ -63,6 +70,8 @@ Write-Output 'READINESS_REGRESSION_OK'
 
 test('BE11 launcher captures owned container diagnostics before removal',()=>{
   const source=readFileSync(new URL('../scripts/be11-local.ps1',import.meta.url),'utf8');
+  assert.match(source,/\$resource="agro-db02-\$runId"/);
+  assert.doesNotMatch(source,/\$resource="agro-be11-\$runId"/);
   assert.ok(source.indexOf('docker logs $containerId')<source.indexOf('docker rm --force $containerId'));
   assert.match(source,/Select-Object Id,State,Mounts/);
   assert.match(source,/NetworkSettings\.Networks/);

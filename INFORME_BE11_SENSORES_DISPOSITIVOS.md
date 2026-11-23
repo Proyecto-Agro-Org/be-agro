@@ -65,7 +65,7 @@ Son namespaces candidatos para pruebas locales. No declaran nombres existentes e
 ## PROBADO
 
 - TypeScript estricto y ESM NodeNext: aprobado.
-- Regresión offline: 388/388 pruebas, incluidas las 374 previas, 8 del núcleo BE-11 y 6 regresiones del launcher.
+- Regresión offline: 390/390 pruebas, incluidas las 374 previas, 8 del núcleo BE-11 y 8 regresiones del launcher/guard.
 - Equivalencia HTTP: 13/13 escenarios.
 - `GET /health` sigue público.
 - Las rutas BE-10/BE-11 permanecen ausentes en la composición por defecto.
@@ -84,6 +84,8 @@ Son namespaces candidatos para pruebas locales. No declaran nombres existentes e
 8. El reloj de los dos procesos de M15 se alinea de forma determinista con el comando de carrera.
 9. El readiness ya no permite que el `stderr` transitorio de `mongosh` termine Windows PowerShell antes de evaluar el código de salida. Cada intento verifica además que el contenedor propio continúe ejecutándose.
 10. Ante un fallo definitivo o deadline, el launcher preserva estado, red, puertos, tmpfs y logs del contenedor antes de retirarlo.
+11. La ejecución `03d27dac3746472481c4f941` confirmó una incompatibilidad interna de nombres: el launcher creaba `agro-be11-<runId>` y el guard compartido exigía `agro-db02-<runId>`. El launcher quedó alineado con el contrato estricto del guard, sin relajar propiedad, red, loopback, mounts, tmpfs, imagen ni topología.
+12. Los rechazos de `validate-owned-docker` ahora se registran mediante categorías controladas por condición; mensajes arbitrarios, URI y objetos Docker completos continúan excluidos de la evidencia de fallo.
 
 ## PENDIENTE
 

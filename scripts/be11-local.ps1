@@ -7,7 +7,7 @@ if($env:DOCKER_HOST -and $env:DOCKER_HOST -notin @('npipe:////./pipe/docker_engi
 $context=docker context inspect|ConvertFrom-Json
 if($LASTEXITCODE -ne 0 -or $context.Endpoints.docker.Host -notin @('npipe:////./pipe/docker_engine','npipe:////./pipe/dockerDesktopLinuxEngine','unix:///var/run/docker.sock','unix:///run/docker.sock')){throw 'Local Docker context required'}
 if((docker info --format '{{.OSType}}') -ne 'linux'){throw 'Linux containers required'}
-$image='mongodb/mongodb-community-server:8.0-ubi8';$runId=[guid]::NewGuid().ToString('N').Substring(0,24);$resource="agro-be11-$runId";$containerId=$null;$networkCreated=$false;$launcherStage='initialize'
+$image='mongodb/mongodb-community-server:8.0-ubi8';$runId=[guid]::NewGuid().ToString('N').Substring(0,24);$resource="agro-db02-$runId";$containerId=$null;$networkCreated=$false;$launcherStage='initialize'
 $repositoryRoot=Resolve-Path (Join-Path $PSScriptRoot '..');$evidenceDirectory=Join-Path $repositoryRoot '.local-evidence';New-Item -ItemType Directory -Path $evidenceDirectory -Force|Out-Null
 $runLog=Join-Path $evidenceDirectory "be11-launcher-$runId.log";$launcherEvidence=Join-Path $evidenceDirectory "be11-launcher-$runId.json"
 $serverLog=Join-Path $evidenceDirectory "be11-mongodb-$runId.log";$containerEvidence=Join-Path $evidenceDirectory "be11-container-$runId.json"
