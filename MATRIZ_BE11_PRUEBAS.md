@@ -10,10 +10,10 @@
 | DTO | mappers explícitos sin campos Mongo/propiedad interna | APROBADO |
 | Modelos | sin DDL/conexión al importar; identidad lógica/física separada | APROBADO |
 | Aislamiento público | rutas BE-11 devuelven 404 en `createApp()` | APROBADO |
-| Regresión general | suite completa | 382/382 |
+| Regresión general | suite completa | 386/386 |
 | HTTP legacy | health, CORS, 404 y 500 contra base | 13/13 |
 
-Las 382 pruebas incluyen las 374 heredadas y 8 pruebas nuevas BE-11.
+Las 386 pruebas incluyen las 374 heredadas, 8 pruebas del núcleo BE-11 y 4 regresiones del launcher: clasificación sanitizada, errores hostiles, creación del directorio de evidencia y cronología válida de M06/M15.
 
 ## MongoDB real preparada
 
@@ -40,6 +40,13 @@ El arnés `scripts/be11-local.ps1` crea un contenedor MongoDB Community 8.0 ofic
 ### Bloqueo real
 
 Los comandos `docker version`, `docker info` y `docker ps` no pudieron comenzar: `docker` no existe en PATH, no se encontró `docker.exe` en la instalación estándar y tampoco existe el servicio `com.docker.service`. No se crearon contenedores, redes, volúmenes ni bases. Por ello no se informa versión MongoDB real ni se afirma aprobación transaccional.
+
+Una primera ejecución local externa llegó al runner pero falló antes de M06. La causa comprobada por inspección fue un fixture temporal inválido: la asociación se abría antes que la asignación sensor-área. No hubo evidencia de éxito. La siguiente ejecución generará, según corresponda:
+
+- `.local-evidence/be11-mongodb.json` para 15/15 aprobados;
+- `.local-evidence/be11-mongodb-failure.json` con etapa y categoría sanitizadas;
+- `.local-evidence/be11-launcher-<runId>.log` con la salida del runner;
+- `.local-evidence/be11-launcher-<runId>.json` con estado del launcher y limpieza.
 
 ## Condición de cierre
 

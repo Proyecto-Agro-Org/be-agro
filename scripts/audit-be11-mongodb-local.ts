@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { Connection } from 'mongoose';
 import { validateDb02Request, verifyOwnedDocker } from './agro-db02/guard.js';
@@ -10,9 +9,11 @@ import { provisionSensorCollections, sensorCollections } from '../src/models/sen
 import { createMongooseBusinessRepository } from '../src/repositories/business.repository.js';
 import { createMongooseSensorRepository } from '../src/repositories/sensor.repository.js';
 import { z } from 'zod';
+import { classifyBe11Failure, writeBe11Evidence } from './be11-diagnostics.js';
 
 const scope={realm:'test',clientId:'client-A'},other={realm:'test',clientId:'client-B'};
 const code=(expected:string|number)=>(error:unknown)=>typeof error==='object'&&error!==null&&'code'in error&&error.code===expected;
+let activeStage='bootstrap', activeRunId:string|undefined, latestResults:readonly {name:string;status:string}[]=[];
 async function processRace(command:{sensorId:string;physicalDeviceId:string;validFrom:number}){
   const environment=Object.fromEntries(Object.entries(process.env).filter(([key])=>/^(PATH|Path|SystemRoot|WINDIR|TEMP|TMP|HOME|USERPROFILE|DOCKER_HOST|DOCKER_CONTEXT|DOCKER_CONFIG|AGRO_DB02_.*)$/.test(key)));
   const children=[0,1].map(()=>fork(fileURLToPath(new URL('./be11-worker.js',import.meta.url)),[],{env:environment,execArgv:[],windowsHide:true,stdio:['ignore','ignore','ignore','ipc']}));
@@ -20,11 +21,12 @@ async function processRace(command:{sensorId:string;physicalDeviceId:string;vali
   try{return await Promise.race([new Promise<{pids:number[],winners:number}>((resolve,reject)=>{const outcomes:boolean[]=[];for(const child of children){child.on('error',reject);child.on('message',(input:unknown)=>{const parsed=messageSchema.safeParse(input);if(!parsed.success||parsed.data.pid!==child.pid)return reject(Error('BE11_CHILD_PROTOCOL'));if(parsed.data.status==='failed')return reject(Error('BE11_CHILD_FAILED'));if(parsed.data.status==='ready'){ready.add(child);if(ready.size===2)for(const item of children)item.send(command);}if(parsed.data.status==='done'){outcomes.push(parsed.data.won===true);if(outcomes.length===2)resolve({pids:children.map(c=>c.pid!),winners:outcomes.filter(Boolean).length});}});}}),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('BE11_CHILD_DEADLINE')),45000);})]);}finally{clearTimeout(timer);for(const child of children)if(child.exitCode===null)child.kill();}}
 
 async function main(){
-  const request=validateDb02Request(process.env);verifyOwnedDocker(request);if(request.topology!=='single-node-replica-set')throw Error('BE11_REQUIRES_REPLICA_SET');
+  activeStage='validate-owned-docker';const request=validateDb02Request(process.env);activeRunId=request.runId;verifyOwnedDocker(request);if(request.topology!=='single-node-replica-set')throw Error('BE11_REQUIRES_REPLICA_SET');
   const database='agro_db02_test_'+request.runId,results:{name:string;status:string}[]=[];let connection:Connection|undefined,second:Connection|undefined,owned=false,clock=Date.now();
-  const check=async(name:string,work:()=>Promise<void>)=>{try{await work();results.push({name,status:'passed'});console.log('PASS '+name);}catch(error){results.push({name,status:'failed'});throw error;}};
+  latestResults=results;const check=async(name:string,work:()=>Promise<void>)=>{activeStage=name;try{await work();results.push({name,status:'passed'});console.log('PASS '+name);}catch(error){results.push({name,status:'failed'});throw error;}};
   try{
-    connection=await connectOwned(request,database);const db=connection.db!;assert.equal((await db.listCollections().toArray()).length,0);owned=true;const build=await db.command({buildInfo:1});
+    activeStage='connect-and-inspect';connection=await connectOwned(request,database);const db=connection.db!;assert.equal((await db.listCollections().toArray()).length,0);owned=true;const build=await db.command({buildInfo:1});assert.equal(build.version,'8.0.38');
+    activeStage='provision-collections';
     await provisionBusinessCollections(connection,'agro_business_be11');await provisionSensorCollections(connection,'agro_sensors_be11','agro_business_be11');
     const sensorLayer=await createMongooseSensorRepository({connection,prefix:'agro_sensors_be11',businessPrefix:'agro_business_be11',now:()=>clock});
     const business=await createMongooseBusinessRepository({connection,prefix:'agro_business_be11',dependencies:sensorLayer.dependencies,now:()=>clock});
@@ -39,7 +41,7 @@ async function main(){
     await check('M04 unverified physical identity cannot be attributed',async()=>{await assert.rejects(sensorLayer.repository.createAssociation(scope,{sensorId:sensor.id,physicalDeviceId:unverified.id,validFrom:clock-1,auditReason:'must-fail'}),code('CONFLICT'));});
     const device=await sensorLayer.repository.createDevice(scope,{sourceId:'ingest-1',key:{kind:'mqtt-clientid',value:'edge-1'}},{status:'verified',authority:'fixture-authority'});
     await check('M05 technical identity is globally unique and does not equal business client',async()=>{assert.notEqual(device.key.value,scope.clientId);await assert.rejects(sensorLayer.repository.createDevice(other,{sourceId:'ingest-1',key:{kind:'mqtt-clientid',value:'edge-1'}},{status:'verified',authority:'fixture-authority'}),code('CONFLICT'));});
-    let association=await sensorLayer.repository.createAssociation(scope,{sensorId:sensor.id,physicalDeviceId:device.id,validFrom:clock-10,auditReason:'initial-link'});
+    activeStage='M06 setup initial association';let association=await sensorLayer.repository.createAssociation(scope,{sensorId:sensor.id,physicalDeviceId:device.id,validFrom:clock,auditReason:'initial-link'});
     await check('M06 association snapshot is scoped and half-open',async()=>{assert.equal(association.areaId,area.id);assert.equal(association.validTo,null);await assert.rejects(sensorLayer.repository.listAssociations(other,sensor.id),code('RESOURCE_NOT_FOUND'));});
     await check('M07 overlapping open association is rejected',async()=>{await assert.rejects(peer.createAssociation(scope,{sensorId:sensor.id,physicalDeviceId:device.id,validFrom:clock-5,auditReason:'overlap'}),code('CONFLICT'));});
     await check('M08 sensor CAS has exactly one winner',async()=>{const outcome=await Promise.allSettled([sensorLayer.repository.patchSensor(scope,sensor.id,{name:'A1',version:0}),peer.patchSensor(scope,sensor.id,{description:'B1',version:0})]);assert.equal(outcome.filter(x=>x.status==='fulfilled').length,1);assert.equal(outcome.filter(x=>x.status==='rejected'&&code('CONFLICT')(x.reason)).length,1);sensor=await sensorLayer.repository.getSensor(scope,sensor.id);});
@@ -54,9 +56,9 @@ async function main(){
     const emptyField=await business.createField(scope,{name:'Empty',description:null}),emptyArea=await business.createArea(scope,emptyField.id,{name:'Empty area',description:null});
     await check('M14 clear dependencies permit area deactivation and missing evidence fails closed',async()=>{await business.deactivateArea(scope,emptyField.id,emptyArea.id,0);const missing=businessCollections('agro_business_be11');await db.collection(sensorCollections('agro_sensors_be11','agro_business_be11').associations).dropIndex('association_id_unique');const f=await business.createField(scope,{name:'Unknown',description:null}),a=await business.createArea(scope,f.id,{name:'Unknown area',description:null});await assert.rejects(business.deactivateArea(scope,f.id,a.id,0),code('DEPENDENCY_UNAVAILABLE'));await db.collection(sensorCollections('agro_sensors_be11','agro_business_be11').associations).createIndex({realm:1,id:1},{unique:true,name:'association_id_unique',collation:{locale:'simple'}});assert.ok(missing.controls);});
     const raceSensor=await sensorLayer.repository.createSensor(scope,{fieldId:field.id,areaId:area.id,name:'Race sensor',description:null}),raceDevice=await sensorLayer.repository.createDevice(scope,{sourceId:'ingest-1',key:{kind:'device-id',value:'race-device'}},{status:'verified',authority:'fixture-authority'});
-    await check('M15 two operating-system processes produce one association winner',async()=>{const outcome=await processRace({sensorId:raceSensor.id,physicalDeviceId:raceDevice.id,validFrom:clock-1});assert.equal(outcome.winners,1);assert.equal(new Set(outcome.pids).size,2);});
+    await check('M15 two operating-system processes produce one association winner',async()=>{const outcome=await processRace({sensorId:raceSensor.id,physicalDeviceId:raceDevice.id,validFrom:clock});assert.equal(outcome.winners,1);assert.equal(new Set(outcome.pids).size,2);});
     const names=sensorCollections('agro_sensors_be11','agro_business_be11'),indexes=Object.fromEntries(await Promise.all([names.sensors,names.devices,names.assignments,names.associations,names.controls].map(async name=>[name,await db.collection(name).listIndexes().toArray()])));
-    writeFileSync('.local-evidence/be11-mongodb.json',JSON.stringify({mongoVersion:build.version,topology:request.topology,run:request.runId,results,indexes,limitations:['single-node replica set; no failover proof','synthetic data and trusted verification fixture','no Atlas, EMQX or production mapping']},null,2));
+    activeStage='write-success-evidence';writeBe11Evidence(process.cwd(),'be11-mongodb.json',{mongoVersion:build.version,topology:request.topology,run:request.runId,results,indexes,limitations:['single-node replica set; no failover proof','synthetic data and trusted verification fixture','no Atlas, EMQX or production mapping']});
   }finally{if(owned&&connection?.readyState===1){verifyOwnedDocker(request);await connection.db!.dropDatabase();}await second?.close();await connection?.close();console.log(JSON.stringify({event:'be11-summary',passed:results.filter(x=>x.status==='passed').length,failed:results.filter(x=>x.status==='failed').length}));}
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(error=>{console.error('BE11_LOCAL_FAILED',error instanceof Error?error.name:'UnknownError');process.exitCode=1;});
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(error=>{const failure=classifyBe11Failure(activeStage,error);writeBe11Evidence(process.cwd(),'be11-mongodb-failure.json',{run:activeRunId??null,failure,results:latestResults});console.error('BE11_LOCAL_FAILED '+JSON.stringify(failure));process.exitCode=1;});

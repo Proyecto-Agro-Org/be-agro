@@ -65,7 +65,7 @@ Son namespaces candidatos para pruebas locales. No declaran nombres existentes e
 ## PROBADO
 
 - TypeScript estricto y ESM NodeNext: aprobado.
-- Regresión offline: 382/382 pruebas, incluidas las 374 previas y 8 nuevas de BE-11.
+- Regresión offline: 386/386 pruebas, incluidas las 374 previas, 8 del núcleo BE-11 y 4 regresiones del launcher.
 - Equivalencia HTTP: 13/13 escenarios.
 - `GET /health` sigue público.
 - Las rutas BE-10/BE-11 permanecen ausentes en la composición por defecto.
@@ -79,6 +79,9 @@ Son namespaces candidatos para pruebas locales. No declaran nombres existentes e
 3. Una asociación no puede comenzar antes de la asignación sensor-área vigente.
 4. El inspector no bloquea por historia cerrada de un sensor ya descomisionado, pero sí por toda dependencia vigente.
 5. El refresco de verificación usa la identidad persistida y no una clave alternativa suministrada por el llamador.
+6. El fixture MongoDB intentaba abrir M06 antes de la vigencia sensor-área (`clock - 10`) y repetía el defecto en M15 (`clock - 1`). Ambos inicios ahora coinciden con la vigencia creada.
+7. El runner ocultaba el error original mostrando solo `Error`; ahora registra etapa y categoría sanitizadas, crea `.local-evidence` y conserva un log por ejecución.
+8. El reloj de los dos procesos de M15 se alinea de forma determinista con el comando de carrera.
 
 ## PENDIENTE
 
