@@ -29,6 +29,9 @@ const dockerFailureCategories: Readonly<Record<string, string>> = Object.freeze(
   DB02_NETWORK_INSPECT_SHAPE_MISMATCH: 'network-inspect-shape-mismatch',
   DB02_SHARED_OR_UNKNOWN_NETWORK: 'shared-or-unknown-network',
   DB02_NETWORK_POLICY_MISMATCH: 'network-policy-mismatch',
+  DB02_NETWORK_GATEWAY_MODE_MISMATCH: 'network-gateway-mode-mismatch',
+  DB02_NETWORK_HOST_BINDING_MISMATCH: 'network-host-binding-mismatch',
+  DB02_NETWORK_MASQUERADE_MISMATCH: 'network-masquerade-mismatch',
   DB02_EFFECTIVE_TMPFS_NOT_VERIFIED: 'effective-tmpfs-not-verified',
   DB02_LOCAL_DOCKER_INSPECTION_FAILED: 'local-docker-inspection-failed',
 });

@@ -72,6 +72,9 @@ test('BE11 launcher captures owned container diagnostics before removal',()=>{
   const source=readFileSync(new URL('../scripts/be11-local.ps1',import.meta.url),'utf8');
   assert.match(source,/\$resource="agro-db02-\$runId"/);
   assert.doesNotMatch(source,/\$resource="agro-be11-\$runId"/);
+  assert.match(source,/--opt com\.docker\.network\.bridge\.gateway_mode_ipv4=nat/);
+  assert.match(source,/--opt com\.docker\.network\.bridge\.host_binding_ipv4=127\.0\.0\.1/);
+  assert.match(source,/--opt com\.docker\.network\.bridge\.enable_ip_masquerade=false/);
   assert.ok(source.indexOf('docker logs $containerId')<source.indexOf('docker rm --force $containerId'));
   assert.match(source,/Select-Object Id,State,Mounts/);
   assert.match(source,/NetworkSettings\.Networks/);

@@ -65,7 +65,7 @@ Son namespaces candidatos para pruebas locales. No declaran nombres existentes e
 ## PROBADO
 
 - TypeScript estricto y ESM NodeNext: aprobado.
-- Regresión offline: 390/390 pruebas, incluidas las 374 previas, 8 del núcleo BE-11 y 8 regresiones del launcher/guard.
+- Regresión offline: 391/391 pruebas, incluidas las 374 previas, 8 del núcleo BE-11 y 9 regresiones del launcher/guard.
 - Equivalencia HTTP: 13/13 escenarios.
 - `GET /health` sigue público.
 - Las rutas BE-10/BE-11 permanecen ausentes en la composición por defecto.
@@ -86,6 +86,7 @@ Son namespaces candidatos para pruebas locales. No declaran nombres existentes e
 10. Ante un fallo definitivo o deadline, el launcher preserva estado, red, puertos, tmpfs y logs del contenedor antes de retirarlo.
 11. La ejecución `03d27dac3746472481c4f941` confirmó una incompatibilidad interna de nombres: el launcher creaba `agro-be11-<runId>` y el guard compartido exigía `agro-db02-<runId>`. El launcher quedó alineado con el contrato estricto del guard, sin relajar propiedad, red, loopback, mounts, tmpfs, imagen ni topología.
 12. Los rechazos de `validate-owned-docker` ahora se registran mediante categorías controladas por condición; mensajes arbitrarios, URI y objetos Docker completos continúan excluidos de la evidencia de fallo.
+13. La ejecución `96c95b43e997486ea5a74424` expuso que el guard exigía `gateway_mode_ipv4=nat`, pero el launcher dependía del valor predeterminado de Docker. El launcher ahora declara explícitamente las tres opciones verificadas de la red; el guard conserva el rechazo fail-closed y distingue cuál política falta.
 
 ## PENDIENTE
 

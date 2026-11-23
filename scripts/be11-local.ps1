@@ -16,7 +16,7 @@ try{
   $launcherStage='pull-official-image'
   docker pull $image|Out-Null;if($LASTEXITCODE -ne 0){throw 'Official MongoDB image unavailable'}
   $launcherStage='create-exclusive-network'
-  docker network create --driver bridge --opt com.docker.network.bridge.host_binding_ipv4=127.0.0.1 --opt com.docker.network.bridge.enable_ip_masquerade=false --label "agro.db02.run=$runId" $resource|Out-Null
+  docker network create --driver bridge --opt com.docker.network.bridge.gateway_mode_ipv4=nat --opt com.docker.network.bridge.host_binding_ipv4=127.0.0.1 --opt com.docker.network.bridge.enable_ip_masquerade=false --label "agro.db02.run=$runId" $resource|Out-Null
   if($LASTEXITCODE -ne 0){throw 'Dedicated network creation failed'};$networkCreated=$true
   $launcherStage='create-exclusive-container';$created=docker create --name $resource --label "agro.db02.run=$runId" --network $resource --publish "127.0.0.1:${Port}:27017" --memory 1536m --cpus 1 --tmpfs /data/db:rw,size=1024m,mode=1777 --tmpfs /data/configdb:rw,size=32m,mode=1777 $image --bind_ip_all --replSet agro_db02
   if($LASTEXITCODE -ne 0 -or $created -notmatch '^[a-f0-9]{64}$'){throw 'Container creation failed'};$containerId=$created.Trim();docker start $containerId|Out-Null

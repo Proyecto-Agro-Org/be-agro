@@ -74,6 +74,23 @@ function dockerText(args: string[]) {
   catch { throw new Error('DB02_LOCAL_DOCKER_INSPECTION_FAILED'); }
 }
 function docker(args: string[]) { return JSON.parse(dockerText(args)); }
+const networkSchema = z.object({ Driver: z.string(), Internal: z.boolean(), Options: z.record(z.string(), z.string()), Labels: z.record(z.string(), z.string()),
+  Containers: z.record(z.string(), z.unknown()) });
+export function validateOwnedNetwork(input: unknown, request: LocalRequest) {
+  const parsed = networkSchema.safeParse(input);
+  if (!parsed.success) throw new Error('DB02_NETWORK_INSPECT_SHAPE_MISMATCH');
+  const network = parsed.data;
+  if (network.Driver !== 'bridge' || network.Internal) throw new Error('DB02_NETWORK_IDENTITY_MISMATCH');
+  if (network.Labels['agro.db02.run'] !== request.runId) throw new Error('DB02_OWNERSHIP_LABEL_MISMATCH');
+  if (Object.keys(network.Containers).some(id => id !== request.container)) throw new Error('DB02_SHARED_OR_UNKNOWN_NETWORK');
+  if (network.Options['com.docker.network.bridge.gateway_mode_ipv4'] !== 'nat')
+    throw new Error('DB02_NETWORK_GATEWAY_MODE_MISMATCH');
+  if (network.Options['com.docker.network.bridge.host_binding_ipv4'] !== '127.0.0.1')
+    throw new Error('DB02_NETWORK_HOST_BINDING_MISMATCH');
+  if (network.Options['com.docker.network.bridge.enable_ip_masquerade'] !== 'false')
+    throw new Error('DB02_NETWORK_MASQUERADE_MISMATCH');
+  return network;
+}
 export function verifyOwnedDocker(request: LocalRequest) {
   if (process.env.DOCKER_HOST) localDockerEndpoint(process.env.DOCKER_HOST);
   const contexts = z.array(z.object({ Endpoints: z.object({ docker: z.object({ Host: z.string() }) }) })).length(1).parse(docker(['context', 'inspect']));
@@ -83,16 +100,9 @@ export function verifyOwnedDocker(request: LocalRequest) {
   const image = z.object({ Image: z.string() }).safeParse(containers[0]);
   if (!image.success || !/^sha256:[a-f0-9]{64}$/.test(image.data.Image)) throw new Error('DB02_IMAGE_IDENTITY_MISMATCH');
   const imageId = image.data.Image;
-  const networkResult = z.array(z.object({ Driver: z.string(), Internal: z.boolean(), Options: z.record(z.string(), z.string()), Labels: z.record(z.string(), z.string()),
-    Containers: z.record(z.string(), z.unknown()) })).length(1).safeParse(docker(['network', 'inspect', name]));
+  const networkResult = z.array(z.unknown()).length(1).safeParse(docker(['network', 'inspect', name]));
   if (!networkResult.success) throw new Error('DB02_NETWORK_INSPECT_SHAPE_MISMATCH');
-  const network = networkResult.data[0];
-  if (network.Driver !== 'bridge' || network.Internal) throw new Error('DB02_NETWORK_IDENTITY_MISMATCH');
-  if (network.Labels['agro.db02.run'] !== request.runId) throw new Error('DB02_OWNERSHIP_LABEL_MISMATCH');
-  if (Object.keys(network.Containers).some(id => id !== request.container)) throw new Error('DB02_SHARED_OR_UNKNOWN_NETWORK');
-  if (network.Options['com.docker.network.bridge.gateway_mode_ipv4'] !== 'nat' ||
-    network.Options['com.docker.network.bridge.host_binding_ipv4'] !== '127.0.0.1' ||
-    network.Options['com.docker.network.bridge.enable_ip_masquerade'] !== 'false') throw new Error('DB02_NETWORK_POLICY_MISMATCH');
+  const network = validateOwnedNetwork(networkResult.data[0], request);
   const mounts = dockerText(['exec', request.container, 'cat', '/proc/mounts']).trim().split('\n').map(line => line.split(/\s+/));
   for (const destination of ['/data/db', '/data/configdb']) {
     const selected = mounts.filter(fields => fields[1] === destination);

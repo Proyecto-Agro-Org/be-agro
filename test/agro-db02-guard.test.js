@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { validateDb02Request, validateDb02Database, db02Uri, localDockerEndpoint, validateOwnedContainer } from '../dist/scripts/agro-db02/guard.js';
+import { validateDb02Request, validateDb02Database, db02Uri, localDockerEndpoint, validateOwnedContainer, validateOwnedNetwork } from '../dist/scripts/agro-db02/guard.js';
 import { persistence } from '../dist/scripts/agro-db02/resources.js';
 
 const environment = { AGRO_DB02_ENABLE: 'AUTHORIZED_DISPOSABLE_DB02_ONLY', AGRO_DB02_RUN_ID: 'a'.repeat(24),
@@ -14,6 +14,11 @@ const container = () => ({ Id: environment.AGRO_DB02_CONTAINER, State: { Running
   Mounts: [{ Type: 'tmpfs', Destination: '/data/db' }, { Type: 'tmpfs', Destination: '/data/configdb' }],
   NetworkSettings: { Networks: { ['agro-db02-' + environment.AGRO_DB02_RUN_ID]: {} },
     Ports: { '27017/tcp': [{ HostIp: '127.0.0.1', HostPort: '27029' }] } } });
+const network = () => ({ Driver: 'bridge', Internal: false,
+  Options: { 'com.docker.network.bridge.gateway_mode_ipv4': 'nat',
+    'com.docker.network.bridge.host_binding_ipv4': '127.0.0.1',
+    'com.docker.network.bridge.enable_ip_masquerade': 'false' },
+  Labels: { 'agro.db02.run': environment.AGRO_DB02_RUN_ID }, Containers: { [environment.AGRO_DB02_CONTAINER]: {} } });
 
 test('DB02-G01 explicit opt-in and complete owned resource identity are required before any I/O', () => {
   assert.throws(() => validateDb02Request({}));
@@ -61,6 +66,13 @@ test('DB02-G05B ownership failures expose only a specific controlled diagnostic 
     const c = container(); mutate(c);
     assert.throws(() => validateOwnedContainer(c, request()), error => error instanceof Error && error.message === code);
   }
+});
+test('DB02-G05C network policy requires an explicit NAT gateway mode and all isolation options', () => {
+  const missingGateway = network();
+  delete missingGateway.Options['com.docker.network.bridge.gateway_mode_ipv4'];
+  assert.throws(() => validateOwnedNetwork(missingGateway, request()),
+    error => error instanceof Error && error.message === 'DB02_NETWORK_GATEWAY_MODE_MISMATCH');
+  assert.doesNotThrow(() => validateOwnedNetwork(network(), request()));
 });
 test('DB02-G06 public ports, remapped destinations, persistent mounts and privileged mode are rejected', () => {
   for (const mutate of [c => { c.HostConfig.PortBindings['27017/tcp'][0].HostIp = '0.0.0.0'; },
