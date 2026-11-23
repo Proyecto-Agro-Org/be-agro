@@ -23,7 +23,7 @@ BE-12 implementa un núcleo aislado para resolver identidades técnicas, atribui
 
 ## PROBADO
 
-- Regresión completa previa a R04: 415/415 pruebas offline y 13/13 escenarios HTTP equivalentes. La corrección R04 agrega regresiones de orden explícito y transferencia A→B→A; el total actualizado se registra en la matriz.
+- Regresión completa posterior a R04: 417/417 pruebas offline y 13/13 escenarios HTTP equivalentes.
 - Identidad válida/desconocida/duplicada.
 - Dispositivo no verificado, inactivo y descomisionado.
 - Asociación faltante, solapada y borde exacto `validTo`/`validFrom`.
@@ -32,13 +32,14 @@ BE-12 implementa un núcleo aislado para resolver identidades técnicas, atribui
 - Paginación, latest, filtros por sensor/dispositivo/área/campo y aislamiento multicliente.
 - Revocación durante lectura asíncrona.
 - Revalidación de dispositivo y revisión/ventana antes de emitir la atribución.
-- Regresión offline de transferencia A→B→A con límites exactos y consulta MongoDB ordenada explícitamente; la confirmación de R04 en MongoDB real requiere repetir la campaña R01–R10.
+- Transferencia A→B→A con límites exactos y consulta MongoDB ordenada explícitamente, confirmada por regresión offline y por R04 en MongoDB real.
+- Campaña local MongoDB 8.0.38 R01–R10 aprobada sobre un replica set de un nodo para el SHA `dc39a89f2734772bf6dd76a880b11504a28cb726`.
+- Índices de identidad, evento, sensor, dispositivo y área inspeccionados en la base descartable de la campaña.
 - Rutas BE-12 ausentes de la aplicación pública.
 - Sonda MongoDB sin autorización detenida antes de inspección Git o acceso a base.
 
 ## PENDIENTE
 
-- Ejecutar la campaña MongoDB real BE-12 desde Windows después del commit local.
 - Aprobar catálogo productivo de magnitud/unidad y transformaciones BE-04.
 - Aprobar reloj autoritativo/tolerancia para eventos tardíos.
 - Aprobar contrato físico y adapter Atlas.
@@ -55,4 +56,4 @@ BE-12 implementa un núcleo aislado para resolver identidades técnicas, atribui
 
 ## Seguridad y límites
 
-El snapshot histórico de una medición no se recalcula con la asociación actual. Todo evento queda en cuarentena con la política incluida hasta aprobar autoridad temporal; una política futura deberá aportar evidencia independiente. El adapter de consulta recibe siempre `realm` y `clientId` derivados de sesión; los filtros públicos no admiten expresiones MongoDB. La campaña real propuesta usa datos sintéticos, namespaces descartables y un replica set de un nodo, por lo que no demuestra failover.
+El snapshot histórico de una medición no se recalcula con la asociación actual. Todo evento queda en cuarentena con la política incluida hasta aprobar autoridad temporal; una política futura deberá aportar evidencia independiente. El adapter de consulta recibe siempre `realm` y `clientId` derivados de sesión; los filtros públicos no admiten expresiones MongoDB. La campaña real ejecutada usó datos sintéticos, namespaces descartables y un replica set de un nodo, por lo que no demuestra failover, Atlas, EMQX, hardware ni comportamiento productivo.

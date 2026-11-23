@@ -16,15 +16,21 @@
 | Regresión general | suite completa | 417/417 |
 | HTTP legacy | health, CORS, 404 y 500 | 13/13 |
 
-## MongoDB real preparada
+## MongoDB real validada
 
-La sonda `audit-be12-mongodb-local.ts` prepara diez casos R01–R10: versión/topología, índices, sensor, dispositivo, área/campo, paginación, transferencia histórica, evento tardío, evento duplicado y lecturas concurrentes aisladas. R04 usa explícitamente `attributedAt DESC, id DESC`; no depende del orden natural ni del índice elegido. La evidencia incluirá el SHA obtenido directamente de Git y exige árbol limpio.
+La campaña R01–R10 se ejecutó para `dc39a89f2734772bf6dd76a880b11504a28cb726` con MongoDB 8.0.38 y un replica set local de un nodo. Resultado: 10 aprobadas, 0 fallidas. Validó versión/topología, índices, sensor, dispositivo, área/campo, paginación, transferencia histórica, evento tardío, evento duplicado y lecturas concurrentes aisladas. R04 usa explícitamente `attributedAt DESC, id DESC`; no depende del orden natural ni del índice elegido.
 
-Comando pendiente desde CMD de Windows, después del commit:
+| Casos | Resultado |
+|---|---|
+| R01–R10 | 10/10 APROBADO |
+| Índices | identidad, evento, sensor, dispositivo y área presentes |
+| Limitación | un nodo; no prueba failover, Atlas ni Production |
+
+Comando reproducible desde CMD de Windows:
 
 ```bat
 cd /d "C:\Users\CamilaGonzález\be-agro\.local-consolidacion\dev"
 npm ci && npm run build && powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\be11-local.ps1" -Suite be12 -AuthorizeDisposable
 ```
 
-No se informa aprobación MongoDB hasta inspeccionar `.local-evidence/be12-mongodb.json`.
+La evidencia local `.local-evidence/be12-mongodb.json` fue inspeccionada y permanece excluida de Git.
