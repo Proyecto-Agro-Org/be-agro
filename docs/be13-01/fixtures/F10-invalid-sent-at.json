@@ -1,0 +1,1 @@
+{"version":1,"eventId":"synthetic-invalid-time-001","sentAt":"not-an-epoch","clientid":"synthetic-device-001","payload":{},"mqtt":{"topic":"synthetic/agro/device-001/telemetry","messageType":"telemetry","dataOrigin":"unknown"}}

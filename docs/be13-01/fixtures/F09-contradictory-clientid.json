@@ -1,0 +1,1 @@
+{"version":1,"eventId":"synthetic-conflict-001","sentAt":1795115607000,"clientid":"synthetic-device-001","payload":{"clientId":"synthetic-device-other"},"mqtt":{"topic":"synthetic/agro/device-001/telemetry","messageType":"telemetry","dataOrigin":"unknown"}}

@@ -1,0 +1,1 @@
+{"version":1,"eventId":"synthetic-status-001","sentAt":1795115601000,"clientid":"synthetic-device-001","deviceTimestamp":null,"payload":{"battery":80,"online":true},"mqtt":{"topic":null,"messageType":"device-status","dataOrigin":"unknown"}}
