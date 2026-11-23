@@ -15,38 +15,29 @@
 
 Las 391 pruebas incluyen las 374 heredadas, 8 pruebas del núcleo BE-11 y 9 regresiones del launcher/guard: clasificación sanitizada, errores hostiles, creación del directorio de evidencia, cronología válida de M06/M15, readiness acotado en Windows, captura de diagnóstico antes de limpiar, contrato de nombre de red, política explícita de red y códigos controlados para cada control de aislamiento.
 
-## MongoDB real preparada
+## MongoDB real ejecutada
 
 El arnés `scripts/be11-local.ps1` crea un contenedor MongoDB Community 8.0 oficial, red exclusiva, binding `127.0.0.1`, dos tmpfs, base/namespace únicos y replica set local de un nodo. Solo elimina recursos con la etiqueta exacta de la ejecución.
 
-| Caso | Cobertura | Estado de esta sesión |
+| Caso | Cobertura | Estado verificado |
 |---|---|---|
-| M01 | sensor + asignación inicial | NO EJECUTADO |
-| M02 | aislamiento cliente/jerarquía | NO EJECUTADO |
-| M03 | BSON e IDs únicos | NO EJECUTADO |
-| M04 | dispositivo no verificado | NO EJECUTADO |
-| M05 | identidad técnica única | NO EJECUTADO |
-| M06 | asociación half-open | NO EJECUTADO |
-| M07 | solapamiento | NO EJECUTADO |
-| M08 | CAS entre conexiones | NO EJECUTADO |
-| M09 | cierre/apertura atómicos | NO EJECUTADO |
-| M10 | historia preservada | NO EJECUTADO |
-| M11 | traslado implícito bloqueado | NO EJECUTADO |
-| M12 | área y descomisionamiento | NO EJECUTADO |
-| M13 | carrera con baja BE-10 | NO EJECUTADO |
-| M14 | `clear/unknown` fail-closed | NO EJECUTADO |
-| M15 | dos procesos asociando el mismo dispositivo | NO EJECUTADO |
+| M01 | sensor + asignación inicial | APROBADO |
+| M02 | aislamiento cliente/jerarquía | APROBADO |
+| M03 | BSON e IDs únicos | APROBADO |
+| M04 | dispositivo no verificado | APROBADO |
+| M05 | identidad técnica única | APROBADO |
+| M06 | asociación half-open | APROBADO |
+| M07 | solapamiento | APROBADO |
+| M08 | CAS entre conexiones | APROBADO |
+| M09 | cierre/apertura atómicos | APROBADO |
+| M10 | historia preservada | APROBADO |
+| M11 | traslado implícito bloqueado | APROBADO |
+| M12 | área y descomisionamiento | APROBADO |
+| M13 | carrera con baja BE-10 | APROBADO |
+| M14 | `clear/unknown` fail-closed | APROBADO |
+| M15 | dos procesos asociando el mismo dispositivo | APROBADO |
 
-### Bloqueo real
-
-Los comandos `docker version`, `docker info` y `docker ps` no pudieron comenzar: `docker` no existe en PATH, no se encontró `docker.exe` en la instalación estándar y tampoco existe el servicio `com.docker.service`. No se crearon contenedores, redes, volúmenes ni bases. Por ello no se informa versión MongoDB real ni se afirma aprobación transaccional.
-
-Una primera ejecución local externa llegó al runner pero falló antes de M06. La causa comprobada por inspección fue un fixture temporal inválido: la asociación se abría antes que la asignación sensor-área. No hubo evidencia de éxito. La siguiente ejecución generará, según corresponda:
-
-- `.local-evidence/be11-mongodb.json` para 15/15 aprobados;
-- `.local-evidence/be11-mongodb-failure.json` con etapa y categoría sanitizadas;
-- `.local-evidence/be11-launcher-<runId>.log` con la salida del runner;
-- `.local-evidence/be11-launcher-<runId>.json` con estado del launcher y limpieza.
+La evidencia local excluida de Git registra MongoDB 8.0.38, topología `single-node-replica-set`, `runId` `3369faf5f1f94f7ca1b2be55`, exactamente M01–M15 sin duplicados, 15 estados `passed`, los índices esperados en cinco namespaces y limpieza confirmada. El JSON fue generado después del commit `8bbd890b28ab5dee5b35cf88e24dee05836f98f7`; no contiene un campo SHA embebido, limitación registrada para futuras campañas.
 
 ## Condición de cierre
 
@@ -61,4 +52,4 @@ npm run typecheck
 git diff --check
 ```
 
-La campaña real debe producir 15/15 y confirmar limpieza de sus recursos. Un nodo no demuestra failover ni tolerancia a fallos distribuida.
+La campaña real produjo 15/15 y confirmó limpieza de sus recursos. Un nodo no demuestra failover ni tolerancia a fallos distribuida.

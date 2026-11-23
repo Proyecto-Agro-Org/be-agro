@@ -71,6 +71,9 @@ Son namespaces candidatos para pruebas locales. No declaran nombres existentes e
 - Las rutas BE-10/BE-11 permanecen ausentes en la composición por defecto.
 - No se agregaron dependencias.
 - La campaña MongoDB real quedó implementada en `scripts/audit-be11-mongodb-local.ts`, `scripts/be11-worker.ts` y `scripts/be11-local.ps1`.
+- Campaña MongoDB real: 15/15 casos aprobados sobre MongoDB 8.0.38 y replica set local descartable de un nodo (`runId` `3369faf5f1f94f7ca1b2be55`).
+- M15 confirmó un único ganador entre dos procesos independientes. M08/M09 confirmaron CAS y reasignación transaccional; M10/M12 confirmaron preservación del historial; M13/M14 confirmaron la integración fail-closed con dependencias BE-10.
+- Los cinco namespaces descartables expusieron los índices únicos, de paginación, cronología y dependencias previstos por el arnés.
 
 ## DEFECTOS CORREGIDOS EN LA AUDITORÍA
 
@@ -95,7 +98,7 @@ Son namespaces candidatos para pruebas locales. No declaran nombres existentes e
 - Aprobar reloj autoritativo operativo; la implementación aislada usa una marca temporal explícita validada contra el reloj de control inyectado.
 - Aprobar la cardinalidad máxima de dispositivos diferentes simultáneos por sensor.
 - Aprobar autoridad y proceso real de verificación de hardware/EMQX.
-- Ejecutar la campaña MongoDB real en Docker Desktop. En esta sesión `docker` no está instalado ni disponible, por lo que no se ejecutaron ni se inventaron resultados.
+- Incorporar el SHA del código en futuras evidencias automáticas. La evidencia actual fue generada tres minutos después del commit validado con HEAD y árbol limpios, pero el JSON no incluye un campo SHA propio.
 
 ## BLOQUEADO
 
@@ -113,4 +116,4 @@ Son namespaces candidatos para pruebas locales. No declaran nombres existentes e
 
 ## Recomendación
 
-El código está listo para revisión local y commit. La integración en `dev` debe exigir ejecución satisfactoria de la campaña MongoDB 8.0.38 y aprobación de que los contratos siguen aislados de la composición pública.
+BE-11 está listo para revisión e integración controlada en `dev`: la campaña MongoDB 8.0.38 aprobó 15/15, la regresión offline aprobó 391/391 y los contratos continúan aislados de la composición pública. Esto no habilita Atlas, EMQX, hardware real, rutas HTTP ni tolerancia a fallos.
