@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import type { Connection } from 'mongoose';
+import type { Collection, Document } from 'mongodb';
 import { validateDb02Request, verifyOwnedDocker } from './agro-db02/guard.js';
 import { connectOwned } from './agro-db02/resources.js';
 import { classifyBe11Failure, writeBe11Evidence } from './be11-diagnostics.js';
@@ -13,6 +14,9 @@ function validatedGitSha(){
   if(status.trim())throw Error('BE12_GIT_TREE_NOT_CLEAN');
   const sha=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
   if(!/^[a-f0-9]{40}$/.test(sha))throw Error('BE12_GIT_SHA_INVALID');return sha;
+}
+export async function readOrderedDeviceHistory(rows:Pick<Collection<Document>,'find'>,scope:{realm:string;clientId:string;physicalDeviceId:string}){
+  return rows.find(scope).sort({attributedAt:-1,id:-1}).project({_id:0,id:1,clientId:1}).toArray();
 }
 async function main(){
   stage='validate-owned-docker';const request=validateDb02Request(process.env);run=request.runId;verifyOwnedDocker(request);
@@ -33,7 +37,7 @@ async function main(){
     await check('R01 version, replica set and owned database',async()=>{assert.equal(build.version,'8.0.38');assert.equal((await db.admin().command({hello:1})).setName,'agro_db02');});
     await check('R02 required indexes exist',async()=>{const names=(await rows.listIndexes().toArray()).map(x=>x.name);for(const name of ['measurement_id_unique','measurement_event_unique','measurement_sensor_history','measurement_device_history','measurement_area_history'])assert.ok(names.includes(name));});
     await check('R03 sensor history is tenant scoped',async()=>{assert.deepEqual((await rows.find({realm:'test',clientId:'client-a',sensorId:'sensor-a'}).sort({attributedAt:-1,id:-1}).toArray()).map(x=>x.id),['a2','a1']);});
-    await check('R04 physical device history remains tenant scoped after transfer',async()=>{assert.deepEqual((await rows.find({realm:'test',clientId:'client-b',physicalDeviceId:'device-shared'}).toArray()).map(x=>x.id),['b1','b2']);});
+    await check('R04 physical device history remains tenant scoped after transfer',async()=>{const history=await readOrderedDeviceHistory(rows,{realm:'test',clientId:'client-b',physicalDeviceId:'device-shared'});assert.ok(history.every(x=>x.clientId==='client-b'));assert.deepEqual(history.map(x=>x.id),['b2','b1']);});
     await check('R05 area and field filters do not cross clients',async()=>{assert.equal(await rows.countDocuments({realm:'test',clientId:'client-a',fieldId:'field-client-a',areaId:'area-client-a'}),2);assert.equal(await rows.countDocuments({realm:'test',clientId:'client-a',fieldId:'field-client-b'}),0);});
     await check('R06 deterministic pagination uses attributedAt and id',async()=>{const first=await rows.find({realm:'test',clientId:'client-b'}).sort({attributedAt:-1,id:-1}).limit(1).toArray();const cursor=first[0];const second=await rows.find({realm:'test',clientId:'client-b',$or:[{attributedAt:{$lt:cursor.attributedAt}},{attributedAt:cursor.attributedAt,id:{$lt:cursor.id}}]}).sort({attributedAt:-1,id:-1}).limit(1).toArray();assert.deepEqual([cursor.id,second[0].id],['b2','b1']);});
     await check('R07 historical ownership is preserved across reassignment',async()=>{assert.equal(await rows.countDocuments({clientId:'client-a',associationId:'association-a'}),2);assert.equal(await rows.countDocuments({clientId:'client-b',associationId:'association-b'}),2);});

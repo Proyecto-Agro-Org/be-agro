@@ -23,7 +23,7 @@ BE-12 implementa un núcleo aislado para resolver identidades técnicas, atribui
 
 ## PROBADO
 
-- Regresión completa: 415/415 pruebas offline y 13/13 escenarios HTTP equivalentes.
+- Regresión completa previa a R04: 415/415 pruebas offline y 13/13 escenarios HTTP equivalentes. La corrección R04 agrega regresiones de orden explícito y transferencia A→B→A; el total actualizado se registra en la matriz.
 - Identidad válida/desconocida/duplicada.
 - Dispositivo no verificado, inactivo y descomisionado.
 - Asociación faltante, solapada y borde exacto `validTo`/`validFrom`.
@@ -32,6 +32,7 @@ BE-12 implementa un núcleo aislado para resolver identidades técnicas, atribui
 - Paginación, latest, filtros por sensor/dispositivo/área/campo y aislamiento multicliente.
 - Revocación durante lectura asíncrona.
 - Revalidación de dispositivo y revisión/ventana antes de emitir la atribución.
+- Regresión offline de transferencia A→B→A con límites exactos y consulta MongoDB ordenada explícitamente; la confirmación de R04 en MongoDB real requiere repetir la campaña R01–R10.
 - Rutas BE-12 ausentes de la aplicación pública.
 - Sonda MongoDB sin autorización detenida antes de inspección Git o acceso a base.
 
