@@ -1,4 +1,4 @@
-param([ValidateRange(1024,65535)][int]$Port=27059,[switch]$AuthorizeDisposable)
+param([ValidateRange(1024,65535)][int]$Port=27059,[switch]$AuthorizeDisposable,[ValidateSet('be11','be12')][string]$Suite='be11')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'be11-readiness.ps1')
 if(-not $AuthorizeDisposable){throw 'Explicit -AuthorizeDisposable is required'}
@@ -9,8 +9,8 @@ if($LASTEXITCODE -ne 0 -or $context.Endpoints.docker.Host -notin @('npipe:////./
 if((docker info --format '{{.OSType}}') -ne 'linux'){throw 'Linux containers required'}
 $image='mongodb/mongodb-community-server:8.0-ubi8';$runId=[guid]::NewGuid().ToString('N').Substring(0,24);$resource="agro-db02-$runId";$containerId=$null;$networkCreated=$false;$launcherStage='initialize'
 $repositoryRoot=Resolve-Path (Join-Path $PSScriptRoot '..');$evidenceDirectory=Join-Path $repositoryRoot '.local-evidence';New-Item -ItemType Directory -Path $evidenceDirectory -Force|Out-Null
-$runLog=Join-Path $evidenceDirectory "be11-launcher-$runId.log";$launcherEvidence=Join-Path $evidenceDirectory "be11-launcher-$runId.json"
-$serverLog=Join-Path $evidenceDirectory "be11-mongodb-$runId.log";$containerEvidence=Join-Path $evidenceDirectory "be11-container-$runId.json"
+$runLog=Join-Path $evidenceDirectory "$Suite-launcher-$runId.log";$launcherEvidence=Join-Path $evidenceDirectory "$Suite-launcher-$runId.json"
+$serverLog=Join-Path $evidenceDirectory "$Suite-mongodb-$runId.log";$containerEvidence=Join-Path $evidenceDirectory "$Suite-container-$runId.json"
 $keys=@('AGRO_DB02_ENABLE','AGRO_DB02_RUN_ID','AGRO_DB02_CONTAINER','AGRO_DB02_PORT','AGRO_DB02_TOPOLOGY');$saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 try{
   $launcherStage='pull-official-image'
@@ -27,7 +27,8 @@ try{
   if($replicaSetExit -ne 0){throw 'Replica set initialization failed'}
   $launcherStage='wait-primary';$null=Wait-Be11MongoProbe -ContainerId $containerId -JavaScript 'quit(db.hello().isWritablePrimary?0:1)' -MaximumAttempts 30 -IntervalMilliseconds 1000 -DeadlineMessage 'Primary readiness deadline'
   $env:AGRO_DB02_ENABLE='AUTHORIZED_DISPOSABLE_DB02_ONLY';$env:AGRO_DB02_RUN_ID=$runId;$env:AGRO_DB02_CONTAINER=$containerId;$env:AGRO_DB02_PORT=[string]$Port;$env:AGRO_DB02_TOPOLOGY='single-node-replica-set'
-  $launcherStage='execute-be11-suite';Push-Location $repositoryRoot;try{& node dist/scripts/audit-be11-mongodb-local.js 2>&1|Tee-Object -FilePath $runLog;$nodeExit=$LASTEXITCODE;if($nodeExit -ne 0){throw 'BE11 MongoDB suite failed'}}finally{Pop-Location}
+  $runner=if($Suite -eq 'be12'){'dist/scripts/audit-be12-mongodb-local.js'}else{'dist/scripts/audit-be11-mongodb-local.js'}
+  $launcherStage="execute-$Suite-suite";Push-Location $repositoryRoot;try{& node $runner 2>&1|Tee-Object -FilePath $runLog;$nodeExit=$LASTEXITCODE;if($nodeExit -ne 0){throw "$Suite MongoDB suite failed"}}finally{Pop-Location}
   $launcherStage='suite-complete'
 }catch{
   @{runId=$runId;stage=$launcherStage;status='failed';errorClass=$_.Exception.GetType().Name;log=$runLog;serverLog=$serverLog;containerEvidence=$containerEvidence}|ConvertTo-Json|Set-Content -Encoding UTF8 -LiteralPath $launcherEvidence

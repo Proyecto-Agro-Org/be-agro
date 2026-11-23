@@ -79,3 +79,11 @@ test('BE11 launcher captures owned container diagnostics before removal',()=>{
   assert.match(source,/Select-Object Id,State,Mounts/);
   assert.match(source,/NetworkSettings\.Networks/);
 });
+
+test('BE11 launcher selects only fixed BE11 or BE12 audit runners',()=>{
+  const source=readFileSync(new URL('../scripts/be11-local.ps1',import.meta.url),'utf8');
+  assert.match(source,/ValidateSet\('be11','be12'\)/);
+  assert.match(source,/dist\/scripts\/audit-be12-mongodb-local\.js/);
+  assert.match(source,/dist\/scripts\/audit-be11-mongodb-local\.js/);
+  assert.doesNotMatch(source,/& node ["']?\$Suite/);
+});
