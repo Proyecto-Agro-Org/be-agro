@@ -8,6 +8,7 @@ import type {
 } from './protected-ingest.contracts.js';
 import { protectedIngestDocumentSchema, type ProtectedIngestDocument } from './protected-ingest.schemas.js';
 import { isIssuedIngestProvenanceAuthority } from './ingest-provenance.authority.js';
+import { registerIssuedCandidate } from './protected-candidate.registry.js';
 
 const hasOwn = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 const quarantined = (reason: ProtectedIngestQuarantineCode): ProtectedIngestMapResult => Object.freeze({ status: 'quarantined', reason });
@@ -118,7 +119,7 @@ export function createProtectedIngestMapper(authority: IngestProvenanceAuthority
         }),
         eligibleForMeasurementMapping: operation === 'telemetry',
       };
-      return Object.freeze(candidate);
+      return registerIssuedCandidate(Object.freeze(candidate));
     } catch { return quarantined('internal-error'); }
   }
 
