@@ -16,7 +16,7 @@ $context=docker context inspect|ConvertFrom-Json
 if($LASTEXITCODE -ne 0 -or $context.Endpoints.docker.Host -notin $localEndpoints){throw 'Local Docker context required'}
 if((docker info --format '{{.OSType}}') -ne 'linux'){throw 'Linux containers required'}
 $ports=@($BasePort,($BasePort+1),($BasePort+2))
-foreach($p in $ports){if(Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue){throw "Port $p already in use"}}
+foreach($p in $ports){if(Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue){throw "Port $p already in use"}}
 $image='mongodb/mongodb-community-server:8.0-ubi8';$runId=[guid]::NewGuid().ToString('N').Substring(0,24);$resource="agro-mn-$runId"
 $holderId=$null;$nodeIds=@();$networkCreated=$false;$stage='initialize'
 $repositoryRoot=Resolve-Path (Join-Path $PSScriptRoot '..');$evidenceDirectory=Join-Path $repositoryRoot '.local-evidence';New-Item -ItemType Directory -Path $evidenceDirectory -Force|Out-Null
