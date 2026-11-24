@@ -32,6 +32,9 @@ function keys(value,result=[]){if(!plain(value))return result;for(const [key,nes
 test('BE13-01 catalogue is complete, unique and never labels synthetic data as real',()=>{
   assert.equal(manifest.length,14);assert.equal(new Set(manifest.map(row=>row.id)).size,14);
   assert.deepEqual([...new Set(manifest.map(row=>row.classification))].sort(),['OBSERVADO_EN_CODIGO','SINTETICO']);
+  assert.equal(manifest.filter(row=>row.classification==='SINTETICO').length,12);
+  assert.equal(manifest.filter(row=>row.classification==='OBSERVADO_EN_CODIGO').length,2);
+  assert.equal(manifest.some(row=>/REAL|SANITIZADO/.test(row.classification)),false);
   for(const row of manifest){assert.match(row.id,/^F\d{2}$/);assert.ok(row.source.includes(':'));assert.ok(Array.isArray(row.limitations));read(row.id);}
 });
 
@@ -69,4 +72,9 @@ test('BE13-01 deep sleep and unknown magnitude stay blocked before BE12 attribut
 
 test('BE13-01 legacy examples remain explicitly separate from the protected contract',()=>{
   for(const id of ['F13','F14']){assert.equal(protectedEnvelope(read(id)),false);assert.equal(manifest.find(row=>row.id===id).classification,'OBSERVADO_EN_CODIGO');}
+});
+
+test('BE13-01 fixtures cannot masquerade as a complete BE12 TrustedMeasurementEvent',()=>{
+  const required=['eventId','sourceId','device','receivedAt','declaredAt','persistedAt','magnitude','unit','value','missingReason','provenance','simulated','metadata'];
+  for(const row of manifest){const fixture=read(row.id);assert.equal(required.every(key=>Object.hasOwn(fixture,key)),false,row.id);}
 });

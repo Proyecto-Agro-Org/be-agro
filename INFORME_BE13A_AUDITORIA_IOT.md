@@ -6,7 +6,7 @@ La cadena `Hardware → EMQX → iot-ingest → MongoDB → be-agro → fe-agro`
 
 - `iot-ingest` productivo conserva una PoC legacy que acepta cuerpos flexibles y persiste sin autenticación del servicio ni atribución empresarial.
 - La rama local AGRO-IOT-01 contiene un modo protegido, probado pero deliberadamente no montado, con autenticación del servicio EMQX, replay/idempotencia, procedencia explícita y almacenamiento técnico.
-- BE-11 está integrado en `dev` y BE-12 está publicado separadamente; modelan identidad física, asociaciones temporales, atribución histórica y aislamiento empresarial, pero no consumen documentos de `iot-ingest` ni están montados públicamente.
+- BE-11 y BE-12 están integrados en `dev` mediante los PR #20 y #21; modelan identidad física, asociaciones temporales, atribución histórica y aislamiento empresarial, pero no consumen documentos de `iot-ingest` ni están montados públicamente.
 - `fe-agro` funciona principalmente con MSW y espera DTOs centrados en `device_id`, `campo_id` y respuestas agregadas que todavía no coinciden con los DTOs aislados BE-11/BE-12.
 
 La primera implementación recomendada es un contrato y mapper puro, offline, que transforme un documento técnico protegido de ingesta en un candidato validado para `TrustedMeasurementEvent`, sin conceder identidad física, cliente ni autoridad temporal. No debe activarse ningún endpoint ni conexión real durante esa tarea.
@@ -15,8 +15,8 @@ La primera implementación recomendada es un contrato y mapper puro, offline, qu
 
 | Repositorio | Ruta | Rama / SHA | Estado observado |
 |---|---|---|---|
-| be-agro, worktree documental | `be-agro/.local-consolidacion/be13a` | `docs/be13a-auditoria-integracion` / base `a40d9b32f14bb8a7d9c3117f67d87452efd4ef31` | limpio al crear; basado en `origin/dev`, contiene BE-11 |
-| be-agro, BE-12 | `be-agro/.local-consolidacion/dev` | `feature/be12-mediciones-historicos` / `cadf36a3156c5bb23196b772ae899033a126cbc1` | BE-12 publicado en PR #21; no modificado |
+| be-agro, consolidación BE-13R | `be-agro/.local-consolidacion/be13-consolidacion` | `feature/be13-01-consolidacion` / base `6a30be4374e68f655ef31fbb69286f4b5ab48178` | recupera BE-13A y BE13-01 sobre `dev` con BE-12 integrado |
+| be-agro, worktrees documentales originales | `be-agro/.local-consolidacion/be13a` y `be13-01` | `881375631be499817686add6cea8b8e4bcc80401` y `43e7a73c6a43da8d471fb51aeb6d3cdbcdfdb123` | preservados sin cambios |
 | be-agro principal | `be-agro` | `feature/be-09-autenticacion-analisis` / `63c7eb20882e1e63e9ed03e2b6afa0a91e124afc` | contiene trabajo local sin seguimiento; preservado |
 | iot-ingest | `C:/Users/CamilaGonzález/iot-ingest` | `feature/agro-iot-01-seguridad-ingesta` / `b99e30ba3c9b66bb61147347a3805e6f8db7db46` | limpio; sin modificaciones |
 | fe-agro | `C:/Users/CamilaGonzález/fe-agro` | `dev` / `daa72a828eb79aad0f09dcb7786a2c5a4adfd3bc` | limpio; sin modificaciones |
@@ -97,7 +97,7 @@ React 19, Vite, TypeScript, MSW y servicios API por pantalla. `src/main.tsx:9-15
 ## Pruebas ejecutadas
 
 - `iot-ingest`: 24/24 offline aprobadas; no se repitió MongoDB real. La documentación registra 12/12 locales previas.
-- `be-agro` BE-12: 417/417 offline aprobadas; evidencia previa R01–R10 10/10 y BE-11 M01–M15 15/15.
+- `be-agro` antes de incorporar la suite documental BE13-01: 417/417 offline aprobadas; evidencia previa R01–R10 10/10 y BE-11 M01–M15 15/15. El total reconciliado se registra en `INFORME_BE13R_CONSOLIDACION.md`.
 - `fe-agro`: una primera ejecución completa falló de forma intermitente en recuperación de token mock; la prueba focalizada aprobó 19/19 y la repetición completa aprobó 321/321. No se modificó el frontend.
 - No se ejecutaron Docker, Atlas, EMQX, Vercel ni hardware.
 

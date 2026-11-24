@@ -93,7 +93,7 @@ Los fixtures usan exclusivamente nombres `synthetic-*`. No contienen claves, tok
 - Ausencia de credenciales y autoridad empresarial en fixtures positivos.
 - Deep sleep y magnitud desconocida permanecen bloqueados para BE-12.
 - Suite documental BE13-01: 7/7 aprobadas.
-- Suite completa de `be-agro` sobre la base BE-11 más los fixtures: 398/398 aprobadas; typecheck y build aprobados. Las dependencias se restauraron desde lockfile con `npm ci --offline`.
+- En la creación original, la suite sobre BE-11 más los fixtures aprobó 398/398. La reconciliación sobre `dev` con BE-12 integrado y su total actual se registran en `INFORME_BE13R_CONSOLIDACION.md`.
 - `iot-ingest`: 24/24 pruebas offline aprobadas.
 - `fe-agro`: 321/321 pruebas offline aprobadas.
 - `git diff --check`: aprobado. No se ejecutaron MongoDB real, Docker ni servicios externos.

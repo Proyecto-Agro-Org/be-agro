@@ -1,5 +1,7 @@
 # BE-13 — Plan incremental de integración
 
+Base reconciliada: `dev` en `6a30be4374e68f655ef31fbb69286f4b5ab48178`, con BE-11 y BE-12 integrados. Este plan conserva estados propuestos; no aprueba contratos productivos ni habilita conexiones externas.
+
 Ninguna tarea de este plan fue implementada durante BE-13A.
 
 | ID | Objetivo | Repo | Dependencias | Riesgo | Pruebas y aceptación | Offline | Aprobación externa |

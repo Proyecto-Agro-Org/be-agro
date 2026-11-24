@@ -60,6 +60,8 @@ declaredAt|null, persistedAt, rawPayload, provenanceEvidence
 
 Todavía no puede producir `TrustedMeasurementEvent` completo porque faltan reglas aprobadas para extraer magnitud/unidad/valor, procedencia física y reloj. La implementación inicial debe devolver un resultado discriminado `candidate | quarantined`, sin inventar esos campos.
 
+El candidato no es un subtipo ni una versión parcial aceptable de `TrustedMeasurementEvent`. Para cruzar la frontera BE-12 debe existir un mapper posterior que construya y valide exactamente `eventId`, `sourceId`, `device`, `receivedAt`, `declaredAt`, `persistedAt`, `magnitude`, `unit`, `value`, `missingReason`, `provenance`, `simulated` y `metadata`. Mientras cualquiera de esas autoridades falte, el resultado permanece en cuarentena y no se invoca el servicio de atribución.
+
 ## Evidencia requerida para aprobación
 
 - Fixtures sanitizados de EMQX para telemetría, estado, conexión, desconexión y reintento.
