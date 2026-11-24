@@ -142,3 +142,54 @@ export function createInMemoryPersistence(calls = []) {
     },
   };
 }
+
+// ---------------------------------------------------------------- BE13-08 synthetic doubles (TEST_ONLY)
+// Bounded retry policy: maxAttempts is a TEST_ONLY number, not an SLO.
+export function createTestOnlyRetryPolicy(maxAttempts = 3, calls = []) {
+  return { decide(input) { calls.push(['retry:decide', input]); return input.attempt < maxAttempts ? { action: 'retry' } : { action: 'stop' }; } };
+}
+// Deterministic scheduler: records waits, never sleeps.
+export function createDeterministicScheduler(calls = []) {
+  return { waits: [], async wait(input) { calls.push(['retry:wait', input]); this.waits.push(input); } };
+}
+// Recovery over the in-memory persistence fake (same semantics as the Mongo recovery).
+export function createInMemoryRecovery(persistence, calls = []) {
+  const id = k => JSON.stringify([k.realm, k.sourceId, k.operation, k.eventId, k.field]);
+  return {
+    async inspect(k) {
+      calls.push(['recovery:inspect', k]);
+      const claim = persistence.claims.get(id(k));
+      const measurement = claim ? persistence.measurements.get(claim.measurementId) : [...persistence.measurements.values()].find(m => id(m.key) === id(k));
+      if (!claim && !measurement) return { realm: k.realm, state: 'not-committed' };
+      if (claim && !measurement) return { realm: k.realm, state: 'inconsistent', inconsistency: 'orphan-claim' };
+      if (!claim && measurement) return { realm: k.realm, state: 'inconsistent', inconsistency: 'orphan-measurement' };
+      if (claim.fingerprint !== measurement.fingerprint) return { realm: k.realm, state: 'inconsistent', inconsistency: 'fingerprint-mismatch' };
+      return { realm: k.realm, state: 'committed', measurementId: claim.measurementId, fingerprint: claim.fingerprint };
+    },
+  };
+}
+// In-memory quarantine store with the same dedupe key, state machine and audit semantics.
+export async function createInMemoryQuarantine(realm = REALM) {
+  const { quarantineIdFor } = await import('../dist/src/repositories/mongo-ingestion-quarantine.store.js');
+  const { initialQuarantineStatus, isTransitionAllowed } = await import('../dist/src/iot/ingestion-failure-classification.js');
+  const rows = new Map(); let clock = 0;
+  return {
+    rows,
+    async record(entry) {
+      if (entry.realm !== realm) throw new Error('QUARANTINE_REALM_MISMATCH');
+      const quarantineId = quarantineIdFor(entry); const now = ++clock;
+      const row = rows.get(quarantineId) ?? { ...structuredClone(entry), quarantineId, status: initialQuarantineStatus(entry.retryClass), attemptCount: 0, firstSeenAt: now, audit: [] };
+      row.attemptCount += 1; row.lastSeenAt = now; row.audit.push({ action: 'recorded', at: now, outcome: entry.reasonCode, reasonCode: entry.reasonCode, evidence: null });
+      rows.set(quarantineId, row);
+      return { realm, quarantineId, status: row.status, attemptCount: row.attemptCount };
+    },
+    async get(id) { const r = rows.get(id); return r && r.realm === realm ? structuredClone(r) : null; },
+    async transition({ quarantineId, from, to, evidence, outcome }) {
+      const r = rows.get(quarantineId); if (!r || r.realm !== realm) return 'not-found';
+      if (r.status !== from) return 'stale';
+      if (!isTransitionAllowed(from, to, r.retryClass) || (from === 'BLOCKED' && to === 'RETRYABLE' && !evidence)) return 'not-allowed';
+      r.status = to; r.audit.push({ action: 'transition', at: ++clock, outcome, reasonCode: null, evidence }); return 'transitioned';
+    },
+    async appendAudit(id, entry) { const r = rows.get(id); if (!r || r.realm !== realm) return false; r.audit.push({ ...entry, at: ++clock }); return true; },
+  };
+}

@@ -4,7 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMeasurementIngestionRoot, describeIngestionRootReadiness } from '../dist/src/services/measurement-ingestion-root.js';
 import { createProductionPlaceholders, isBlockingPlaceholder } from '../dist/src/adapters/ingestion-production-placeholders.js';
-import { protectedDocument, device, association, world, createInMemoryPersistence, deepFrozen } from '../test-support/be13-composition.fixtures.js';
+import { protectedDocument, device, association, world, createInMemoryPersistence, deepFrozen, createTestOnlyRetryPolicy, createDeterministicScheduler,
+  createInMemoryRecovery, createInMemoryQuarantine } from '../test-support/be13-composition.fixtures.js';
 
 const ACK = Object.freeze({ mode: 'current-state-only', limitation: 'DEVICE_STATUS_HISTORY_REQUIRED' });
 // Synthetic provenance verifier: the evidence object itself carries the descriptor (test only).
@@ -196,8 +197,14 @@ test('Readiness: all production placeholders → BLOCKED per dependency; the def
   for (const value of [placeholders.hardware, placeholders.policies.clock, placeholders.be12, placeholders.provenanceVerifier]) assert.equal(isBlockingPlaceholder(value), true);
 });
 
-test('Readiness: synthetic doubles → READY_FOR_TEST; missing → MISSING; contains no secrets', () => {
-  const { deps } = syntheticRoot();
+test('Readiness: synthetic doubles → READY_FOR_TEST; missing → MISSING; contains no secrets', async () => {
+  const { deps: base } = syntheticRoot();
+  // BE13-08: the base pipeline alone is no longer READY_FOR_TEST — retry, recovery and quarantine are reported separately.
+  const baseOnly = describeIngestionRootReadiness(base);
+  assert.deepEqual([baseOnly.overall, baseOnly.dependencies.retryPolicy, baseOnly.dependencies.retryScheduler, baseOnly.dependencies.recovery,
+    baseOnly.dependencies.quarantine], ['BLOCKED', 'MISSING', 'MISSING', 'MISSING', 'MISSING']);
+  const deps = { ...base, retryPolicy: createTestOnlyRetryPolicy(), retryScheduler: createDeterministicScheduler(),
+    recovery: createInMemoryRecovery(base.persistence), quarantine: await createInMemoryQuarantine() };
   assert.equal(describeIngestionRootReadiness(deps).overall, 'READY_FOR_TEST');
   for (const input of [deps, null, { ...deps, ...P() }]) assert.equal(describeIngestionRootReadiness(input).productionReady, false, 'READY_FOR_TEST is never production readiness');
   const missing = describeIngestionRootReadiness({ ...deps, persistence: undefined, deviceStatusHistory: undefined });

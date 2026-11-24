@@ -32,8 +32,9 @@ test('V1 no production module imports test-support; placeholders export only blo
     // Real imports only (static, dynamic, require); comments that mention the folder are fine.
     assert.equal(/(from\s*['"][^'"]*test-support|import\s*\(\s*['"`][^'"`]*test-support|require\s*\(\s*['"][^'"]*test-support)/.test(readFileSync(file, 'utf8')), false, file);
   }
-  assert.deepEqual(Object.keys(placeholdersModule).sort(), ['createBlockingBe12Authorities', 'createBlockingProvenanceVerifier', 'createProductionPlaceholders', 'isBlockingPlaceholder']);
-  assert.deepEqual(Object.keys(rootModule).sort(), ['createMeasurementIngestionRoot', 'describeIngestionRootReadiness']);
+  assert.deepEqual(Object.keys(placeholdersModule).sort(), ['createBlockingBe12Authorities', 'createBlockingProvenanceVerifier', 'createBlockingRetryPolicy',
+    'createBlockingRetryScheduler', 'createProductionPlaceholders', 'isBlockingPlaceholder']);
+  assert.deepEqual(Object.keys(rootModule).sort(), ['createMeasurementIngestionRoot', 'createResilientMeasurementIngestionRoot', 'describeIngestionRootReadiness']);
 });
 
 test('V2 no environment-variable permissive mode exists', async () => {

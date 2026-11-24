@@ -36,7 +36,11 @@ test('MN launcher: closed chaos actions, loopback publishing, ownership labels a
   assert.match(launcher, /"127\.0\.0\.1:\$\{p\}:\$\{p\}"/);
   assert.match(launcher, /--network "container:\$holderId"/);
   assert.match(launcher, /Owned resource cleanup unconfirmed/);
-  assert.match(launcher, /& node 'dist\/scripts\/audit-be13-07-multinode-local\.js'/);
+  // Closed list of runners with literal paths; the suite name never becomes part of a path.
+  assert.match(launcher, /ValidateSet\('be13-07','be13-08'\)/);
+  assert.match(launcher, /'be13-08'\{'dist\/scripts\/audit-be13-08-multinode-local\.js'\}default\{'dist\/scripts\/audit-be13-07-multinode-local\.js'\}/);
+  assert.match(launcher, /& node \$runner/);
+  assert.doesNotMatch(launcher, /& node ["']?\$Suite/);
   assert.doesNotMatch(launcher, /--privileged|-v |--volume|mongodb\+srv/);
   const guard = readFileSync(new URL('../scripts/be13-07/guard.ts', import.meta.url), 'utf8');
   assert.match(guard, /action: 'stop' \| 'start' \| 'pause' \| 'unpause'/);
