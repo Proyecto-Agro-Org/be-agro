@@ -46,3 +46,15 @@ Sin dependencias nuevas. Se usa el driver incluido en `mongoose` 9.12.2 (`mongoo
 ## Validaciones
 
 Offline 687/687 · Mongo real 27/27 ×2 · HTTP 13/13 · typecheck/build/diff-check OK.
+
+## Revisión final pre-publicación
+
+| ID | Severidad | Hallazgo | Evidencia | Corrección | Estado |
+| --- | --- | --- | --- | --- | --- |
+| T6 | MEDIO (defensa en profundidad) | El `$jsonSchema` de mediciones aceptaba 15 violaciones del contrato BE-12: `NaN`/`±Infinity` en `value`, `value=null` sin `missingReason`, `0` con `missingReason`, épocas infinitas o fraccionarias, `persistedAt < receivedAt`, `simulated` incoherente con `provenance`, `metadata` anidada, revisión fraccionaria, realm/`eventId`/`sourceId` distintos entre nivel superior y anidado. El código valida con Zod antes de escribir; solo escrituras que eludan el repositorio podían persistirlas. | A06 contra MongoDB 8.0.38 (`acceptedInvalid` con 15 casos) | Rangos finitos, épocas enteras `[0, 8.64e15]`, revisiones enteras, `metadata` escalar (≤ 20), `$expr` con invariantes cruzados BE-12 y coherencia de clave | CORREGIDO (A06: 0 aceptados, 0 válidos rechazados, ×2) |
+
+Planes ganadores (A07 + M01/M04): lookup de claim por `_id` → `FETCH > IXSCAN _id_`; claim por clave → `idempotency_key_unique`; medición por clave → `measurement_key_unique`; dispositivo → `device_technical_identity_unique`; asociación → `device_timeline_unique` con `realm` en los límites.
+
+Launcher `be11-local.ps1`: lista cerrada (`ValidateSet` + `switch` con rutas literales), `$Port` con rango, sin argumentos arbitrarios hacia `node`, guards BE-11 sin cambios, limpieza confirmada por etiqueta de propiedad. Observación preexistente: la suite no tiene timeout global en el launcher (solo readiness y carreras).
+
+Campaña tras la corrección: **29/29 en dos ejecuciones** (`67d0726`).

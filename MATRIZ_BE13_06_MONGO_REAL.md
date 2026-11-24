@@ -2,7 +2,7 @@
 
 Ejecución: `scripts/be11-local.ps1 -AuthorizeDisposable -Suite be13-06 -Port 27069` → contenedor `mongodb/mongodb-community-server:8.0-ubi8` (MongoDB **8.0.38**), replica set `agro_db02` de un nodo, red bridge propia, publicación solo `127.0.0.1:27069`, tmpfs, base `agro_db02_test_<runId>` vacía y eliminada al final; limpieza de contenedor y red confirmada. Git SHA evaluado: `ede8202` (árbol limpio exigido por el runner).
 
-**Resultado: 27/27 en dos ejecuciones independientes.** Evidencia local (no versionada): `.local-evidence/be13-06-mongodb.json` y logs del launcher.
+**Resultado inicial: 27/27 en dos ejecuciones independientes (`ede8202`). Tras la revisión final (A06 validador, A07 planes) y la corrección del validador: 29/29 en dos ejecuciones (`67d0726`).** Evidencia local (no versionada): `.local-evidence/be13-06-mongodb.json` y logs del launcher.
 
 | ID | Escenario | Resultado |
 | --- | --- | --- |
@@ -47,3 +47,10 @@ Los segundos intentos son conflictos de escritura reales resueltos por reintento
 ## Verificación de mutación
 
 Con el claim ejecutado **fuera** de la transacción (mutación sobre `dist`, restaurado después), la campaña falló (10 PASS y luego FAIL en M11a): la pérdida de atomicidad es detectable.
+
+## Revisión final
+
+| ID | Escenario | Antes de la corrección | Después (×2) |
+| --- | --- | --- | --- |
+| A06 | Validador de mediciones frente a 18 violaciones y 4 documentos válidos | FAIL: 15 violaciones aceptadas | PASS: 0 aceptadas, 0 válidos rechazados |
+| A07 | Planes ganadores de idempotencia y mediciones | PASS | PASS |
