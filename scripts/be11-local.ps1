@@ -1,4 +1,4 @@
-param([ValidateRange(1024,65535)][int]$Port=27059,[switch]$AuthorizeDisposable,[ValidateSet('be11','be12')][string]$Suite='be11')
+param([ValidateRange(1024,65535)][int]$Port=27059,[switch]$AuthorizeDisposable,[ValidateSet('be11','be12','be13-06')][string]$Suite='be11')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'be11-readiness.ps1')
 if(-not $AuthorizeDisposable){throw 'Explicit -AuthorizeDisposable is required'}
@@ -27,7 +27,7 @@ try{
   if($replicaSetExit -ne 0){throw 'Replica set initialization failed'}
   $launcherStage='wait-primary';$null=Wait-Be11MongoProbe -ContainerId $containerId -JavaScript 'quit(db.hello().isWritablePrimary?0:1)' -MaximumAttempts 30 -IntervalMilliseconds 1000 -DeadlineMessage 'Primary readiness deadline'
   $env:AGRO_DB02_ENABLE='AUTHORIZED_DISPOSABLE_DB02_ONLY';$env:AGRO_DB02_RUN_ID=$runId;$env:AGRO_DB02_CONTAINER=$containerId;$env:AGRO_DB02_PORT=[string]$Port;$env:AGRO_DB02_TOPOLOGY='single-node-replica-set'
-  $runner=if($Suite -eq 'be12'){'dist/scripts/audit-be12-mongodb-local.js'}else{'dist/scripts/audit-be11-mongodb-local.js'}
+  $runner=switch($Suite){'be12'{'dist/scripts/audit-be12-mongodb-local.js'}'be13-06'{'dist/scripts/audit-be13-06-mongodb-local.js'}default{'dist/scripts/audit-be11-mongodb-local.js'}}
   $launcherStage="execute-$Suite-suite";Push-Location $repositoryRoot;try{& node $runner 2>&1|Tee-Object -FilePath $runLog;$nodeExit=$LASTEXITCODE;if($nodeExit -ne 0){throw "$Suite MongoDB suite failed"}}finally{Pop-Location}
   $launcherStage='suite-complete'
 }catch{

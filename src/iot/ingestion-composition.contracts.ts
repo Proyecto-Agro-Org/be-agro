@@ -172,3 +172,53 @@ export type CompositionResult = CompositionAccepted | CompositionDuplicate | Com
 export interface MeasurementIngestionComposition {
   ingest(candidate: ProtectedMeasurementCandidate, selection: { readonly field: string }): Promise<CompositionResult>;
 }
+
+// ---------------------------------------------------------------- BE13-06 persistence
+// Claim + measurement write in ONE transaction. A claim never survives a failed
+// write and a measurement is never written without its claim. The guarantee is
+// local to the store transaction; it is not global exactly-once delivery.
+export type PersistenceLookup =
+  | { readonly realm: TrustGateRealm; readonly status: 'absent' }
+  | { readonly realm: TrustGateRealm; readonly status: 'present'; readonly fingerprint: string; readonly measurementId: string };
+
+export type PersistenceOutcome =
+  | { readonly realm: TrustGateRealm; readonly status: 'persisted'; readonly measurementId: string }
+  | { readonly realm: TrustGateRealm; readonly status: 'duplicate'; readonly measurementId: string }
+  | { readonly realm: TrustGateRealm; readonly status: 'conflict' };
+
+export interface PersistMeasurementInput {
+  readonly key: IdempotencyKey;
+  readonly fingerprint: string;
+  readonly event: TrustedMeasurementEvent;
+  readonly attribution: CompositionAttribution;
+}
+
+export interface MeasurementPersistencePort {
+  lookup(key: IdempotencyKey): Promise<PersistenceLookup>;
+  persistAtomically(input: PersistMeasurementInput): Promise<PersistenceOutcome>;
+}
+
+export interface PersistentMeasurementIngestionDependencies extends Omit<MeasurementIngestionDependencies, 'idempotency'> {
+  readonly persistence: MeasurementPersistencePort;
+}
+
+export interface PersistentCompositionAccepted extends Omit<CompositionAccepted, 'persisted'> {
+  readonly persisted: true;
+  readonly measurementId: string;
+}
+
+export interface PersistentCompositionDuplicate extends CompositionDuplicate {
+  // Present when the store returns the reference of the already persisted measurement.
+  readonly measurementId: string | null;
+}
+
+export type PersistentCompositionQuarantineCode = CompositionQuarantineCode | 'persistence-unavailable';
+export interface PersistentCompositionQuarantined extends Omit<CompositionQuarantined, 'reason'> {
+  readonly reason: PersistentCompositionQuarantineCode;
+}
+
+export type PersistentCompositionResult = PersistentCompositionAccepted | PersistentCompositionDuplicate | PersistentCompositionQuarantined;
+
+export interface PersistentMeasurementIngestionComposition {
+  ingest(candidate: ProtectedMeasurementCandidate, selection: { readonly field: string }): Promise<PersistentCompositionResult>;
+}
