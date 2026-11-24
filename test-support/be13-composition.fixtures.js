@@ -132,14 +132,18 @@ export function createInMemoryPersistence(calls = []) {
     claims, measurements,
     async lookup(k) { calls.push(['persist:lookup', k]); const c = claims.get(id(k));
       return c ? { realm: k.realm, status: 'present', fingerprint: c.fingerprint, measurementId: c.measurementId } : { realm: k.realm, status: 'absent' }; },
-    async persistAtomically(input) {
+    async persistAtomically(input, options) {
       calls.push(['persist:atomic', input]);
       const k = input.key, current = claims.get(id(k));
       if (current) return current.fingerprint === input.fingerprint ? { realm: k.realm, status: 'duplicate', measurementId: current.measurementId } : { realm: k.realm, status: 'conflict' };
+      // BE13-10B fence: evaluated right before the (synchronous) writes; not held → nothing is written.
+      if (options?.fence !== undefined && (await options.fence(null)) !== true) throw new Error('INGESTION_REPLAY_FENCE_STALE');
+      if (claims.has(id(k))) { const c = claims.get(id(k)); return c.fingerprint === input.fingerprint ? { realm: k.realm, status: 'duplicate', measurementId: c.measurementId } : { realm: k.realm, status: 'conflict' }; }
       const measurementId = mid(k);
       claims.set(id(k), { fingerprint: input.fingerprint, measurementId }); measurements.set(measurementId, structuredClone(input));
       return { realm: k.realm, status: 'persisted', measurementId };
     },
+    replayFencing: 'atomic',
   };
 }
 
@@ -172,7 +176,7 @@ export function createInMemoryRecovery(persistence, calls = []) {
 export async function createInMemoryQuarantine(realm = REALM) {
   const { quarantineIdFor } = await import('../dist/src/repositories/mongo-ingestion-quarantine.store.js');
   const { initialQuarantineStatus, isTransitionAllowed } = await import('../dist/src/iot/ingestion-failure-classification.js');
-  const rows = new Map(); let clock = 0;
+  const rows = new Map(); let clock = 0; const settleCalls = [];
   return {
     rows,
     async record(entry) {
@@ -183,16 +187,50 @@ export async function createInMemoryQuarantine(realm = REALM) {
       rows.set(quarantineId, row);
       return { realm, quarantineId, status: row.status, attemptCount: row.attemptCount };
     },
-    async get(id) { const r = rows.get(id); return r && r.realm === realm ? structuredClone(r) : null; },
+    async get(id) { const r = rows.get(id); return r && r.realm === realm ? { ...structuredClone(r), lease: r.lease ? { ...r.lease } : null } : null; },
     async transition({ quarantineId, from, to, evidence, outcome, expectedVersion }) {
+      if (from === 'REPLAYING' || to === 'REPLAYING') return 'not-allowed'; // BE13-10B: only the lease CAS touches REPLAYING
       const r = rows.get(quarantineId); if (!r || r.realm !== realm) return 'not-found';
       if (r.status !== from || (expectedVersion !== undefined && r.version !== expectedVersion)) return 'stale';
       if (!isTransitionAllowed(from, to, r.retryClass) || (from === 'BLOCKED' && to === 'RETRYABLE' && !evidence)) return 'not-allowed';
       r.status = to; r.version += 1; r.audit.push({ action: 'transition', at: ++clock, outcome, reasonCode: null, evidence }); return 'transitioned';
     },
+    // BE13-10B: same CAS semantics as the Mongo store; check-and-set is synchronous (single-threaded ⇒ atomic).
+    async acquireLease({ quarantineId, expectedVersion, ownerId, acquiredAt }) {
+      const r = rows.get(quarantineId); if (!r || r.realm !== realm) return { result: 'not-found' };
+      if (r.status !== 'RETRYABLE' || r.version !== expectedVersion) return { result: r.status === 'RETRYABLE' || r.status === 'REPLAYING' ? 'stale' : 'not-allowed' };
+      r.version += 1; r.status = 'REPLAYING'; r.lease = { ownerId, acquiredAt, token: r.version };
+      r.audit.push({ action: 'transition', at: ++clock, outcome: 'lease-acquired', reasonCode: null, evidence: null });
+      return { result: 'acquired', leaseToken: r.version };
+    },
+    async settleReplay({ quarantineId, holder, to, outcome, evidence, expectedVersion }, transaction) {
+      settleCalls.push({ quarantineId, holder, to, outcome, transaction: transaction === undefined ? 'none' : 'inside' });
+      if (holder.kind === 'unleased' && to === 'RETRYABLE') return 'not-allowed';
+      const r = rows.get(quarantineId); if (!r || r.realm !== realm) return 'stale';
+      if (expectedVersion !== undefined && r.version !== expectedVersion) return 'stale';
+      if (holder.kind === 'lease' ? (r.status !== 'REPLAYING' || r.lease?.ownerId !== holder.ownerId || r.lease?.token !== holder.leaseToken) : r.status !== 'RETRYABLE') return 'stale';
+      r.status = to; r.version += 1; delete r.lease;
+      r.audit.push({ action: 'transition', at: ++clock, outcome, reasonCode: null, evidence }); return 'transitioned';
+    },
+    settleCalls,
     async appendAudit(id, entry) { const r = rows.get(id); if (!r || r.realm !== realm) return false; r.audit.push({ ...entry, at: ++clock }); return true; },
     async summarize() { const m = new Map(); for (const r of rows.values()) if (r.realm === realm) { const k = JSON.stringify([r.status, r.reasonCode, r.retryClass]); m.set(k, (m.get(k) ?? 0) + 1); }
       return [...m].map(([k, count]) => { const [status, reasonCode, retryClass] = JSON.parse(k); return { status, reasonCode, retryClass, count }; }); },
+  };
+}
+
+// ---------------------------------------------------------------- BE13-10B synthetic lease governance (TEST_ONLY)
+// A controllable synthetic clock and a lease policy whose window is a TEST_ONLY number of synthetic units. Neither is a
+// proposal for production: the real duration and the real time authority are pending human decisions.
+export const TEST_ONLY_LEASE_WINDOW = 1_000;
+export function createSyntheticLeaseGovernance({ window = TEST_ONLY_LEASE_WINDOW, start = 10_000 } = {}) {
+  const clock = { at: start, trusted: true };
+  return {
+    clock,
+    timeAuthority: { async now({ realm }) { return clock.trusted ? { realm, status: 'trusted', at: clock.at, authorityRevision: 1 } : { realm, status: 'untrusted' }; } },
+    leasePolicy: { async evaluate({ realm, lease, now }) {
+      return { realm, status: now - lease.acquiredAt > window ? 'EXPIRED' : 'ACTIVE', recoveryByNonOwner: 'when-expired', policyRevision: 1 };
+    } },
   };
 }
 

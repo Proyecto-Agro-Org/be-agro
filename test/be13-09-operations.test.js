@@ -5,7 +5,7 @@ import { createIngestionOperationsBootstrap, describeOperationsReadiness, descri
 import { createDenyAllOperatorAuthorization, createUnconfiguredMetrics, createUnconfiguredAlerts, createProductionPlaceholders } from '../dist/src/adapters/ingestion-production-placeholders.js';
 import { sanitizeMetricLabels } from '../dist/src/iot/ingestion-observability.js';
 import { protectedDocument, world, createInMemoryPersistence, createTestOnlyRetryPolicy, createDeterministicScheduler, createInMemoryRecovery,
-  createInMemoryQuarantine, createInMemoryAudit, createSyntheticOperatorAuthority, createRecordingMetrics, createRecordingAlerts } from '../test-support/be13-composition.fixtures.js';
+  createInMemoryQuarantine, createInMemoryAudit, createSyntheticOperatorAuthority, createRecordingMetrics, createRecordingAlerts, createSyntheticLeaseGovernance } from '../test-support/be13-composition.fixtures.js';
 
 const ACK = { mode: 'current-state-only', limitation: 'DEVICE_STATUS_HISTORY_REQUIRED' };
 const verifier = { verify: e => (e && e.syntheticTestOnly === true ? { sourceId: e.sourceId, operation: 'telemetry', eventId: e.eventId, device: { kind: 'mqtt-clientid', value: e.clientid } } : null) };
@@ -23,14 +23,16 @@ async function setup({ extra = {}, down = false, maxAttempts = 1 } = {}) {
   const w = world();
   const persistence = createInMemoryPersistence(w.calls);
   let failing = down;
-  const flaky = { lookup: k => persistence.lookup(k), persistAtomically: async i => { if (failing) throw new Error('down'); return persistence.persistAtomically(i); } };
+  const flaky = { lookup: k => persistence.lookup(k), persistAtomically: async (i, o) => { if (failing) throw new Error('down'); return persistence.persistAtomically(i, o); }, replayFencing: 'atomic' };
   const quarantine = await createInMemoryQuarantine(), audit = createInMemoryAudit(), metrics = createRecordingMetrics(), alerts = createRecordingAlerts();
+  const lease = createSyntheticLeaseGovernance();
   const deps = { realmAuthority: { authorizedRealm: () => 'test' }, provenanceVerifier: verifier, hardware: w.deps.hardware, temporal: w.deps.temporal, catalogue: w.deps.catalogue,
     policies: w.deps.policies, identityStore: w.deps.identityStore, persistence: flaky,
     be12: { temporal: { select: async e => ({ status: 'trusted', at: e.receivedAt, clock: 'received-at' }) }, catalogue: { accepts: async () => true } },
     deviceStatusHistory: ACK, retryPolicy: createTestOnlyRetryPolicy(maxAttempts), retryScheduler: createDeterministicScheduler(), recovery: createInMemoryRecovery(persistence),
-    quarantine, authorization: createSyntheticOperatorAuthority(operators), audit, metrics, alerts, retention: { mode: 'retain-indefinitely' }, ...extra };
-  return { w, persistence, quarantine, audit, metrics, alerts, deps, boot: createIngestionOperationsBootstrap(deps), fix: () => { failing = false; }, breakIt: () => { failing = true; } };
+    quarantine, authorization: createSyntheticOperatorAuthority(operators), audit, metrics, alerts, retention: { mode: 'retain-indefinitely' },
+    timeAuthority: lease.timeAuthority, leasePolicy: lease.leasePolicy, ...extra };
+  return { w, persistence, quarantine, audit, metrics, alerts, deps, lease, boot: createIngestionOperationsBootstrap(deps), fix: () => { failing = false; }, breakIt: () => { failing = true; } };
 }
 async function retryableEntry(opts = {}) {
   const s = await setup({ down: true, ...opts });
@@ -85,9 +87,10 @@ test('O02/O04 authorized replay: lease → pipeline → RESOLVED; audit in stric
   const r = await s.boot.operations.replay(admin, replayInput(s));
   assert.deepEqual([r.status, r.quarantineStatus, r.replay.outcome.status, r.auditComplete], ['done', 'RESOLVED', 'accepted', true]);
   const trail = await s.audit.listForQuarantine(s.q.quarantineId, 50);
-  assert.deepEqual(trail.map(a => a.action), ['quarantine-created', 'replay-requested', 'replay-started', 'replay-result']);
-  assert.deepEqual(trail.map(a => a.sequence), [1, 2, 3, 4]);
-  assert.deepEqual(trail.filter(a => a.actorId === 'op-admin').length, 3);
+  // BE13-10B adds 'lease-acquired' (owner = the authorized principal) between the request and the start.
+  assert.deepEqual(trail.map(a => a.action), ['quarantine-created', 'replay-requested', 'lease-acquired', 'replay-started', 'replay-result']);
+  assert.deepEqual(trail.map(a => a.sequence), [1, 2, 3, 4, 5]);
+  assert.deepEqual(trail.filter(a => a.actorId === 'op-admin').length, 4);
   assert.ok(trail.every(a => !JSON.stringify(a).includes('temperature')), 'no payload in audit');
 });
 
@@ -172,13 +175,20 @@ test('O18 audit failure blocks administrative actions (fail-closed) without chan
   assert.equal(s.persistence.measurements.size, 0);
 });
 
-test('Lease release: a stuck REPLAYING entry is released only with QUARANTINE_REPLAY and evidence', async () => {
+test('Lease release (BE13-10B): only the OWNER releases its active lease; REPLAYING cannot be entered by a generic transition', async () => {
   const s = await retryableEntry();
-  await s.quarantine.transition({ quarantineId: s.q.quarantineId, from: 'RETRYABLE', to: 'REPLAYING', expectedVersion: s.version, evidence: 'crash', outcome: 'replay-started' });
+  // The generic transition can no longer create an ownerless REPLAYING entry.
+  assert.equal(await s.quarantine.transition({ quarantineId: s.q.quarantineId, from: 'RETRYABLE', to: 'REPLAYING', expectedVersion: s.version, evidence: 'crash', outcome: 'x' }), 'not-allowed');
+  // A replay of op-admin that "crashed" while holding the lease (taken through the lease CAS, as the service does).
+  const acquired = await s.quarantine.acquireLease({ quarantineId: s.q.quarantineId, expectedVersion: s.version, ownerId: 'op-admin', acquiredAt: s.lease.clock.at });
+  assert.equal(acquired.result, 'acquired');
   const v = (await s.quarantine.get(s.q.quarantineId)).version;
-  assert.equal((await s.boot.operations.discard(admin, { quarantineId: s.q.quarantineId, expectedVersion: v, evidence: ev('operator-decision') })).reason, 'transition-not-allowed');
-  assert.equal((await s.boot.operations.releaseLease(viewer, { quarantineId: s.q.quarantineId, expectedVersion: v, evidence: ev('operator-decision') })).reason, 'forbidden');
-  assert.equal((await s.boot.operations.releaseLease(admin, { quarantineId: s.q.quarantineId, expectedVersion: v, evidence: ev('operator-decision') })).quarantineStatus, 'RETRYABLE');
+  const input = { quarantineId: s.q.quarantineId, expectedVersion: v, evidence: ev('operator-decision') };
+  assert.equal((await s.boot.operations.discard(admin, input)).reason, 'transition-not-allowed');
+  assert.equal((await s.boot.operations.releaseLease(viewer, input)).reason, 'forbidden');
+  assert.equal((await s.boot.operations.releaseLease({ token: 'tok-replayer' }, input)).reason, 'lease-owned-by-another-operator');
+  assert.equal((await s.boot.operations.releaseLease(admin, input)).quarantineStatus, 'RETRYABLE');
+  assert.equal((await s.quarantine.get(s.q.quarantineId)).lease, null);
 });
 
 test('O19/O20 metrics are emitted with bounded labels; a failing metrics adapter never alters results', async () => {

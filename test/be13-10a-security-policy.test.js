@@ -6,7 +6,7 @@ import { createOperationsSecurityPolicyBundle, describeSecurityPolicyReadiness }
 import { createBlockingSecurityPolicies, isBlockingPlaceholder } from '../dist/src/adapters/ingestion-production-placeholders.js';
 import { createIngestionOperationsBootstrap } from '../dist/src/services/ingestion-operations.service.js';
 import { protectedDocument, world, createInMemoryPersistence, createTestOnlyRetryPolicy, createDeterministicScheduler, createInMemoryRecovery,
-  createInMemoryQuarantine, createInMemoryAudit, createRecordingMetrics, createRecordingAlerts } from '../test-support/be13-composition.fixtures.js';
+  createInMemoryQuarantine, createInMemoryAudit, createRecordingMetrics, createRecordingAlerts, createSyntheticLeaseGovernance } from '../test-support/be13-composition.fixtures.js';
 import { syntheticPolicies, createInMemoryLeaseStore, QID } from '../test-support/be13-10a-policy.fixtures.js';
 
 const bundleWith = (overrides = {}) => { const p = syntheticPolicies(overrides); return { ...p, bundle: createOperationsSecurityPolicyBundle(p.deps) }; };
@@ -345,15 +345,16 @@ test('Integration: bundle.authorization is a drop-in OperatorAuthorizationPort f
   const w = world();
   const persistence = createInMemoryPersistence(w.calls);
   let failing = true;
-  const flaky = { lookup: k => persistence.lookup(k), persistAtomically: async i => { if (failing) throw new Error('down'); return persistence.persistAtomically(i); } };
+  const flaky = { lookup: k => persistence.lookup(k), persistAtomically: async (i, o) => { if (failing) throw new Error('down'); return persistence.persistAtomically(i, o); }, replayFencing: 'atomic' };
   const quarantine = await createInMemoryQuarantine(), audit = createInMemoryAudit();
+  const lease = createSyntheticLeaseGovernance();
   const verifier = { verify: e => (e && e.syntheticTestOnly === true ? { sourceId: e.sourceId, operation: 'telemetry', eventId: e.eventId, device: { kind: 'mqtt-clientid', value: e.clientid } } : null) };
   const boot = createIngestionOperationsBootstrap({ realmAuthority: { authorizedRealm: () => 'test' }, provenanceVerifier: verifier, hardware: w.deps.hardware, temporal: w.deps.temporal,
     catalogue: w.deps.catalogue, policies: w.deps.policies, identityStore: w.deps.identityStore, persistence: flaky,
     be12: { temporal: { select: async e => ({ status: 'trusted', at: e.receivedAt, clock: 'received-at' }) }, catalogue: { accepts: async () => true } },
     deviceStatusHistory: { mode: 'current-state-only', limitation: 'DEVICE_STATUS_HISTORY_REQUIRED' }, retryPolicy: createTestOnlyRetryPolicy(1), retryScheduler: createDeterministicScheduler(),
     recovery: createInMemoryRecovery(persistence), quarantine, authorization: bundle.authorization, audit, metrics: createRecordingMetrics(), alerts: createRecordingAlerts(),
-    retention: { mode: 'retain-indefinitely' } });
+    retention: { mode: 'retain-indefinitely' }, timeAuthority: lease.timeAuthority, leasePolicy: lease.leasePolicy });
   const doc = protectedDocument();
   const evidence = { syntheticTestOnly: true, sourceId: doc.sourceId, eventId: doc.eventId, clientid: doc.clientid };
   const q = await boot.ingest(doc, evidence, { field: 'temperature' });

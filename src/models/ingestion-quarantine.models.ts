@@ -15,7 +15,14 @@ const code = { bsonType: 'string', pattern: '^[a-z][a-z0-9-]{1,63}$' };
 const hexOrNull = { anyOf: [{ bsonType: 'string', pattern: '^[0-9a-f]{64}$' }, { bsonType: 'null' }] };
 const status = { enum: ['OPEN', 'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED'] };
 
-export const quarantineValidator = { $jsonSchema: { bsonType: 'object', additionalProperties: false,
+// BE13-10B: `lease` exists IFF status is REPLAYING (`$expr` below); owner/date/token are typed.
+const lease = { bsonType: 'object', additionalProperties: false, required: ['ownerId', 'acquiredAt', 'token'], properties: {
+  ownerId: { bsonType: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9:_./-]+$' },
+  acquiredAt: { bsonType: 'date' },
+  token: { bsonType: ['int', 'long'], minimum: 1, maximum: 9_007_199_254_740_991 } } };
+export const quarantineLeaseCoherence = { $eq: [{ $eq: ['$status', 'REPLAYING'] }, { $eq: [{ $type: '$lease' }, 'object'] }] };
+
+export const quarantineValidator = { $expr: quarantineLeaseCoherence, $jsonSchema: { bsonType: 'object', additionalProperties: false,
   required: ['_id', 'realm', 'stage', 'sourceId', 'operation', 'eventId', 'field', 'device', 'reasonCode', 'cause', 'retryClass', 'fingerprint',
     'documentDigest', 'status', 'version', 'attemptCount', 'firstSeenAt', 'lastSeenAt', 'createdAt', 'updatedAt', 'audit'],
   properties: {
@@ -34,6 +41,7 @@ export const quarantineValidator = { $jsonSchema: { bsonType: 'object', addition
     audit: { bsonType: 'array', maxItems: 100, items: { bsonType: 'object', additionalProperties: false, required: ['action', 'at', 'outcome', 'reasonCode', 'evidence'],
       properties: { action: { enum: ['recorded', 'transition', 'replay'] }, at: { bsonType: 'date' }, outcome: code, reasonCode: { anyOf: [code, { bsonType: 'null' }] },
         evidence: { anyOf: [{ bsonType: 'string', minLength: 1, maxLength: 256, pattern: '^[A-Za-z0-9:_./-]+$' }, { bsonType: 'null' }] } } } },
+    lease,
   } } };
 
 // Indexes (justified):
@@ -44,6 +52,19 @@ export const quarantineIndexes = [
   { key: { realm: 1, status: 1, updatedAt: 1 }, name: 'quarantine_realm_status' },
   { key: { realm: 1, eventId: 1 }, name: 'quarantine_realm_event' },
 ] as const;
+
+// BE13-10B — LOCAL validator upgrade for an existing BE13-08/09 quarantine collection. Order: (1) deploy code that
+// writes/reads `lease`; (2) run this; (3) run tests; (4) existing data. BE13-08/09 documents without `lease` stay valid
+// in every status except REPLAYING. A REPLAYING document WITHOUT a lease has no provable owner: the upgrade refuses to
+// run (fail-closed) and reports how many exist; resolving them is an explicit operator decision, never automatic.
+export async function upgradeQuarantineValidatorBe1310b(connection: Connection, prefix: string) {
+  const name = quarantineCollection(prefix), db = connection.db;
+  if (!db || (await db.listCollections({ name }).toArray()).length !== 1) throw new TypeError('Existing quarantine namespace required');
+  const orphanReplaying = await db.collection(name).countDocuments({ status: 'REPLAYING', lease: { $exists: false } }, { readConcern: { level: 'majority' } } as never);
+  if (orphanReplaying > 0) return Object.freeze({ status: 'blocked' as const, orphanReplaying });
+  await db.command({ collMod: name, validator: quarantineValidator, validationLevel: 'strict', validationAction: 'error' });
+  return Object.freeze({ status: 'upgraded' as const, orphanReplaying: 0 });
+}
 
 export async function provisionQuarantineCollection(connection: Connection, prefix: string) {
   const name = quarantineCollection(prefix), db = connection.db;

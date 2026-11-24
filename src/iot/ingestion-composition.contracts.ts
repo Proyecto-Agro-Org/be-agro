@@ -195,8 +195,13 @@ export interface PersistMeasurementInput {
 
 export interface MeasurementPersistencePort {
   lookup(key: IdempotencyKey): Promise<PersistenceLookup>;
-  persistAtomically(input: PersistMeasurementInput): Promise<PersistenceOutcome>;
+  // BE13-10B: `fence` runs INSIDE the same atomic unit as the claim + measurement writes, receiving the opaque transaction.
+  // Anything but `true` aborts the unit: nothing is written.
+  persistAtomically(input: PersistMeasurementInput, options?: PersistenceWriteOptions): Promise<PersistenceOutcome>;
+  // BE13-10B: explicit declaration that `options.fence` is honoured atomically. Replays refuse adapters without it.
+  readonly replayFencing?: 'atomic';
 }
+export interface PersistenceWriteOptions { readonly fence?: (transaction: unknown) => Promise<boolean> }
 
 export interface PersistentMeasurementIngestionDependencies extends Omit<MeasurementIngestionDependencies, 'idempotency'> {
   readonly persistence: MeasurementPersistencePort;

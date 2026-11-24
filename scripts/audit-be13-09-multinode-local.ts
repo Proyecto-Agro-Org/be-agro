@@ -75,8 +75,10 @@ async function main() {
 
     const realPersistence = createMongoMeasurementPersistence({ connection, prefix: INGEST, realm: 'test' });
     let down = new Set<string>();
+    // BE13-10B: the wrapper forwards the replay fence and declares atomic fencing (the real adapter honours it).
     const persistence: MeasurementPersistencePort = { lookup: k => realPersistence.lookup(k),
-      async persistAtomically(i) { if (down.has(i.key.eventId)) throw new Error('dependency down'); return realPersistence.persistAtomically(i); } };
+      async persistAtomically(i, o) { if (down.has(i.key.eventId)) throw new Error('dependency down'); return realPersistence.persistAtomically(i, o); },
+      replayFencing: 'atomic' };
     const quarantine = createMongoIngestionQuarantineStore({ connection, prefix: INGEST, realm: 'test' });
     const audit = createMongoIngestionAuditStore({ connection, prefix: INGEST, realm: 'test' });
     const metricsEvents: { name: string; labels: object }[] = [], alertEvents: object[] = [];
@@ -102,6 +104,9 @@ async function main() {
       recovery: createMongoPersistenceRecovery({ connection, prefix: INGEST, realm: 'test' }), quarantine, authorization, audit,
       metrics: { increment: (name: string, labels: object) => { metricsEvents.push({ name, labels }); } }, alerts: { emit: (e: object) => { alertEvents.push(e); } },
       retention: { mode: 'retain-indefinitely' as const },
+      // BE13-10B: TEST_ONLY synthetic trusted time and a lease policy that never expires within this campaign.
+      timeAuthority: { now: async ({ realm }: { realm: string }) => ({ realm, status: 'trusted', at: 1_000, authorityRevision: 1 }) },
+      leasePolicy: { evaluate: async ({ realm }: { realm: string }) => ({ realm, status: 'ACTIVE', recoveryByNonOwner: 'never', policyRevision: 1 }) },
     } as unknown as IngestionOperationsBootstrapDependencies;
     const boot = createIngestionOperationsBootstrap(baseDeps);
     const docFor = (eventId: string, payload?: object) => fixtures.protectedDocument({ eventId, ...(payload ? { payload } : {}) }) as { sourceId: string; eventId: string; clientid: string };
@@ -136,7 +141,7 @@ async function main() {
       const actions = trail.map(a => a.action);
       console.log('O04 trail ' + JSON.stringify(trail.map(a => [a.sequence, a.action, a.outcome])));
       // O01 (x2) and O03 (x1) denials are audited on the same stream, before the authorized replay.
-      assert.deepEqual(actions, ['quarantine-created', 'authorization-denied', 'authorization-denied', 'authorization-denied', 'replay-requested', 'replay-started', 'replay-result'], JSON.stringify(actions));
+      assert.deepEqual(actions, ['quarantine-created', 'authorization-denied', 'authorization-denied', 'authorization-denied', 'replay-requested', 'lease-acquired', 'replay-started', 'replay-result'], JSON.stringify(actions));
       assert.ok(trail.every((a, i) => a.sequence === i + 1));
     });
     await check('O05 denied audit created', async () => {

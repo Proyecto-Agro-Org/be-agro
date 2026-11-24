@@ -6,6 +6,7 @@
 // layer sandboxes in-process code.
 import type { QuarantineStatus, RetryClass, IngestionStage, ResilientIngestionDependencies, ResilientIngestionResult, ReplayResult } from './ingestion-recovery.contracts.js';
 import type { TrustGateRealm } from './trust-gate.contracts.js';
+import type { OperationsTimeAuthority, ReplayLeasePolicy } from './operations-security-policy.contracts.js';
 
 // ---------------------------------------------------------------- operators
 export type OperatorCapability =
@@ -54,7 +55,10 @@ export interface ResolutionEvidence extends ResolutionEvidenceInput {
 export type AuditAction =
   | 'quarantine-created' | 'quarantine-recurred' | 'classification-changed' | 'recovery-outcome'
   | 'replay-requested' | 'replay-denied' | 'replay-started' | 'replay-result'
-  | 'transition-requested' | 'transition-result' | 'resolved' | 'discarded' | 'authorization-denied';
+  | 'transition-requested' | 'transition-result' | 'resolved' | 'discarded' | 'authorization-denied'
+  // BE13-10B — replay lease governance
+  | 'lease-acquired' | 'lease-release-requested' | 'lease-released-owner' | 'lease-recovery-requested' | 'lease-recovered-expired' | 'lease-release-denied'
+  | 'stale-replay-blocked';
 export interface AuditAppend {
   readonly realm: TrustGateRealm;
   readonly quarantineId: string | null;
@@ -105,7 +109,9 @@ export interface IngestionAlertPort { emit(event: AlertEvent): void | Promise<vo
 // ---------------------------------------------------------------- operations service
 export type OperationDenial =
   | 'invalid-request' | 'unauthenticated' | 'forbidden' | 'realm-out-of-scope' | 'quarantine-not-found' | 'stale-version'
-  | 'transition-not-allowed' | 'evidence-required' | 'evidence-type-not-accepted' | 'audit-unavailable' | 'resolve-not-verified';
+  | 'transition-not-allowed' | 'evidence-required' | 'evidence-type-not-accepted' | 'audit-unavailable' | 'resolve-not-verified'
+  // BE13-10B — replay lease governance
+  | 'time-authority-unavailable' | 'lease-owned-by-another-operator' | 'lease-active' | 'lease-policy-unavailable' | 'stale-replay-lease' | 'replay-fence-unsupported';
 export type OperationResult =
   | { readonly status: 'done'; readonly quarantineId: string; readonly quarantineStatus: QuarantineStatus; readonly version: number; readonly auditComplete: boolean }
   | { readonly status: 'denied'; readonly reason: OperationDenial };
@@ -130,7 +136,11 @@ export interface IngestionOperations {
   block(credential: unknown, input: { readonly quarantineId: string; readonly expectedVersion: number; readonly evidence: ResolutionEvidenceInput }): Promise<OperationResult>;
   resolve(credential: unknown, input: { readonly quarantineId: string; readonly expectedVersion: number; readonly evidence: ResolutionEvidenceInput }): Promise<OperationResult>;
   discard(credential: unknown, input: { readonly quarantineId: string; readonly expectedVersion: number; readonly evidence: ResolutionEvidenceInput }): Promise<OperationResult>;
+  // BE13-10B: ONLY the lease owner (same authorized operatorId) may release its own ACTIVE lease (QUARANTINE_REPLAY).
   releaseLease(credential: unknown, input: { readonly quarantineId: string; readonly expectedVersion: number; readonly evidence: ResolutionEvidenceInput }): Promise<OperationResult>;
+  // BE13-10B: anyone authorized for QUARANTINE_UNBLOCK may recover a lease the injected ReplayLeasePolicy declares EXPIRED
+  // under TRUSTED time. Recovery returns the entry to RETRYABLE (CAS); a new replay or a discard are separate operations.
+  recoverExpiredLease(credential: unknown, input: { readonly quarantineId: string; readonly expectedVersion: number; readonly evidence: ResolutionEvidenceInput }): Promise<OperationResult>;
 }
 
 // ---------------------------------------------------------------- bootstrap & readiness
@@ -140,6 +150,10 @@ export interface IngestionOperationsBootstrapDependencies extends ResilientInges
   readonly metrics: IngestionMetricsPort;
   readonly alerts: IngestionAlertPort;
   readonly retention: AuditRetentionPolicy;
+  // BE13-10B: lease acquisition time and expiry decisions. Placeholders (createBlockingSecurityPolicies) never expire
+  // and never provide trusted time, so the default bootstrap can neither acquire nor recover a lease.
+  readonly timeAuthority: OperationsTimeAuthority;
+  readonly leasePolicy: ReplayLeasePolicy;
 }
 
 export interface OperationsReadiness {

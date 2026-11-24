@@ -12,7 +12,9 @@ const realm = { enum: ['test', 'development', 'preview', 'production'] };
 const code = { bsonType: 'string', pattern: '^[a-z][a-z0-9-]{1,63}$' };
 const capabilities = ['QUARANTINE_VIEW', 'QUARANTINE_REPLAY', 'QUARANTINE_UNBLOCK', 'QUARANTINE_BLOCK', 'QUARANTINE_RESOLVE', 'QUARANTINE_DISCARD', 'AUDIT_VIEW', 'OPERATIONS_VIEW'];
 const actions = ['quarantine-created', 'quarantine-recurred', 'classification-changed', 'recovery-outcome', 'replay-requested', 'replay-denied', 'replay-started',
-  'replay-result', 'transition-requested', 'transition-result', 'resolved', 'discarded', 'authorization-denied'];
+  'replay-result', 'transition-requested', 'transition-result', 'resolved', 'discarded', 'authorization-denied',
+  // BE13-10B — replay lease governance
+  'lease-acquired', 'lease-release-requested', 'lease-released-owner', 'lease-recovery-requested', 'lease-recovered-expired', 'lease-release-denied', 'stale-replay-blocked'];
 const safeRef = { bsonType: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9:_./-]+$' };
 
 // additionalProperties:false rejects rawPayload, stack, messages, secrets, tokens, URIs.
@@ -48,6 +50,14 @@ export const auditIndexes = [
   { key: { realm: 1, stream: 1, sequence: 1 }, name: 'audit_stream_sequence', unique: true },
   { key: { realm: 1, occurredAt: 1 }, name: 'audit_realm_occurred' },
 ] as const;
+
+// BE13-10B — LOCAL, additive validator upgrade (new lease actions only); existing audit documents stay valid.
+export async function upgradeAuditValidatorBe1310b(connection: Connection, prefix: string) {
+  const n = auditCollections(prefix), db = connection.db;
+  if (!db || (await db.listCollections({ name: n.audit }).toArray()).length !== 1) throw new TypeError('Existing audit namespace required');
+  await db.command({ collMod: n.audit, validator: auditValidator, validationLevel: 'strict', validationAction: 'error' });
+  return Object.freeze({ status: 'upgraded' as const });
+}
 
 export async function provisionAuditCollections(connection: Connection, prefix: string) {
   const n = auditCollections(prefix), db = connection.db;

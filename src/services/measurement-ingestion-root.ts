@@ -18,12 +18,13 @@ import type {
 import type {
   FailureClassification,
   QuarantineEntry,
+  ReplayHolder,
   ReplayResult,
   ResilientIngestionDependencies,
   ResilientIngestionResult,
   ResilientMeasurementIngestion,
 } from '../iot/ingestion-recovery.contracts.js';
-import type { IdempotencyKey } from '../iot/ingestion-composition.contracts.js';
+import type { IdempotencyKey, MeasurementPersistencePort, PersistMeasurementInput } from '../iot/ingestion-composition.contracts.js';
 import type { ProtectedMeasurementCandidate } from '../iot/protected-ingest.contracts.js';
 import type { TrustGateRealm } from '../iot/trust-gate.contracts.js';
 import { createMeasurementAttributionService } from './measurement-attribution.service.js';
@@ -115,15 +116,21 @@ function assemble(deps: MeasurementIngestionRootDependencies) {
   const realm: TrustGateRealm = realmResult.data;
   const provenance = createIngestProvenanceAuthority(deps.provenanceVerifier);
   const mapper = createProtectedIngestMapper(provenance.authority);
-  const be12 = createMeasurementAttributionService({ ...createBe12IdentityPorts(deps.identityStore, realm),
-    temporal: deps.be12.temporal, catalogue: deps.be12.catalogue } as never, { realm });
-  const composition = createPersistentMeasurementIngestionComposition({
-    realmContext: { realm }, identityStore: deps.identityStore, temporal: deps.temporal, hardware: deps.hardware, catalogue: deps.catalogue,
-    policies: { clock: deps.policies.clock, declaredAt: deps.policies.declaredAt, missingReason: deps.policies.missingReason, persistenceTime: deps.policies.persistenceTime },
-    persistence: deps.persistence, be12, ...(deps.authorityTimeoutMs === undefined ? {} : { authorityTimeoutMs: deps.authorityTimeoutMs }),
-  });
+  const composition = buildComposition(deps, realm, deps.persistence);
   const map = (protectedDocument: unknown, provenanceEvidence: unknown) => mapper.map(protectedDocument, provenance.attest(provenanceEvidence) ?? undefined);
   return { realm, map, composition };
+}
+
+// The realm is passed in (already fixed by the realm authority at construction): building a composition never
+// consults the realm authority again (BE13-07 V6). BE13-10B uses it to build a FENCED composition per replay.
+function buildComposition(deps: MeasurementIngestionRootDependencies, realm: TrustGateRealm, persistence: MeasurementPersistencePort) {
+  const be12 = createMeasurementAttributionService({ ...createBe12IdentityPorts(deps.identityStore, realm),
+    temporal: deps.be12.temporal, catalogue: deps.be12.catalogue } as never, { realm });
+  return createPersistentMeasurementIngestionComposition({
+    realmContext: { realm }, identityStore: deps.identityStore, temporal: deps.temporal, hardware: deps.hardware, catalogue: deps.catalogue,
+    policies: { clock: deps.policies.clock, declaredAt: deps.policies.declaredAt, missingReason: deps.policies.missingReason, persistenceTime: deps.policies.persistenceTime },
+    persistence, be12, ...(deps.authorityTimeoutMs === undefined ? {} : { authorityTimeoutMs: deps.authorityTimeoutMs }),
+  });
 }
 
 export function createMeasurementIngestionRoot(deps: MeasurementIngestionRootDependencies): MeasurementIngestionRoot {
@@ -155,7 +162,13 @@ const recordedSchema = z.object({ realm: catalogueRealmSchema, quarantineId: z.s
 const replayRecordSchema = z.object({ quarantineId: z.string().regex(/^q_[0-9a-f]{64}$/), realm: catalogueRealmSchema,
   status: z.enum(['OPEN', 'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED']), reasonCode: z.string().regex(/^[a-z][a-z0-9-]{1,63}$/),
   sourceId: z.string().nullable(), operation: z.enum(['measurement', 'device-status']).nullable(), eventId: z.string().nullable(), field: z.string().nullable(),
-  device: z.object({ kind: z.enum(['mqtt-clientid', 'device-id']), value: z.string() }).strict().nullable(), fingerprint: hex64.nullable() }).passthrough();
+  device: z.object({ kind: z.enum(['mqtt-clientid', 'device-id']), value: z.string() }).strict().nullable(), fingerprint: hex64.nullable(),
+  lease: z.object({ ownerId: z.string(), acquiredAt: z.number(), token: z.number().int() }).strict().nullable().optional() }).passthrough();
+
+// BE13-10B — the lease handed over by the operations service (owner = authorized principal id, token = fencing token).
+const replayLeaseSchema = z.object({ ownerId: z.string().min(1).max(128).regex(/^[A-Za-z0-9:_./-]+$/), leaseToken: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER) }).strict();
+// Internal sentinel: the fence reported the lease lost; the run stops without any further side effect.
+const FENCE_LOST: unique symbol = Symbol('be13-10b/fence-lost');
 
 function canonical(value: unknown, depth = 0): unknown {
   if (depth > 32) throw new Error('too deep');
@@ -206,7 +219,11 @@ export function createResilientMeasurementIngestionRoot(deps: ResilientIngestion
     Object.freeze({ retryClass, stage, reasonCode, retryable: retryClass === 'transient' });
 
   // Same candidate (same identity) on every attempt: retries never create a new eventId, field, realm or fingerprint.
-  async function run(candidate: ProtectedMeasurementCandidate, field: string): Promise<ResilientIngestionResult> {
+  // BE13-10B: a fenced replay passes its own composition; when the fence reports the lease was lost, the run stops
+  // IMMEDIATELY (no classification, recovery, retry or new quarantine record): nothing was written.
+  async function run(candidate: ProtectedMeasurementCandidate, field: string,
+    fenced?: { readonly composition: typeof composition; readonly lost: () => boolean }): Promise<ResilientIngestionResult | typeof FENCE_LOST> {
+    const activeComposition = fenced?.composition ?? composition;
     const key = keyOf(candidate, field), fingerprint = technicalInputFingerprint(realm, candidate, field);
     // One read per decision; the report already read is classified (no second read that could race).
     const tryInspect = async () => { try { const r = recoveryReportSchema.safeParse(await inspect(key)); return r.success ? r.data : null; } catch { return null; } };
@@ -222,7 +239,8 @@ export function createResilientMeasurementIngestionRoot(deps: ResilientIngestion
       return toQuarantine(entryOf(candidate, field, cls('persistence-state-inconsistent', 'consistency', 'recovery'), detail, fingerprint, null), attempts);
     };
     for (let attempt = 1; attempt <= HARD_ATTEMPT_CEILING; attempt += 1) {
-      const result = await composition.ingest(candidate, { field });
+      const result = await activeComposition.ingest(candidate, { field });
+      if (fenced?.lost()) return FENCE_LOST;
       if (result.status === 'accepted') return Object.freeze({ status: 'accepted', measurementId: result.measurementId, eventId: candidate.eventId, attempts: attempt });
       let classification: FailureClassification;
       let cause: string | null = null;
@@ -263,26 +281,37 @@ export function createResilientMeasurementIngestionRoot(deps: ResilientIngestion
       return toQuarantine(entryOf(null, field, classification, null, null, documentDigest(protectedDocument)), 1);
     }
     if (field === null) return toQuarantine(entryOf(mapped, null, classifyIngestionFailure('invalid-selection', null), null, null, null), 1);
-    return run(mapped, field);
+    return run(mapped, field) as Promise<ResilientIngestionResult>; // never FENCE_LOST without a fence
   }
 
   async function replay(input: { readonly quarantineId: string; readonly protectedDocument: unknown; readonly provenanceEvidence: unknown; readonly field: string;
-    readonly leased?: boolean }): Promise<ReplayResult> {
+    readonly lease?: { readonly ownerId: string; readonly leaseToken: number } }): Promise<ReplayResult> {
     const reject = (reasonCode: Extract<ReplayResult, { status: 'replay-rejected' }>['reasonCode']): ReplayResult => Object.freeze({ status: 'replay-rejected', reasonCode });
     const idOk = typeof input?.quarantineId === 'string' && /^q_[0-9a-f]{64}$/.test(input.quarantineId);
     const fieldOk = logicalKey.safeParse(input?.field).success;
-    if (!idOk || !fieldOk) return reject('invalid-replay-input');
+    const leaseInput = input?.lease === undefined ? null : replayLeaseSchema.safeParse(input.lease);
+    if (!idOk || !fieldOk || (leaseInput !== null && !leaseInput.success)) return reject('invalid-replay-input');
+    // BE13-10B: a replay writes ONLY through an adapter that fences atomically; otherwise nothing is attempted.
+    if (deps.persistence.replayFencing !== 'atomic') return reject('replay-fence-unsupported');
     let record: z.output<typeof replayRecordSchema> | null = null;
     try { const raw = await quarantine.get(input.quarantineId); if (raw !== null) record = replayRecordSchema.parse(raw); } catch { record = null; }
     if (!record || record.realm !== realm || record.quarantineId !== input.quarantineId) return reject('quarantine-not-found');
     const current = record;
     const audit = async (outcome: string) => { try { await quarantine.appendAudit(current.quarantineId, { action: 'replay', outcome, reasonCode: current.reasonCode, evidence: null }); } catch { /* best effort */ } };
-    // BE13-09: a leased replay expects REPLAYING (taken by CAS by the operations service) and must always leave it.
-    const expected = input.leased === true ? 'REPLAYING' : 'RETRYABLE';
-    if (record.status !== expected) { await audit('replay-not-allowed'); return reject('replay-not-allowed'); }
-    const releaseLease = async (outcome: string) => {
-      if (expected === 'REPLAYING') { try { await quarantine.transition({ quarantineId: current.quarantineId, from: 'REPLAYING', to: 'RETRYABLE', evidence: 'replay', outcome }); } catch { /* reported by status */ } }
+    const holder: ReplayHolder = leaseInput?.success
+      ? Object.freeze({ kind: 'lease' as const, ownerId: leaseInput.data.ownerId, leaseToken: leaseInput.data.leaseToken })
+      : Object.freeze({ kind: 'unleased' as const });
+    if (holder.kind === 'lease') {
+      // The caller must hold THIS lease right now (owner + token): otherwise it is a stale replay.
+      if (record.status !== 'REPLAYING' || record.lease?.ownerId !== holder.ownerId || record.lease?.token !== holder.leaseToken) {
+        await audit('stale-replay-lease'); return reject('stale-replay-lease');
+      }
+    } else if (record.status !== 'RETRYABLE') { await audit('replay-not-allowed'); return reject('replay-not-allowed'); }
+    // 'error' (store unreachable) is kept apart from 'stale' (someone else holds/settled the entry).
+    const settle = async (to: 'RESOLVED' | 'RETRYABLE' | 'BLOCKED', outcome: string): Promise<string> => {
+      try { return await quarantine.settleReplay({ quarantineId: current.quarantineId, holder, to, outcome, evidence: 'replay' }); } catch { return 'error'; }
     };
+    const releaseLease = async (outcome: string) => { if (holder.kind === 'lease') await settle('RETRYABLE', outcome); };
     const mapped = map(input.protectedDocument, input.provenanceEvidence);
     if (mapped.status !== 'candidate' || record.sourceId !== mapped.sourceId || record.operation !== mapped.storeOperation || record.eventId !== mapped.eventId ||
       record.field !== input.field || record.device?.kind !== mapped.device.kind || record.device?.value !== mapped.device.value) {
@@ -291,14 +320,37 @@ export function createResilientMeasurementIngestionRoot(deps: ResilientIngestion
     if (record.fingerprint === null || record.fingerprint !== technicalInputFingerprint(realm, mapped, input.field)) {
       await audit('replay-fingerprint-mismatch'); await releaseLease('replay-fingerprint-mismatch'); return reject('replay-fingerprint-mismatch');
     }
-    const outcome = await run(mapped, input.field);
+    // FENCE: "measurement written" and "this holder still holds the entry" are ONE atomic unit. The fence CAS settles the
+    // entry to RESOLVED inside the persistence transaction; if the lease was recovered/released/changed meanwhile, the CAS
+    // matches nothing, the transaction aborts and no measurement exists. A store failure inside the fence also aborts it.
+    const fence: { state: 'unset' | 'held' | 'lost' } = { state: 'unset' };
+    const fencedPersistence: MeasurementPersistencePort = Object.freeze({
+      lookup: (key: IdempotencyKey) => deps.persistence.lookup(key),
+      persistAtomically: (persistInput: PersistMeasurementInput) => deps.persistence.persistAtomically(persistInput, Object.freeze({
+        fence: async (transaction: unknown) => {
+          const result = await quarantine.settleReplay({ quarantineId: current.quarantineId, holder, to: 'RESOLVED', outcome: 'replay-persisted', evidence: 'replay' }, transaction);
+          fence.state = result === 'transitioned' ? 'held' : 'lost';
+          return fence.state === 'held';
+        },
+      })),
+      replayFencing: 'atomic' as const,
+    });
+    const outcome = await run(mapped, input.field, { composition: buildComposition(deps, realm, fencedPersistence), lost: () => fence.state === 'lost' });
+    if (outcome === FENCE_LOST) { await audit('stale-replay-lease'); return reject('stale-replay-lease'); }
     const done = outcome.status === 'accepted' || outcome.status === 'duplicate' || outcome.status === 'recovered-committed';
     const blocked = outcome.status === 'quarantined' && outcome.quarantineStatus === 'BLOCKED';
-    try {
-      if (done) await quarantine.transition({ quarantineId: current.quarantineId, from: expected, to: 'RESOLVED', evidence: 'replay', outcome: outcome.status });
-      else if (blocked) await quarantine.transition({ quarantineId: current.quarantineId, from: expected, to: 'BLOCKED', evidence: 'replay', outcome: outcome.reasonCode });
-      else { await audit(outcome.reasonCode); await releaseLease(outcome.reasonCode); }
-    } catch { /* the store result below reflects whatever was persisted */ }
+    // Settling is CAS on the same holder. If the fenced commit already settled RESOLVED (fence === 'held'), the CAS is
+    // simply stale. Otherwise a stale CAS means this replay LOST its hold before completing: it wrote nothing under its
+    // lease (an existing measurement, if any, was written by someone else) and is reported as stale, never as done.
+    const lostHold = async () => { await audit('stale-replay-lease'); return reject('stale-replay-lease'); };
+    if (done) {
+      if ((await settle('RESOLVED', outcome.status)) === 'stale' && fence.state !== 'held') return lostHold();
+    } else if (blocked) {
+      if ((await settle('BLOCKED', outcome.reasonCode)) === 'stale' && holder.kind === 'lease') return lostHold();
+    } else {
+      await audit(outcome.reasonCode);
+      if (holder.kind === 'lease' && (await settle('RETRYABLE', outcome.reasonCode)) === 'stale') return lostHold();
+    }
     let after;
     try { after = await quarantine.get(current.quarantineId); } catch { after = null; }
     return Object.freeze({ status: 'replayed', quarantineId: current.quarantineId, outcome, quarantineStatus: after?.status ?? record.status });
