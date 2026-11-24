@@ -168,7 +168,7 @@ test('P15 caller "retryable" flags never change the classification', async () =>
 test('P16 QoS redelivery (1 or 2, DUP) of the same event stays idempotent: realm + sourceId + operation + eventId + field', async () => {
   const s = await boundarySetup();
   assert.equal((await s.boundary.deliver(delivery({ obs: { qos: 2, packetId: 1 } }))).results[0].result.status, 'accepted');
-  assert.equal((await s.boundary.deliver(delivery({ obs: { qos: 1, packetId: 2, receivedAt: 1795115600200, rawPersistedAt: 1795115600210 } }))).results[0].result.status, 'duplicate');
+  assert.equal((await s.boundary.deliver(delivery({ obs: { qos: 1, packetId: 2, receivedAt: 1795115600200 } }))).results[0].result.status, 'duplicate');
   assert.equal(measurementsOf(s).length, 1);
 });
 
@@ -186,14 +186,18 @@ test('P18 full synthetic E2E accepted: delivery → boundary → BE13-02…10B �
   assert.equal(r.results[0].result.status, 'accepted');
   const [m] = measurementsOf(s);
   assert.deepEqual([m.key.realm, m.key.sourceId, m.key.eventId, m.key.field], ['test', 'synthetic-ingest', 'synthetic-telemetry-001', 'temperature']);
-  const admitted = await s.boundary.admitForReplay(delivery());
+  // BE13-11B: replay evidence is rebuilt from a persisted inbox record (persist-only receipt → admitForReplay by inboxId).
+  const persisted = await s.admission.admit(delivery({ obs: { packetId: 8 } }), { mode: 'persist-only' });
+  assert.equal(persisted.status, 'persisted');
+  const admitted = await s.admission.admitForReplay({ inboxId: persisted.receipt.inboxId });
   assert.equal(admitted.status, 'admitted');
   assert.deepEqual(admitted.fields, ['temperature']);
 });
 
 test('P19 full synthetic E2E quarantined: verified deliveries that fail inside the pipeline are quarantined there', async () => {
   const noInbox = await boundarySetup();
-  const r = await noInbox.boundary.deliver(delivery({ obs: { rawPersistedAt: null } }));
+  // BE13-11B: the direct (non-durable) boundary has no persisted instant → BE13-04 blocks inside the pipeline.
+  const r = await noInbox.direct.deliver(delivery());
   assert.deepEqual([r.results[0].result.status, r.results[0].result.reasonCode, r.results[0].result.quarantineStatus], ['quarantined', 'unresolved-persisted-at', 'BLOCKED']);
   const unknownDevice = await boundarySetup({ mappingMode: { kind: 'ok', key: 'synthetic-device-404' } });
   const u = await unknownDevice.boundary.deliver(delivery({ obs: { mqttClientId: 'synthetic-device-404' }, env: { clientid: 'synthetic-device-404' } }));
@@ -233,7 +237,7 @@ test('The boundary owns provenance: an injected pipeline verifier is refused; th
   for (const name of ['brokerProvenanceVerifier', 'brokerIdentityMapping', 'payloadLimits', 'boundaryConfig'])
     assert.throws(() => createMqttIngestionBoundary({ ...s.deps, [name]: undefined }), new RegExp(name));
   // Operator replay with forged evidence is refused by the pipeline (the evidence was not issued by the boundary).
-  await s.boundary.deliver(delivery({ obs: { rawPersistedAt: null } }));
+  await s.direct.deliver(delivery());
   const [row] = [...s.quarantine.rows.values()];
   const r = await s.boundary.operations.replay({ token: 'tok-admin' }, { quarantineId: row.quarantineId, expectedVersion: row.version, protectedDocument: {}, provenanceEvidence: { syntheticTestOnly: true }, field: 'temperature' });
   assert.equal(r.status, 'denied', 'BLOCKED entries are not replayable and forged evidence is never accepted');

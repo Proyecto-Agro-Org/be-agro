@@ -18,7 +18,9 @@ import { createMongoMeasurementPersistence } from '../src/repositories/mongo-mea
 import { createMongoPersistenceRecovery } from '../src/repositories/mongo-persistence-recovery.repository.js';
 import { createMongoIngestionQuarantineStore } from '../src/repositories/mongo-ingestion-quarantine.store.js';
 import { createMongoIngestionAuditStore } from '../src/repositories/mongo-ingestion-audit.store.js';
-import { createMqttIngestionBoundary } from '../src/services/mqtt-ingestion-boundary.service.js';
+import { createDurableBrokerAdmissionService, createMqttIngestionBoundary } from '../src/services/mqtt-ingestion-boundary.service.js';
+import { provisionBrokerInboxCollection } from '../src/models/broker-inbox.models.js';
+import { createMongoBrokerInboxStore } from '../src/repositories/mongo-broker-inbox.store.js';
 import type { MqttIngestionBoundaryDependencies } from '../src/iot/mqtt-ingestion-boundary.contracts.js';
 
 type BrokerFixtures = {
@@ -54,6 +56,7 @@ async function main() {
     await provisionIngestionCollections(connection, INGEST);
     await provisionQuarantineCollection(connection, INGEST);
     await provisionAuditCollections(connection, INGEST);
+    await provisionBrokerInboxCollection(connection, INGEST); // BE13-11B: the accepted path is persist-before-ingest
     const sn = sensorCollections(SENSOR, BUSINESS), inn = ingestionCollections(INGEST);
     await db.collection(sn.devices).insertOne({ _id: 'test:device-1', realm: 'test', id: 'device-1', clientId: 'owner', sourceId: 'synthetic-ingest', keyKind: 'mqtt-clientid',
       keyValue: 'synthetic-device-001', verification: 'verified', verificationAuthority: 'synthetic', lifecycle: 'active', version: 3, createdAt: day(1), updatedAt: day(2) } as never, { writeConcern: { w: 'majority' } });
@@ -73,7 +76,7 @@ async function main() {
         persistenceTime: { decide: async (q: { realm: string; persistedAt: number }) => ({ realm: q.realm, status: 'approved', persistedAt: q.persistedAt, policyRevision: 1 }) },
       },
     };
-    const boundaryOn = (conn: Connection, verifierMode?: object) => createMqttIngestionBoundary({
+    const depsOn = (conn: Connection, verifierMode?: object) => ({
       realmAuthority: { authorizedRealm: () => 'test' }, ...synthetic,
       identityStore: createMongoIngestionIdentityStore({ connection: conn, sensorPrefix: SENSOR, businessPrefix: BUSINESS }),
       persistence: createMongoMeasurementPersistence({ connection: conn, prefix: INGEST, realm: 'test' }),
@@ -88,6 +91,12 @@ async function main() {
       timeAuthority: { now: async ({ realm }: { realm: string }) => ({ realm, status: 'untrusted' }) }, leasePolicy: { evaluate: async ({ realm }: { realm: string }) => ({ realm, status: 'ACTIVE', recoveryByNonOwner: 'never', policyRevision: 1 }) },
       brokerProvenanceVerifier: f.syntheticVerifier(verifierMode), brokerIdentityMapping: f.syntheticMapping(), payloadLimits: f.TEST_ONLY_LIMITS, boundaryConfig: f.TEST_ONLY_CONFIG,
     } as unknown as MqttIngestionBoundaryDependencies);
+    // BE13-11B: deliver = durable admission (verify → Mongo inbox majority+j → process from the record).
+    const boundaryOn = (conn: Connection, verifierMode?: object) => {
+      const admission = createDurableBrokerAdmissionService({ ...depsOn(conn, verifierMode), durableInbox: createMongoBrokerInboxStore({ connection: conn, prefix: INGEST, realm: 'test' }) });
+      return { deliver: (raw: unknown) => admission.admit(raw, { mode: 'persist-and-process' }) };
+    };
+    const direct = createMqttIngestionBoundary(depsOn(connection));
     const delivery = (obs: object = {}, env: object = {}, payload?: Buffer) => ({ brokerObserved: f.observed(obs), payload: payload ?? f.bytesOf(f.envelope(env)) });
     const boundary = boundaryOn(connection);
     const ev = (id: string) => ({ eventId: 'e11a-' + id });
@@ -139,8 +148,8 @@ async function main() {
       const r = await boundaryOn(connection, { kind: 'throw' }).deliver(delivery({}, ev('09'))) as Rejected;
       assert.equal(r.retryable, true); await none('09', r, 'broker-verifier-unavailable');
     });
-    await check('E10 verified delivery without a raw-persisted instant → quarantined BLOCKED inside the pipeline (Mongo)', async () => {
-      const r = await boundary.deliver(delivery({ rawPersistedAt: null }, ev('10'))) as unknown as Ingested;
+    await check('E10 verified delivery on the direct (non-durable) path → no persisted instant → quarantined BLOCKED inside the pipeline (Mongo)', async () => {
+      const r = await direct.deliver(delivery({}, ev('10'))) as unknown as Ingested;
       assert.deepEqual([r.results[0]!.result.status, r.results[0]!.result.reasonCode], ['quarantined', 'unresolved-persisted-at']);
       assert.equal(await count('e11a-10'), 0);
       assert.equal((await quarantineRows.findOne({ eventId: 'e11a-10' }))?.status, 'BLOCKED');

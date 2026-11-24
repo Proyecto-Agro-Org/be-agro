@@ -111,5 +111,8 @@ export function createBlockingMqttBoundaryPlaceholders() {
     brokerIdentityMapping: register({ async resolve(request: { realm?: unknown } | undefined) { return Object.freeze({ status: 'unknown' as const, realm: request?.realm }); } }),
     payloadLimits: register({ maxBytes: 1, maxDepth: 1, maxKeys: 1, maxStringLength: 1 }),
     boundaryConfig: register({ topicRoutes: Object.freeze([]), retained: 'block' as const, fields: Object.freeze([]), verifierTimeoutMs: 1, auditVerifiedDeliveries: false }),
+    // BE13-11B: no durable store approved: it never confirms a write and knows no record.
+    durableInbox: register({ async persistVerifiedDelivery(_request: unknown): Promise<never> { throw new Error('durable broker inbox not configured'); },
+      async getById(_request: unknown) { return null; }, async ping() { return false; } }),
   });
 }

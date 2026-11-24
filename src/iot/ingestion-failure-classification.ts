@@ -26,6 +26,9 @@ const CLASS_BY_CODE: Readonly<Record<string, RetryClass>> = Object.freeze({
   'broker-context-malformed': 'validation', 'payload-too-large': 'validation', 'payload-invalid-utf8': 'validation', 'payload-malformed': 'validation',
   'payload-dangerous-key': 'validation', 'payload-limits-exceeded': 'validation', 'topic-not-routed': 'validation', 'no-configured-field': 'validation',
   'retained-message-blocked': 'policy-blocked', 'boundary-not-configured': 'policy-blocked',
+  // BE13-11B durable inbox: unavailable store = transient (nothing confirmed, nothing processed); a record whose bytes/context/
+  // provenance no longer match is a consistency failure (never repaired, never processed); an unknown id is validation.
+  'broker-inbox-unavailable': 'transient', 'broker-inbox-integrity-failed': 'consistency', 'broker-inbox-not-found': 'validation',
   // conflict
   'idempotency-conflict': 'conflict',
   // waiting for a human decision or for missing reference data (BLOCKED_BY_POLICY)
