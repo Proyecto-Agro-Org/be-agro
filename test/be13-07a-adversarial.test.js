@@ -32,9 +32,9 @@ test('V1 no production module imports test-support; placeholders export only blo
     // Real imports only (static, dynamic, require); comments that mention the folder are fine.
     assert.equal(/(from\s*['"][^'"]*test-support|import\s*\(\s*['"`][^'"`]*test-support|require\s*\(\s*['"][^'"]*test-support)/.test(readFileSync(file, 'utf8')), false, file);
   }
-  assert.deepEqual(Object.keys(placeholdersModule).sort(), ['createBlockingBe12Authorities', 'createBlockingProvenanceVerifier', 'createBlockingRetryPolicy',
+  assert.deepEqual(Object.keys(placeholdersModule).sort(), ['createBlockingBe12Authorities', 'createBlockingMqttBoundaryPlaceholders', 'createBlockingProvenanceVerifier', 'createBlockingRetryPolicy',
     'createBlockingRetryScheduler', 'createBlockingSecurityPolicies', 'createDenyAllOperatorAuthorization', 'createProductionPlaceholders', 'createUnconfiguredAlerts', 'createUnconfiguredMetrics',
-    'isBlockingPlaceholder']); // BE13-09: deny-all authorization + no-op observability; BE13-10A: conservative security policies (all registered as blocking)
+    'isBlockingPlaceholder']); // BE13-09: deny-all authorization + no-op observability; BE13-10A: conservative security policies; BE13-11A: broker boundary (all registered as blocking)
   assert.deepEqual(Object.keys(rootModule).sort(), ['createMeasurementIngestionRoot', 'createResilientMeasurementIngestionRoot', 'describeIngestionRootReadiness']);
 });
 

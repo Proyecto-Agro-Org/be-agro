@@ -58,7 +58,9 @@ export type AuditAction =
   | 'transition-requested' | 'transition-result' | 'resolved' | 'discarded' | 'authorization-denied'
   // BE13-10B — replay lease governance
   | 'lease-acquired' | 'lease-release-requested' | 'lease-released-owner' | 'lease-recovery-requested' | 'lease-recovered-expired' | 'lease-release-denied'
-  | 'stale-replay-blocked';
+  | 'stale-replay-blocked'
+  // BE13-11A — broker boundary (no raw payload, no credentials, no tokens)
+  | 'broker-provenance-verified' | 'broker-provenance-rejected' | 'broker-verifier-unavailable' | 'broker-delivery-malformed' | 'technical-identity-mismatch';
 export interface AuditAppend {
   readonly realm: TrustGateRealm;
   readonly quarantineId: string | null;
@@ -89,10 +91,11 @@ export type AuditRetentionPolicy = { readonly mode: 'retain-indefinitely' } | { 
 // ---------------------------------------------------------------- observability (best-effort)
 export type MetricName =
   | 'ingestion_total' | 'ingestion_accepted_total' | 'ingestion_duplicate_total' | 'ingestion_quarantined_total'
-  | 'retry_attempt_total' | 'recovery_outcome_total' | 'quarantine_transition_total' | 'replay_total' | 'authorization_denied_total';
+  | 'retry_attempt_total' | 'recovery_outcome_total' | 'quarantine_transition_total' | 'replay_total' | 'authorization_denied_total'
+  | 'broker_delivery_total' | 'provenance_result_total' | 'mqtt_boundary_rejected_total';
 // Only low-cardinality labels; values are mapped onto closed vocabularies before emission.
 export interface MetricLabels {
-  readonly stage?: IngestionStage | 'operations';
+  readonly stage?: IngestionStage | 'operations' | 'boundary';
   readonly reasonCode?: string;
   readonly retryClass?: RetryClass;
   readonly outcome?: string;
@@ -100,7 +103,9 @@ export interface MetricLabels {
 export interface IngestionMetricsPort { increment(name: MetricName, labels: MetricLabels): void | Promise<void> }
 
 export type AlertType = 'QUARANTINE_BACKLOG_HIGH' | 'RETRY_EXHAUSTED' | 'PERSISTENCE_INCONSISTENT' | 'AUTHORIZATION_DENIED_SPIKE'
-  | 'RECOVERY_INCONSISTENT' | 'REALM_ISOLATION_VIOLATION' | 'AUDIT_RESULT_MISSING';
+  | 'RECOVERY_INCONSISTENT' | 'REALM_ISOLATION_VIOLATION' | 'AUDIT_RESULT_MISSING'
+  // BE13-11A (facts, no thresholds; PROVENANCE_REJECTION_SPIKE is reserved: it needs a threshold that is not decided)
+  | 'PROVENANCE_REJECTION_SPIKE' | 'BROKER_VERIFIER_UNAVAILABLE' | 'TECHNICAL_IDENTITY_MISMATCH';
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
 // Facts, not thresholds: thresholding/aggregation is external and not decided.
 export interface AlertEvent { readonly type: AlertType; readonly severity: AlertSeverity; readonly reasonCode: string | null }

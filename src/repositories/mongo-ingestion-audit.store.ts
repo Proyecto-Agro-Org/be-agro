@@ -16,7 +16,8 @@ const safeRef = z.string().min(1).max(128).regex(/^[A-Za-z0-9:_./-]+$/);
 const capability = z.enum(['QUARANTINE_VIEW', 'QUARANTINE_REPLAY', 'QUARANTINE_UNBLOCK', 'QUARANTINE_BLOCK', 'QUARANTINE_RESOLVE', 'QUARANTINE_DISCARD', 'AUDIT_VIEW', 'OPERATIONS_VIEW']);
 const action = z.enum(['quarantine-created', 'quarantine-recurred', 'classification-changed', 'recovery-outcome', 'replay-requested', 'replay-denied', 'replay-started',
   'replay-result', 'transition-requested', 'transition-result', 'resolved', 'discarded', 'authorization-denied',
-  'lease-acquired', 'lease-release-requested', 'lease-released-owner', 'lease-recovery-requested', 'lease-recovered-expired', 'lease-release-denied', 'stale-replay-blocked']);
+  'lease-acquired', 'lease-release-requested', 'lease-released-owner', 'lease-recovery-requested', 'lease-recovered-expired', 'lease-release-denied', 'stale-replay-blocked',
+  'broker-provenance-verified', 'broker-provenance-rejected', 'broker-verifier-unavailable', 'broker-delivery-malformed', 'technical-identity-mismatch']);
 const quarantineId = z.string().regex(/^q_[0-9a-f]{64}$/);
 const evidence = z.object({ evidenceType: z.enum(['policy-approval', 'authority-restored', 'dependency-restored', 'data-verified', 'operator-decision']),
   reference: safeRef, verification: z.literal('DECLARED_UNVERIFIED') }).strict();
