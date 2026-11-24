@@ -15,6 +15,8 @@ El mapper acepta exclusivamente la forma persistida por el store protegido de `i
 
 La estructura correcta no prueba procedencia. El documento debe acompañarse por una capacidad opaca emitida por `createIngestProvenanceAuthority`. Esa capacidad queda vinculada en memoria a `sourceId`, tipo de mensaje, `eventId` y `TechnicalDeviceKey`. Copiarla, serializarla o presentar `trusted=true` no autoriza el documento.
 
+La factory es una frontera entre módulos confiables del mismo proceso, no un autenticador externo: cualquier módulo con ejecución arbitraria dentro del backend pertenece al mismo dominio de confianza y podría crear otra authority. La composición productiva debe mantener el verifier fuera de entradas públicas y someter su implementación a revisión. Actualmente no existe verifier productivo.
+
 ## Resultado `candidate`
 
 Un candidato contiene:
@@ -24,7 +26,7 @@ Un candidato contiene:
 - tupla inmutable `sourceId + storeOperation + eventId`;
 - timestamps separados con origen y `trustedForAttribution:false`;
 - copia defensiva e inmutable del payload técnico;
-- procedencia autorizada por capacidad externa, conservando que medición física y atribución comercial siguen sin verificar;
+- identidad técnica autorizada por capacidad externa, `payloadIntegrity:'not-attested'` y broker conservado solo como declaración;
 - `eligibleForMeasurementMapping=true` solo para telemetría.
 
 No contiene `clientId`, `fieldId`, `areaId`, `sensorId`, `physicalDeviceId`, `attributedAt`, ACK, transacción, retry ni configuración de persistencia. No es `TrustedMeasurementEvent` y no puede enviarse directamente a BE-12.
@@ -55,8 +57,10 @@ No incluye payload, identificadores, errores de bibliotecas, credenciales ni dia
 
 ## Temporalidad y payload
 
-`deviceTimestamp`, `sentAt`, `_receivedAt` y `persistedAt?` permanecen separados. No se usa `Date.now()`, no se crea `attributedAt` y ningún reloj se eleva a autoridad empresarial. Cero, `null` y ausencia permanecen diferentes; no se normalizan magnitudes ni unidades.
+`deviceTimestamp`, `sentAt`, `_receivedAt` y `persistedAt?` permanecen separados. Si existe, `persistedAt` no puede ser anterior a recepción. No se usa `Date.now()`, no se crea `attributedAt` y ningún reloj se eleva a autoridad empresarial. Cero, `null` y ausencia permanecen diferentes; no se normalizan magnitudes ni unidades.
+
+Telemetría exige el mismo topic no nulo, sin comodines y de hasta 1024 bytes que el schema protegido real. El payload crudo se valida antes de Zod para que claves peligrosas no puedan ser eliminadas silenciosamente. Los límites de profundidad 16 y presupuesto 10.000 reflejan el validador de `iot-ingest`; el límite HTTP de 1 MB pertenece a la frontera anterior y no se reinventa aquí.
 
 ## Idempotencia
 
-El mapper conserva la tupla técnica pero no compara digests, no entrega ACK, no persiste y no afirma exactly-once. Replay, retry y transacciones siguen siendo responsabilidad de `iot-ingest`.
+El mapper conserva la tupla técnica pero no compara digests, no entrega ACK, no persiste y no afirma exactly-once. La capacidad puede reutilizarse para la misma tupla y no atesta los bytes del payload; esto se expresa en la salida mediante `payloadIntegrity:'not-attested'`. Replay, retry y transacciones siguen siendo responsabilidad de `iot-ingest`.

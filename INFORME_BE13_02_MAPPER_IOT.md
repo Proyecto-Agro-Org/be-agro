@@ -15,7 +15,7 @@ No se agregó composición en `app.ts`, dependencias, rutas, adapters de MongoDB
 
 ## Seguridad y confianza
 
-El schema demuestra forma, no origen. La capacidad externa se valida contra fuente, operación, evento y dispositivo; objetos copiados o flags del payload no funcionan. El mapper rechaza contradicciones entre documento, procedencia y aliases de identidad. Las excepciones se reducen a códigos controlados.
+El schema demuestra forma, no origen. La capacidad externa se valida contra fuente, operación, evento y dispositivo; objetos copiados o flags del payload no funcionan. La salida distingue autorización de identidad técnica de integridad del payload, que permanece explícitamente no atestada. El mapper rechaza contradicciones entre documento, procedencia y aliases de identidad. Las excepciones se reducen a códigos controlados.
 
 La identidad MQTT permanece técnica. No se generan IDs empresariales ni se consulta BE-11. `x-emqx-key` autenticaría al servicio EMQX, no al hardware, y no aparece como entrada aceptada por el mapper.
 
@@ -38,8 +38,9 @@ Resultados finales:
 - `npm.cmd ci --offline`: aprobado; 120 paquetes restaurados desde lockfile y 0 vulnerabilidades informadas.
 - Typecheck: aprobado.
 - Build: aprobado.
-- Suite focalizada: 33/33 aprobadas.
-- Suite completa: 458/458 aprobadas; se conservaron las 425 pruebas anteriores.
+- Suite funcional BE13-02: 37 casos.
+- Suite adversarial BE13-02A: 27 casos.
+- Suite completa: 489/489 pruebas aprobadas.
 - Regresión HTTP: 13/13 escenarios equivalentes.
 - `git diff --check`: aprobado.
 

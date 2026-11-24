@@ -27,4 +27,4 @@
 | Salida hostil del verifier | no emite capacidad ni propaga diagnóstico | PROBADO |
 | Autoridad arbitraria | factory del mapper la rechaza | PROBADO |
 
-La suite focalizada contiene 33 casos automatizados y reutiliza los 14 fixtures BE13-01 sin modificarlos. Las capacidades positivas son dobles sintéticos locales y no prueban autenticación productiva.
+La suite funcional contiene 37 casos automatizados y la auditoría adversarial agrega 27, para un total focalizado de 64. Se reutilizan los 14 fixtures BE13-01 sin modificarlos. Las capacidades positivas son dobles sintéticos locales y no prueban autenticación productiva.

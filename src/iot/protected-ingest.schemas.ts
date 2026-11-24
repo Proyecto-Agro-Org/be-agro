@@ -3,6 +3,7 @@ import { z } from 'zod';
 const technicalId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/);
 const instant = z.date().refine(value => Number.isSafeInteger(value.getTime()) && value.getTime() >= 0);
 const deviceTimestamp = z.union([z.string().max(128), z.number().finite(), z.null()]);
+const mqttTopic = z.string().min(1).refine(value => Buffer.byteLength(value, 'utf8') <= 1024 && !/[+#\u0000]/.test(value)).nullable();
 
 export const protectedMessageTypeSchema = z.enum(['telemetry', 'device-status', 'connected', 'disconnected']);
 export const protectedStoreOperationSchema = z.enum(['measurement', 'device-status']);
@@ -23,7 +24,7 @@ export const protectedIngestDocumentSchema = z.object({
     technicalClientId: technicalId,
     brokerIdentity: z.enum(['broker-assertion-config-verified', 'declared-unverified']),
     mqttContext: z.enum(['service-declared', 'missing']),
-    topic: z.string().min(1).max(1024).nullable(),
+    topic: mqttTopic,
     messageType: z.enum(['telemetry', 'device-status', 'connected', 'disconnected', 'unknown']),
     dataOriginDeclared: z.enum(['simulated', 'physical-unverified', 'unknown']),
     physicalMeasurementVerified: z.literal(false),
@@ -31,7 +32,7 @@ export const protectedIngestDocumentSchema = z.object({
     deviceTimestamp,
     brokerDeclaredAt: instant,
     receivedAt: instant,
-  }).strict(),
+  }).strict().refine(value => value.messageType !== 'telemetry' || value.topic !== null),
 }).strict();
 
 export type ProtectedIngestDocument = z.infer<typeof protectedIngestDocumentSchema>;

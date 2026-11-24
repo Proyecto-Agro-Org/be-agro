@@ -204,3 +204,37 @@ test('BE13-02 hostile verifier output cannot escape or mint a capability', () =>
 test('BE13-02 an arbitrary accepts method cannot replace an issued authority', () => {
   assert.throws(() => createProtectedIngestMapper({ accepts() { return true; } }), /Issued provenance authority required/);
 });
+
+test('BE13-02 telemetry requires the same non-null safe topic accepted by protected ingest', () => {
+  for (const topic of [null, 'synthetic/+/telemetry', 'synthetic/#']) {
+    const document = documentFromEnvelope(fixture('F01'));
+    document._provenance.topic = topic;
+    assert.equal(mapAuthorized(document).reason, 'invalid-schema');
+  }
+  const oversized = documentFromEnvelope(fixture('F01'));
+  oversized._provenance.topic = 'á'.repeat(600);
+  assert.equal(mapAuthorized(oversized).reason, 'invalid-schema');
+});
+
+test('BE13-02 persistedAt before receivedAt is an invalid technical timeline', () => {
+  const document = documentFromEnvelope(fixture('F01'));
+  document.persistedAt = new Date(document._receivedAt.getTime() - 1);
+  assert.equal(mapAuthorized(document).reason, 'invalid-timestamp');
+});
+
+test('BE13-02 undefined source is classified as missing instead of generic schema failure', () => {
+  const document = documentFromEnvelope(fixture('F01')); document.sourceId = undefined;
+  assert.equal(authorized(document).mapper.map(document).reason, 'missing-source');
+});
+
+test('BE13-02 authority snapshots verifier fields once instead of accepting time-varying getters', () => {
+  const document = documentFromEnvelope(fixture('F01'));
+  let reads = 0;
+  const verified = { get sourceId() { reads += 1; return reads === 1 ? document.sourceId : 'synthetic-other-source'; },
+    operation: document._provenance.messageType, eventId: document.eventId,
+    device: { kind: 'mqtt-clientid', value: document.clientid } };
+  const boundary = createIngestProvenanceAuthority({ verify() { return verified; } });
+  const capability = boundary.attest({});
+  assert.equal(createProtectedIngestMapper(boundary.authority).map(document, capability).status, 'candidate');
+  assert.equal(reads, 1);
+});

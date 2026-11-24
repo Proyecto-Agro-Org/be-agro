@@ -25,15 +25,18 @@ export function createIngestProvenanceAuthority(verifier: ExternalProvenanceVeri
       const result = verify(evidence);
       if (!result || typeof result !== 'object') return null;
       const device = result.device;
-      if (!technicalId.test(result.sourceId) || !technicalId.test(result.eventId) ||
-        !['telemetry', 'device-status', 'connected', 'disconnected'].includes(result.operation) ||
-        !device || !['mqtt-clientid', 'device-id'].includes(device.kind) || !technicalId.test(device.value)) return null;
+      if (!device || typeof device !== 'object') return null;
+      const sourceId = result.sourceId, operation = result.operation, eventId = result.eventId;
+      const kind = device.kind, value = device.value;
+      if (!technicalId.test(sourceId) || !technicalId.test(eventId) ||
+        !['telemetry', 'device-status', 'connected', 'disconnected'].includes(operation) ||
+        !['mqtt-clientid', 'device-id'].includes(kind) || !technicalId.test(value)) return null;
       const capability = Object.freeze({}) as IngestProvenanceCapability;
       issued.set(capability as object, Object.freeze({
-        sourceId: result.sourceId,
-        operation: result.operation,
-        eventId: result.eventId,
-        device: Object.freeze({ kind: device.kind, value: device.value }),
+        sourceId,
+        operation,
+        eventId,
+        device: Object.freeze({ kind, value }),
       }));
       return capability;
     } catch { return null; }

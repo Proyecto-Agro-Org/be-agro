@@ -44,8 +44,9 @@ export interface ProtectedMeasurementCandidate {
   }>;
   readonly payload: Readonly<Record<string, unknown>>;
   readonly provenance: Readonly<{
-    authorization: 'external-capability';
-    brokerIdentity: 'broker-assertion-config-verified' | 'declared-unverified';
+    technicalIdentityAuthorization: 'external-capability';
+    payloadIntegrity: 'not-attested';
+    brokerIdentityDeclared: 'broker-assertion-config-verified' | 'declared-unverified';
     mqttContext: 'service-declared';
     topic: string | null;
     dataOriginDeclared: DeclaredDataOrigin;

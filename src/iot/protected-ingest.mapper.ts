@@ -31,7 +31,7 @@ function preflight(input: unknown): ProtectedIngestQuarantineCode | null {
   if (!plain(input)) return 'unsupported-document';
   const protectedShape = ['sourceId', 'operation', '_payload', '_provenance'].some(key => hasOwn(input, key));
   if (!protectedShape) return 'unsupported-document';
-  if (!hasOwn(input, 'sourceId') || input.sourceId === '') return 'missing-source';
+  if (!hasOwn(input, 'sourceId') || typeof input.sourceId !== 'string' || input.sourceId === '') return 'missing-source';
   if (!hasOwn(input, 'eventId') || typeof input.eventId !== 'string' || input.eventId === '') return 'missing-event-id';
   if (!hasOwn(input, 'clientid') || typeof input.clientid !== 'string' || input.clientid === '') return 'missing-technical-identity';
   if (!['measurement', 'device-status'].includes(String(input.operation))) return 'unsupported-operation';
@@ -46,6 +46,7 @@ function preflight(input: unknown): ProtectedIngestQuarantineCode | null {
   if (!(input._receivedAt instanceof Date) || !Number.isSafeInteger(input._receivedAt.getTime()) || input._receivedAt.getTime() < 0 ||
     (hasOwn(input, 'persistedAt') && (!(input.persistedAt instanceof Date) || !Number.isSafeInteger(input.persistedAt.getTime()) || input.persistedAt.getTime() < 0)))
     return 'invalid-timestamp';
+  if (input.persistedAt instanceof Date && input.persistedAt.getTime() < input._receivedAt.getTime()) return 'invalid-timestamp';
   return null;
 }
 
@@ -70,14 +71,14 @@ export function createProtectedIngestMapper(authority: IngestProvenanceAuthority
   function map(input: unknown, capability?: unknown): ProtectedIngestMapResult {
     try {
       const early = preflight(input); if (early) return quarantined(early);
+      let payload: Readonly<Record<string, unknown>>;
+      try { payload = cloneTechnicalValue((input as Record<string, unknown>)._payload) as Readonly<Record<string, unknown>>; }
+      catch { return quarantined('invalid-payload'); }
       const parsed = protectedIngestDocumentSchema.safeParse(input);
       if (!parsed.success) return quarantined('invalid-schema');
       const document = parsed.data;
       if (contradictory(document)) return quarantined('conflicting-identity');
       const operation = operationOf(document); if (!operation) return quarantined('unsupported-operation');
-      let payload: Readonly<Record<string, unknown>>;
-      try { payload = cloneTechnicalValue(document._payload) as Readonly<Record<string, unknown>>; }
-      catch { return quarantined('invalid-payload'); }
       const expected: VerifiedIngestProvenance = Object.freeze({
         sourceId: document.sourceId,
         operation,
@@ -106,8 +107,9 @@ export function createProtectedIngestMapper(authority: IngestProvenanceAuthority
         }),
         payload,
         provenance: Object.freeze({
-          authorization: 'external-capability',
-          brokerIdentity: document._provenance.brokerIdentity,
+          technicalIdentityAuthorization: 'external-capability',
+          payloadIntegrity: 'not-attested',
+          brokerIdentityDeclared: document._provenance.brokerIdentity,
           mqttContext: 'service-declared',
           topic: document._provenance.topic,
           dataOriginDeclared: document._provenance.dataOriginDeclared,

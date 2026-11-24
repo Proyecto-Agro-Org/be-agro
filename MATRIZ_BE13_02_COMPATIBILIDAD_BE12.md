@@ -12,7 +12,7 @@
 | `unit` | payload libre | no promovida | BLOQUEADO | catálogo/extractor aprobado |
 | `value` | payload libre | no promovido | BLOQUEADO | semántica por magnitud |
 | `missingReason` | no canónico | ausente | BLOQUEADO | reglas null/ausencia aprobadas |
-| `provenance` | origen declarado | evidencia técnica conservada | PENDIENTE DE AUTORIDAD | mapper de procedencia BE-12 |
+| `provenance` | origen declarado | identidad técnica atestada; payload no atestado | PENDIENTE DE AUTORIDAD | mapper de procedencia e integridad BE-12 |
 | `simulated` | `dataOriginDeclared` | no promovido automáticamente | PENDIENTE DE AUTORIDAD | evidencia y regla aprobadas |
 | `metadata` | payload/contexto amplio | no convertido a metadata BE-12 | BLOQUEADO | allowlist explícita y límites |
 | `clientId` | prohibido como autoridad | ausente | COMPATIBLE | lo resuelve la ventana BE-11/12 |
