@@ -33,14 +33,14 @@ export const quarantineEntrySchema = z.object({
   fingerprint: hex.nullable(), documentDigest: hex.nullable(),
 }).strict().refine(e => e.eventId !== null || e.documentDigest !== null, 'eventId or documentDigest required for dedupe');
 const auditSchema = z.object({ action: z.enum(['recorded', 'transition', 'replay']), outcome: code, reasonCode: code.nullable(), evidence: evidence.nullable() }).strict();
-const statusSchema = z.enum(['OPEN', 'RETRYABLE', 'BLOCKED', 'RESOLVED', 'DISCARDED']);
+const statusSchema = z.enum(['OPEN', 'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED']);
 const idSchema = z.string().regex(/^q_[0-9a-f]{64}$/);
 const date = z.date().transform(d => d.getTime());
 const storedSchema = z.object({ _id: idSchema, realm: catalogueRealmSchema, stage: quarantineEntrySchema.shape.stage,
   sourceId: text.nullable(), operation: z.enum(['measurement', 'device-status']).nullable(), eventId: text.nullable(), field: text.nullable(),
   device: z.object({ kind: z.enum(['mqtt-clientid', 'device-id']), value: text }).strict().nullable(), reasonCode: code, cause: code.nullable(),
   retryClass: quarantineEntrySchema.shape.retryClass, fingerprint: hex.nullable(), documentDigest: hex.nullable(), status: statusSchema,
-  attemptCount: z.number().int().min(1), firstSeenAt: date, lastSeenAt: date, createdAt: date, updatedAt: date,
+  version: z.number().int().min(1), attemptCount: z.number().int().min(1), firstSeenAt: date, lastSeenAt: date, createdAt: date, updatedAt: date,
   audit: z.array(z.object({ action: z.enum(['recorded', 'transition', 'replay']), at: date, outcome: code, reasonCode: code.nullable(), evidence: evidence.nullable() }).strict()).max(100),
 }).strict();
 
@@ -79,6 +79,7 @@ export function createMongoIngestionQuarantineStore(options: { connection: Conne
         ...fixed,
         status: { $ifNull: ['$status', literal(initialQuarantineStatus(entry.retryClass))] },
         attemptCount: { $add: [{ $ifNull: ['$attemptCount', 0] }, 1] },
+        version: { $add: [{ $ifNull: ['$version', 0] }, 1] },
         firstSeenAt: { $ifNull: ['$firstSeenAt', '$$NOW'] }, createdAt: { $ifNull: ['$createdAt', '$$NOW'] }, lastSeenAt: '$$NOW', updatedAt: '$$NOW',
         audit: auditPush({ action: 'recorded', outcome: entry.reasonCode, reasonCode: entry.reasonCode, evidence: null }),
       } }], { upsert: true, writeConcern, maxTimeMS: 3000 } as never);
@@ -87,15 +88,17 @@ export function createMongoIngestionQuarantineStore(options: { connection: Conne
       return Object.freeze({ realm, quarantineId: id, status: stored.status, attemptCount: stored.attemptCount });
     },
     get,
-    async transition(input: { quarantineId: string; from: QuarantineStatus; to: QuarantineStatus; evidence: string | null; outcome: string }): Promise<TransitionResult> {
-      const parsed = z.object({ quarantineId: idSchema, from: statusSchema, to: statusSchema, evidence: evidence.nullable(), outcome: code }).strict().parse(input);
+    async transition(input: { quarantineId: string; from: QuarantineStatus; to: QuarantineStatus; evidence: string | null; outcome: string; expectedVersion?: number }): Promise<TransitionResult> {
+      const parsed = z.object({ quarantineId: idSchema, from: statusSchema, to: statusSchema, evidence: evidence.nullable(), outcome: code,
+        expectedVersion: z.number().int().min(1).optional() }).strict().parse(input);
       const current = await get(parsed.quarantineId);
       if (!current) return 'not-found';
-      if (current.status !== parsed.from) return 'stale';
+      if (current.status !== parsed.from || (parsed.expectedVersion !== undefined && current.version !== parsed.expectedVersion)) return 'stale';
       if (!isTransitionAllowed(parsed.from, parsed.to, current.retryClass)) return 'not-allowed';
       // Unblocking requires explicit evidence that the blocker was corrected.
       if (parsed.from === 'BLOCKED' && parsed.to === 'RETRYABLE' && parsed.evidence === null) return 'not-allowed';
-      const result = await rows.updateOne({ _id: parsed.quarantineId as never, realm, status: parsed.from }, [{ $set: { status: literal(parsed.to), updatedAt: '$$NOW',
+      const filter = { _id: parsed.quarantineId as never, realm, status: parsed.from, ...(parsed.expectedVersion === undefined ? {} : { version: parsed.expectedVersion }) };
+      const result = await rows.updateOne(filter, [{ $set: { status: literal(parsed.to), updatedAt: '$$NOW', version: { $add: ['$version', 1] },
         audit: auditPush({ action: 'transition', outcome: parsed.outcome, reasonCode: null, evidence: parsed.evidence }) } }], { writeConcern, maxTimeMS: 3000 } as never);
       return result.modifiedCount === 1 ? 'transitioned' : 'stale';
     },
@@ -103,6 +106,12 @@ export function createMongoIngestionQuarantineStore(options: { connection: Conne
       const id = idSchema.parse(rawId), entry = auditSchema.parse(rawEntry);
       const result = await rows.updateOne({ _id: id as never, realm }, [{ $set: { updatedAt: '$$NOW', audit: auditPush(entry) } }], { writeConcern, maxTimeMS: 3000 } as never);
       return result.matchedCount === 1;
+    },
+    async summarize() {
+      const rowsOut = await rows.aggregate([{ $match: { realm } }, { $group: { _id: { status: '$status', reasonCode: '$reasonCode', retryClass: '$retryClass' }, count: { $sum: 1 } } },
+        { $sort: { '_id.status': 1, '_id.reasonCode': 1 } }], { maxTimeMS: 3000, readConcern: { level: 'majority' } } as never).toArray();
+      return Object.freeze(rowsOut.map(r => Object.freeze(z.object({ status: statusSchema, reasonCode: code, retryClass: quarantineEntrySchema.shape.retryClass, count: z.number().int().min(0) })
+        .parse({ ...(r._id as object), count: r.count }))));
     },
   }) as IngestionQuarantineStore;
 }

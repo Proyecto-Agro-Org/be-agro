@@ -96,7 +96,9 @@ test('A7 quarantine poisoning: the schema forbids payload, stack, secrets and in
   const s = quarantineValidator.$jsonSchema;
   assert.equal(s.additionalProperties, false);
   for (const forbidden of ['rawPayload', 'payload', 'stack', 'message', 'x-emqx-key', 'uri', 'token']) assert.equal(Object.hasOwn(s.properties, forbidden), false, forbidden);
-  assert.deepEqual(s.properties.status.enum, ['OPEN', 'RETRYABLE', 'BLOCKED', 'RESOLVED', 'DISCARDED']);
+  // BE13-09 adds REPLAYING (replay lease) and a CAS version.
+  assert.deepEqual(s.properties.status.enum, ['OPEN', 'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED']);
+  assert.equal(s.properties.version.minimum, 1);
   assert.equal(s.properties.attemptCount.minimum, 1);
   assert.equal(s.properties.reasonCode.pattern, '^[a-z][a-z0-9-]{1,63}$');
   assert.equal(s.properties.audit.maxItems, 100);

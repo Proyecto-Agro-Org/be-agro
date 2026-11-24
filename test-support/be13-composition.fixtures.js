@@ -178,18 +178,54 @@ export async function createInMemoryQuarantine(realm = REALM) {
     async record(entry) {
       if (entry.realm !== realm) throw new Error('QUARANTINE_REALM_MISMATCH');
       const quarantineId = quarantineIdFor(entry); const now = ++clock;
-      const row = rows.get(quarantineId) ?? { ...structuredClone(entry), quarantineId, status: initialQuarantineStatus(entry.retryClass), attemptCount: 0, firstSeenAt: now, audit: [] };
-      row.attemptCount += 1; row.lastSeenAt = now; row.audit.push({ action: 'recorded', at: now, outcome: entry.reasonCode, reasonCode: entry.reasonCode, evidence: null });
+      const row = rows.get(quarantineId) ?? { ...structuredClone(entry), quarantineId, status: initialQuarantineStatus(entry.retryClass), version: 0, attemptCount: 0, firstSeenAt: now, audit: [] };
+      row.attemptCount += 1; row.version += 1; row.lastSeenAt = now; row.audit.push({ action: 'recorded', at: now, outcome: entry.reasonCode, reasonCode: entry.reasonCode, evidence: null });
       rows.set(quarantineId, row);
       return { realm, quarantineId, status: row.status, attemptCount: row.attemptCount };
     },
     async get(id) { const r = rows.get(id); return r && r.realm === realm ? structuredClone(r) : null; },
-    async transition({ quarantineId, from, to, evidence, outcome }) {
+    async transition({ quarantineId, from, to, evidence, outcome, expectedVersion }) {
       const r = rows.get(quarantineId); if (!r || r.realm !== realm) return 'not-found';
-      if (r.status !== from) return 'stale';
+      if (r.status !== from || (expectedVersion !== undefined && r.version !== expectedVersion)) return 'stale';
       if (!isTransitionAllowed(from, to, r.retryClass) || (from === 'BLOCKED' && to === 'RETRYABLE' && !evidence)) return 'not-allowed';
-      r.status = to; r.audit.push({ action: 'transition', at: ++clock, outcome, reasonCode: null, evidence }); return 'transitioned';
+      r.status = to; r.version += 1; r.audit.push({ action: 'transition', at: ++clock, outcome, reasonCode: null, evidence }); return 'transitioned';
     },
     async appendAudit(id, entry) { const r = rows.get(id); if (!r || r.realm !== realm) return false; r.audit.push({ ...entry, at: ++clock }); return true; },
+    async summarize() { const m = new Map(); for (const r of rows.values()) if (r.realm === realm) { const k = JSON.stringify([r.status, r.reasonCode, r.retryClass]); m.set(k, (m.get(k) ?? 0) + 1); }
+      return [...m].map(([k, count]) => { const [status, reasonCode, retryClass] = JSON.parse(k); return { status, reasonCode, retryClass, count }; }); },
   };
 }
+
+// ---------------------------------------------------------------- BE13-09 synthetic doubles (TEST_ONLY)
+// Append-only audit store in memory (same ordering semantics as the Mongo store).
+export function createInMemoryAudit(realm = REALM) {
+  const entries = [], counters = new Map(); let failing = false;
+  return {
+    entries, setFailing(v) { failing = v; },
+    async append(entry) {
+      if (failing) throw new Error('audit down');
+      if (entry.realm !== realm) throw new Error('AUDIT_REALM_MISMATCH');
+      const stream = entry.quarantineId ?? 'realm', key = entry.realm + ':' + stream, sequence = (counters.get(key) ?? 0) + 1;
+      counters.set(key, sequence);
+      const record = { ...structuredClone(entry), stream, sequence, auditId: 'a_' + String(entries.length + 1).padStart(64, '0'), occurredAt: entries.length + 1 };
+      entries.push(record); return { realm, auditId: record.auditId, sequence };
+    },
+    async listForQuarantine(id, limit) { return entries.filter(e => e.realm === realm && e.stream === id).sort((a, b) => a.sequence - b.sequence).slice(0, limit); },
+    async ping() { return !failing; },
+  };
+}
+// Synthetic operator authority: the principal is resolved from a token table owned by
+// the authority; anything else carried by the credential (roles, capabilities, realm) is ignored.
+export function createSyntheticOperatorAuthority(table) {
+  return {
+    async authorize({ credential, realm, capability }) {
+      const principal = table[credential?.token];
+      if (!principal) return { decision: 'deny', reason: 'unauthenticated' };
+      if (!principal.realms.includes(realm)) return { decision: 'deny', reason: 'realm-out-of-scope' };
+      if (!principal.capabilities.includes(capability)) return { decision: 'deny', reason: 'forbidden' };
+      return { decision: 'allow', principal };
+    },
+  };
+}
+export function createRecordingMetrics() { const events = []; return { events, increment(name, labels) { events.push({ name, labels }); } }; }
+export function createRecordingAlerts() { const events = []; return { events, emit(event) { events.push(event); } }; }

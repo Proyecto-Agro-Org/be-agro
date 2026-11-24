@@ -55,7 +55,7 @@ export type RecoveryReport =
 export interface PersistenceRecoveryPort { inspect(key: IdempotencyKey): Promise<RecoveryReport> }
 
 // ------------------------------------------------------------ Quarantine
-export type QuarantineStatus = 'OPEN' | 'RETRYABLE' | 'BLOCKED' | 'RESOLVED' | 'DISCARDED';
+export type QuarantineStatus = 'OPEN' | 'RETRYABLE' | 'REPLAYING' | 'BLOCKED' | 'RESOLVED' | 'DISCARDED';
 export interface QuarantineEntry {
   readonly realm: TrustGateRealm;
   readonly stage: IngestionStage;
@@ -79,6 +79,7 @@ export interface QuarantineAuditEntry {
 export interface QuarantineRecord extends QuarantineEntry {
   readonly quarantineId: string;
   readonly status: QuarantineStatus;
+  readonly version: number;   // BE13-09: incremented on every mutation (CAS)
   readonly attemptCount: number;
   readonly firstSeenAt: number;
   readonly lastSeenAt: number;
@@ -89,8 +90,11 @@ export interface IngestionQuarantineStore {
   record(entry: QuarantineEntry): Promise<{ readonly realm: TrustGateRealm; readonly quarantineId: string; readonly status: QuarantineStatus; readonly attemptCount: number }>;
   get(quarantineId: string): Promise<QuarantineRecord | null>;
   // Conditional on `from`; illegal transitions are refused by the state machine.
+  // expectedVersion (BE13-09): when given, the transition also requires that exact version (optimistic CAS).
   transition(input: { readonly quarantineId: string; readonly from: QuarantineStatus; readonly to: QuarantineStatus; readonly evidence: string | null;
-    readonly outcome: string }): Promise<TransitionResult>;
+    readonly outcome: string; readonly expectedVersion?: number }): Promise<TransitionResult>;
+  // BE13-09: counts per status and reason inside the store realm (no identifiers).
+  summarize?(): Promise<readonly { readonly status: QuarantineStatus; readonly reasonCode: string; readonly retryClass: RetryClass; readonly count: number }[]>;
   appendAudit(quarantineId: string, entry: QuarantineAuditEntry): Promise<boolean>;
 }
 
@@ -120,5 +124,8 @@ export interface ResilientMeasurementIngestion {
   readonly realm: TrustGateRealm;
   ingest(protectedDocument: unknown, provenanceEvidence: unknown, selection: { readonly field: string }): Promise<ResilientIngestionResult>;
   // Explicit, never automatic. Requires the ORIGINAL document and provenance evidence again.
-  replay(input: { readonly quarantineId: string; readonly protectedDocument: unknown; readonly provenanceEvidence: unknown; readonly field: string }): Promise<ReplayResult>;
+  // leased (BE13-09): the operations service already moved the entry RETRYABLE → REPLAYING by CAS; the replay then
+  // expects REPLAYING and always leaves the lease (RESOLVED, BLOCKED or back to RETRYABLE).
+  replay(input: { readonly quarantineId: string; readonly protectedDocument: unknown; readonly provenanceEvidence: unknown; readonly field: string;
+    readonly leased?: boolean }): Promise<ReplayResult>;
 }

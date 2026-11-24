@@ -63,3 +63,16 @@ export function createBlockingRetryPolicy() {
 export function createBlockingRetryScheduler() {
   return register({ async wait(_input: unknown): Promise<void> { throw new Error('retry scheduling is not approved'); } });
 }
+
+// BE13-09 — operations placeholders. Authorization denies everything (default
+// deny, no permissive fallback). Metrics and alerts discard events: no provider
+// is approved; readiness reports them as BLOCKED.
+export function createDenyAllOperatorAuthorization() {
+  return register({ async authorize(_request: unknown) { return Object.freeze({ decision: 'deny' as const, reason: 'unauthenticated' as const }); } });
+}
+export function createUnconfiguredMetrics() {
+  return register({ increment(_name: unknown, _labels: unknown) { /* no provider approved */ } });
+}
+export function createUnconfiguredAlerts() {
+  return register({ emit(_event: unknown) { /* no provider approved */ } });
+}

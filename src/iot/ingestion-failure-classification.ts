@@ -59,15 +59,26 @@ export function initialQuarantineStatus(retryClass: RetryClass): 'RETRYABLE' | '
 
 // Quarantine state machine. RESOLVED and DISCARDED are terminal. A security,
 // validation, conflict or consistency entry can never become RETRYABLE.
+// BE13-09: REPLAYING is a lease taken by an authorized replay (RETRYABLE →
+// REPLAYING by CAS); while leased the entry cannot be discarded or resolved
+// by anyone else. There is deliberately no BLOCKED → RESOLVED: a blocked entry
+// is closed with DISCARDED, or unblocked with evidence and replayed.
 const TRANSITIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   OPEN: ['RETRYABLE', 'BLOCKED', 'DISCARDED'],
-  RETRYABLE: ['RETRYABLE', 'RESOLVED', 'BLOCKED', 'DISCARDED'],
+  RETRYABLE: ['RETRYABLE', 'REPLAYING', 'RESOLVED', 'BLOCKED', 'DISCARDED'],
+  REPLAYING: ['RESOLVED', 'RETRYABLE', 'BLOCKED'],
   BLOCKED: ['RETRYABLE', 'DISCARDED'],
   RESOLVED: [],
   DISCARDED: [],
 });
 export function isTransitionAllowed(from: string, to: string, retryClass: RetryClass): boolean {
   if (!Object.hasOwn(TRANSITIONS, from) || !TRANSITIONS[from].includes(to)) return false;
-  if (to === 'RETRYABLE' && from !== 'RETRYABLE' && !['transient', 'ambiguous-commit', 'policy-blocked', 'unknown'].includes(retryClass)) return false;
+  // Leaving the replay lease back to RETRYABLE is always allowed (the entry was already RETRYABLE).
+  if (to === 'RETRYABLE' && from !== 'RETRYABLE' && from !== 'REPLAYING' && !['transient', 'ambiguous-commit', 'policy-blocked', 'unknown'].includes(retryClass)) return false;
   return true;
+}
+
+// BE13-09: closed vocabulary of reason codes (used to bound metric label cardinality).
+export function isKnownReasonCode(code: unknown): code is string {
+  return typeof code === 'string' && Object.hasOwn(CLASS_BY_CODE, code);
 }
