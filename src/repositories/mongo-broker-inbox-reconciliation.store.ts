@@ -84,8 +84,8 @@ export function createMongoBrokerInboxReconciliationStore(options: { connection:
     // Takeover: ONLY a claim whose lease already expired on the database clock; the version is bumped, so the old holder is fenced out.
     const t = await state.findOneAndUpdate({ _id: id as never, realm, status: 'claimed', $expr: { $lte: [{ $add: ['$claimedAt', lease] }, '$$NOW'] } },
       [{ $set: { version: { $add: ['$version', 1] }, token: lit(token), claimedAt: '$$NOW' } }], { returnDocument: 'after', writeConcern, maxTimeMS: 5000 } as never);
-    const doc = (t as unknown as { value?: { version?: number } | null }).value ?? (t as unknown as { version?: number } | null);
-    const version = doc && typeof (doc as { version?: unknown }).version === 'number' ? (doc as { version: number }).version : null;
+    // The driver answers the updated document itself (or null when the CAS filter matched nothing).
+    const version = t !== null && typeof (t as { version?: unknown }).version === 'number' ? (t as unknown as { version: number }).version : null;
     return version === null ? null : Object.freeze({ inboxId: id, token, version });
   }
 
