@@ -53,3 +53,13 @@ export function createProductionPlaceholders() {
     be12: createBlockingBe12Authorities(),
   });
 }
+
+// BE13-08 — blocking retry placeholders. The production retry policy never
+// retries automatically (every retryable failure goes to quarantine as
+// RETRYABLE for an explicit replay) and the scheduler never schedules.
+export function createBlockingRetryPolicy() {
+  return register({ decide: (_input: unknown) => ({ action: 'stop' as const }) });
+}
+export function createBlockingRetryScheduler() {
+  return register({ async wait(_input: unknown): Promise<void> { throw new Error('retry scheduling is not approved'); } });
+}

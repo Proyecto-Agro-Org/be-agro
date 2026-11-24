@@ -1,6 +1,6 @@
 # BE-13 — Checklist de preparación para Production
 
-Estado al cierre de BE13-07 (rama local, base `dev` `81f25ad`). **Nada está habilitado en runtime.** Un ítem solo se marca READY con evidencia; READY local no implica READY en Atlas.
+Estado actualizado al cierre de BE13-08 (rama local, base `dev` `8bd99f4`). **Nada está habilitado en runtime.** Un ítem solo se marca READY con evidencia; READY local no implica READY en Atlas.
 
 | Ítem | Estado | Evidencia / motivo |
 | --- | --- | --- |
@@ -14,15 +14,15 @@ Estado al cierre de BE13-07 (rama local, base `dev` `81f25ad`). **Nada está hab
 | Catálogo de magnitudes/unidades | BLOCKED | Catálogo BE-04 final no aprobado como autoridad versionada |
 | Device status history | BLOCKED | `DEVICE_STATUS_HISTORY_REQUIRED`; hoy fail-closed con estado actual |
 | Mongo topology | PENDING | Replica set local de 3 nodos probado (22 PASS ×2); falta la topología objetivo (Atlas o equivalente) y su validación |
-| Transaction resilience | PENDING | Failover, reintento transitorio, commit ambiguo y concurrencia probados localmente (REAL); F05 y Atlas NO VERIFICABLES; R1 requiere política de reintentos |
+| Transaction resilience | PENDING | Failover, reintento transitorio, commit ambiguo y concurrencia probados localmente (REAL). **R1 resuelto en BE13-08** con recovery majority (25/25 × 2, Q05 REAL). F05 y Atlas NO VERIFICABLES |
 | Idempotencia / atomicidad | READY (local) | BE13-06: claim + medición en una transacción; 29/29 ×2 single-node; multi-nodo consistente; pendiente revalidar en la topología objetivo |
 | Secrets management | PENDING | Ningún secreto en el repo; no existe aún mecanismo de credenciales para Atlas/EMQX |
 | EMQX | BLOCKED | Sin integración, sin verifier, sin autorización |
 | Atlas | BLOCKED | No utilizado; requiere autorización, credenciales gestionadas y campaña propia |
 | Monitoring | PENDING | Sin métricas de ingesta (cuarentenas por código, latencia, reintentos) |
 | Alerting | PENDING | Sin alertas definidas |
-| Retry policy | PENDING | Debe reintentar `persistence-unavailable` y errores de dependencia con la misma entrada (R1); backoff y límites por decidir |
-| DLQ / quarantine store | PENDING | Las cuarentenas son resultados en memoria; no hay almacenamiento ni reprocesamiento |
+| Retry policy | PENDING | Mecanismo implementado (BE13-08): clasificación determinista, política y scheduler inyectables, techo duro de 10, placeholders productivos bloqueantes. Faltan los valores productivos (`maxAttempts`, backoff) |
+| DLQ / quarantine store | READY (local) | BE13-08: cuarentena Mongo sanitizada con dedupe, máquina de estados, auditoría y replay explícito; probada en multi-nodo. Pendiente: autorización de operadores, retención de auditoría, reprocesamiento operado |
 | Deployment | BLOCKED | Root no montado; no hay bootstrap, worker ni consumer |
 | Rollback | PENDING | Sin procedimiento; colecciones nuevas se crean por aprovisionamiento explícito (reversible), sin migraciones de datos existentes |
 | Composition root | READY (offline) | Dependencias obligatorias, placeholders bloqueantes, readiness estático; 31 pruebas |
