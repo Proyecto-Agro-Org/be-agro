@@ -20,7 +20,7 @@ import { ingestionCollections } from '../models/ingestion-persistence.models.js'
 // claim cannot be created nothing is written. Requires a replica set.
 // The guarantee is local to this store; it is not global exactly-once.
 
-export type PersistenceStage = 'after-read' | 'after-claim' | 'after-measurement';
+export type PersistenceStage = 'after-read' | 'after-fence' | 'after-claim' | 'after-measurement';
 export interface PersistenceTestSeams {
   // TEST SEAM ONLY. Never set by the composition. Throwing aborts the transaction.
   readonly faultInjection?: (stage: PersistenceStage, attempt: number) => void | Promise<void>;
@@ -74,8 +74,12 @@ export function createMongoMeasurementPersistence(options: { connection: Connect
     return claim ? { realm, status: 'present', fingerprint: claim.fingerprint, measurementId: claim.measurementId } : { realm, status: 'absent' };
   }
 
-  async function persistAtomically(raw: unknown): Promise<PersistenceOutcome> {
+  async function persistAtomically(raw: unknown, rawOptions?: unknown): Promise<PersistenceOutcome> {
     const input: PersistMeasurementInput = inputSchema.parse(raw);
+    // BE13-10B: optional fence, executed inside THIS transaction with THIS session.
+    if (rawOptions !== undefined && (typeof rawOptions !== 'object' || rawOptions === null)) throw new TypeError('Invalid persistence options');
+    const fence = (rawOptions as { fence?: unknown } | undefined)?.fence;
+    if (fence !== undefined && typeof fence !== 'function') throw new TypeError('Invalid persistence fence');
     const { key, fingerprint } = input;
     if (key.realm !== realm || input.attribution.realm !== realm) throw new Error('INGESTION_REALM_MISMATCH');
     if (input.event.eventId !== key.eventId || input.event.sourceId !== key.sourceId) throw new Error('INGESTION_EVENT_KEY_MISMATCH');
@@ -91,6 +95,11 @@ export function createMongoMeasurementPersistence(options: { connection: Connect
           const existing = await readClaim(key, session);
           if (existing) { outcome = classify(existing, fingerprint); return; }
           await seams.faultInjection?.('after-read', attempt);
+          // 1b. BE13-10B fence: the replay lease must still be held. Its CAS write joins this transaction, so the
+          // measurement is committed only together with the lease being consumed; a concurrent recovery/discard on the
+          // same quarantine document write-conflicts and exactly one side commits. Not held → abort, nothing written.
+          if (fence !== undefined && (await (fence as (t: unknown) => Promise<unknown>)(session)) !== true) throw new Error('INGESTION_REPLAY_FENCE_STALE');
+          await seams.faultInjection?.('after-fence', attempt);
           // 2. Create the claim (reversible until commit).
           const claimed = await claims.updateOne({ _id: claimId as never }, {
             $setOnInsert: { realm, sourceId: key.sourceId, operation: key.operation, eventId: key.eventId, field: key.field, fingerprint, state: 'committed', measurementId },
@@ -121,5 +130,5 @@ export function createMongoMeasurementPersistence(options: { connection: Connect
     } finally { await session.endSession(); }
   }
 
-  return Object.freeze({ lookup, persistAtomically }) as MeasurementPersistencePort;
+  return Object.freeze({ lookup, persistAtomically, replayFencing: 'atomic' as const }) as MeasurementPersistencePort;
 }

@@ -191,7 +191,7 @@ test('BE13-08 unavailable quarantine store or recovery → uncertain / persisten
 // ---------------------------------------------------------------- replay
 async function retryableEntry() {
   let down = true;
-  const s = await setup({ maxAttempts: 1, persistenceWrap: p => ({ lookup: p.lookup, async persistAtomically(i) { if (down) throw new Error('down'); return p.persistAtomically(i); } }) });
+  const s = await setup({ maxAttempts: 1, persistenceWrap: p => ({ lookup: p.lookup, async persistAtomically(i, o) { if (down) throw new Error('down'); return p.persistAtomically(i, o); }, replayFencing: 'atomic' }) });
   const doc = protectedDocument();
   const q = await s.root.ingest(doc, evidenceFor(doc), { field: 'temperature' });
   assert.equal(q.quarantineStatus, 'RETRYABLE');
@@ -203,7 +203,7 @@ test('BE13-08 replay permitted: same identity, dependency fixed → accepted →
   const r = await s.root.replay({ quarantineId: s.q.quarantineId, protectedDocument: s.doc, provenanceEvidence: evidenceFor(s.doc), field: 'temperature' });
   assert.deepEqual([r.status, r.outcome.status, r.quarantineStatus], ['replayed', 'accepted', 'RESOLVED']);
   const stored = await s.quarantine.get(s.q.quarantineId);
-  assert.ok(stored.audit.some(a => a.action === 'transition' && a.outcome === 'accepted'));
+  assert.ok(stored.audit.some(a => a.action === 'transition' && a.outcome === 'replay-persisted')); // BE13-10B: settled by the fence, atomically with the write
   assert.deepEqual([s.persistence.claims.size, s.persistence.measurements.size], [1, 1]);
 });
 

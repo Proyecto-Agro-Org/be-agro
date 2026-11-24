@@ -1,4 +1,4 @@
-param([ValidateRange(1024,65000)][int]$BasePort=27071,[switch]$AuthorizeDisposable,[ValidateSet('be13-07','be13-08','be13-09')][string]$Suite='be13-07')
+param([ValidateRange(1024,65000)][int]$BasePort=27071,[switch]$AuthorizeDisposable,[ValidateSet('be13-07','be13-08','be13-09','be13-10b')][string]$Suite='be13-07')
 # BE13-07 — disposable LOCAL 3-node MongoDB replica set for the resilience campaign.
 # Same guards as be11-local.ps1 (local Docker context, Linux containers, exclusive
 # bridge network bound to 127.0.0.1, ownership labels, tmpfs, no privileges,
@@ -50,7 +50,7 @@ try{
   $stage='wait-topology'
   $null=Wait-MnProbe $nodeIds[0] $ports[0] "const s=rs.status();quit(s.members.filter(m=>m.stateStr==='PRIMARY').length===1&&s.members.filter(m=>m.stateStr==='SECONDARY').length===2?0:1)" 60 'Topology readiness deadline'
   $env:AGRO_MN_ENABLE='AUTHORIZED_DISPOSABLE_MULTINODE_ONLY';$env:AGRO_MN_RUN_ID=$runId;$env:AGRO_MN_HOLDER=$holderId;$env:AGRO_MN_NODES=($nodeIds -join ',');$env:AGRO_MN_BASE_PORT=[string]$BasePort
-  $runner=switch($Suite){'be13-08'{'dist/scripts/audit-be13-08-multinode-local.js'}'be13-09'{'dist/scripts/audit-be13-09-multinode-local.js'}default{'dist/scripts/audit-be13-07-multinode-local.js'}}
+  $runner=switch($Suite){'be13-08'{'dist/scripts/audit-be13-08-multinode-local.js'}'be13-09'{'dist/scripts/audit-be13-09-multinode-local.js'}'be13-10b'{'dist/scripts/audit-be13-10b-multinode-local.js'}default{'dist/scripts/audit-be13-07-multinode-local.js'}}
   $stage="execute-$Suite-suite";Push-Location $repositoryRoot;try{& node $runner 2>&1|Tee-Object -FilePath $runLog;if($LASTEXITCODE -ne 0){throw "$Suite multi-node suite failed"}}finally{Pop-Location}
   $stage='suite-complete'
 }catch{

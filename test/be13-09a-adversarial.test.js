@@ -8,7 +8,7 @@ import { auditValidator } from '../dist/src/models/ingestion-audit.models.js';
 import { emitAlert, sanitizeMetricLabels } from '../dist/src/iot/ingestion-observability.js';
 import * as auditStoreModule from '../dist/src/repositories/mongo-ingestion-audit.store.js';
 import { protectedDocument, world, createInMemoryPersistence, createTestOnlyRetryPolicy, createDeterministicScheduler, createInMemoryRecovery,
-  createInMemoryQuarantine, createInMemoryAudit, createSyntheticOperatorAuthority, createRecordingMetrics, createRecordingAlerts } from '../test-support/be13-composition.fixtures.js';
+  createInMemoryQuarantine, createInMemoryAudit, createSyntheticOperatorAuthority, createRecordingMetrics, createRecordingAlerts, createSyntheticLeaseGovernance } from '../test-support/be13-composition.fixtures.js';
 
 const ACK = { mode: 'current-state-only', limitation: 'DEVICE_STATUS_HISTORY_REQUIRED' };
 const verifier = { verify: e => (e && e.syntheticTestOnly === true ? { sourceId: e.sourceId, operation: 'telemetry', eventId: e.eventId, device: { kind: 'mqtt-clientid', value: e.clientid } } : null) };
@@ -18,13 +18,15 @@ const table = { 'tok-admin': { operatorId: 'op-admin', realms: ['test'], capabil
   'tok-none': { operatorId: 'op-none', realms: ['test'], capabilities: [], authenticationReference: 'synthetic:none' } };
 async function setup(extra = {}) {
   const w = world(); const persistence = createInMemoryPersistence(); let failing = true;
-  const flaky = { lookup: k => persistence.lookup(k), persistAtomically: async i => { if (failing) throw new Error('down'); return persistence.persistAtomically(i); } };
+  const flaky = { lookup: k => persistence.lookup(k), persistAtomically: async (i, o) => { if (failing) throw new Error('down'); return persistence.persistAtomically(i, o); }, replayFencing: 'atomic' };
   const quarantine = await createInMemoryQuarantine(), audit = createInMemoryAudit(), metrics = createRecordingMetrics(), alerts = createRecordingAlerts();
+  const lease = createSyntheticLeaseGovernance();
   const deps = { realmAuthority: { authorizedRealm: () => 'test' }, provenanceVerifier: verifier, hardware: w.deps.hardware, temporal: w.deps.temporal, catalogue: w.deps.catalogue,
     policies: w.deps.policies, identityStore: w.deps.identityStore, persistence: flaky,
     be12: { temporal: { select: async e => ({ status: 'trusted', at: e.receivedAt, clock: 'received-at' }) }, catalogue: { accepts: async () => true } },
     deviceStatusHistory: ACK, retryPolicy: createTestOnlyRetryPolicy(1), retryScheduler: createDeterministicScheduler(), recovery: createInMemoryRecovery(persistence),
-    quarantine, authorization: createSyntheticOperatorAuthority(table), audit, metrics, alerts, retention: { mode: 'retain-indefinitely' }, ...extra };
+    quarantine, authorization: createSyntheticOperatorAuthority(table), audit, metrics, alerts, retention: { mode: 'retain-indefinitely' },
+    timeAuthority: lease.timeAuthority, leasePolicy: lease.leasePolicy, ...extra };
   const boot = createIngestionOperationsBootstrap(deps);
   const doc = protectedDocument(); const q = await boot.ingest(doc, evidenceFor(doc), { field: 'temperature' });
   failing = false;

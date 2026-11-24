@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto';
-import type { Connection } from 'mongoose';
+import type { ClientSession, Connection } from 'mongoose';
 import { z } from 'zod';
 import { catalogueRealmSchema } from '../auth/identity-catalogue.schemas.js';
 import { initialQuarantineStatus, isTransitionAllowed } from '../iot/ingestion-failure-classification.js';
 import type {
   IngestionQuarantineStore,
   QuarantineAuditEntry,
+  LeaseAcquireResult,
   QuarantineEntry,
   QuarantineRecord,
+  ReplayHolder,
   QuarantineStatus,
   TransitionResult,
 } from '../iot/ingestion-recovery.contracts.js';
@@ -42,7 +44,14 @@ const storedSchema = z.object({ _id: idSchema, realm: catalogueRealmSchema, stag
   retryClass: quarantineEntrySchema.shape.retryClass, fingerprint: hex.nullable(), documentDigest: hex.nullable(), status: statusSchema,
   version: z.number().int().min(1), attemptCount: z.number().int().min(1), firstSeenAt: date, lastSeenAt: date, createdAt: date, updatedAt: date,
   audit: z.array(z.object({ action: z.enum(['recorded', 'transition', 'replay']), at: date, outcome: code, reasonCode: code.nullable(), evidence: evidence.nullable() }).strict()).max(100),
-}).strict();
+  lease: z.object({ ownerId: evidence.max(128), acquiredAt: date, token: z.number().int().min(1) }).strict().optional(),
+}).strict().refine(d => (d.status === 'REPLAYING') === (d.lease !== undefined), 'lease present iff REPLAYING');
+const leaseOwner = z.string().min(1).max(128).regex(/^[A-Za-z0-9:_./-]+$/);
+const leaseToken = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+const holderSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('lease'), ownerId: leaseOwner, leaseToken }).strict(),
+  z.object({ kind: z.literal('unleased') }).strict(),
+]);
 
 export function quarantineIdFor(entry: QuarantineEntry): string {
   const key = ['be13-08/q1', entry.realm, entry.stage, entry.sourceId, entry.operation, entry.eventId, entry.field, entry.reasonCode,
@@ -65,8 +74,8 @@ export function createMongoIngestionQuarantineStore(options: { connection: Conne
     const id = idSchema.parse(rawId);
     const raw = await rows.findOne({ _id: id as never, realm }, { maxTimeMS: 3000, readConcern: { level: 'majority' } } as never);
     if (raw === null) return null;
-    const { _id, createdAt: _c, updatedAt: _u, ...doc } = storedSchema.parse(raw);
-    return Object.freeze({ ...doc, quarantineId: _id, audit: Object.freeze(doc.audit.map(a => Object.freeze(a))) });
+    const { _id, createdAt: _c, updatedAt: _u, lease, ...doc } = storedSchema.parse(raw);
+    return Object.freeze({ ...doc, quarantineId: _id, audit: Object.freeze(doc.audit.map(a => Object.freeze(a))), lease: lease ? Object.freeze({ ...lease }) : null });
   }
 
   return Object.freeze({
@@ -91,6 +100,8 @@ export function createMongoIngestionQuarantineStore(options: { connection: Conne
     async transition(input: { quarantineId: string; from: QuarantineStatus; to: QuarantineStatus; evidence: string | null; outcome: string; expectedVersion?: number }): Promise<TransitionResult> {
       const parsed = z.object({ quarantineId: idSchema, from: statusSchema, to: statusSchema, evidence: evidence.nullable(), outcome: code,
         expectedVersion: z.number().int().min(1).optional() }).strict().parse(input);
+      // BE13-10B: REPLAYING is entered and left ONLY through the lease CAS (acquireLease / settleReplay).
+      if (parsed.from === 'REPLAYING' || parsed.to === 'REPLAYING') return 'not-allowed';
       const current = await get(parsed.quarantineId);
       if (!current) return 'not-found';
       if (current.status !== parsed.from || (parsed.expectedVersion !== undefined && current.version !== parsed.expectedVersion)) return 'stale';
@@ -100,6 +111,34 @@ export function createMongoIngestionQuarantineStore(options: { connection: Conne
       const filter = { _id: parsed.quarantineId as never, realm, status: parsed.from, ...(parsed.expectedVersion === undefined ? {} : { version: parsed.expectedVersion }) };
       const result = await rows.updateOne(filter, [{ $set: { status: literal(parsed.to), updatedAt: '$$NOW', version: { $add: ['$version', 1] },
         audit: auditPush({ action: 'transition', outcome: parsed.outcome, reasonCode: null, evidence: parsed.evidence }) } }], { writeConcern, maxTimeMS: 3000 } as never);
+      return result.modifiedCount === 1 ? 'transitioned' : 'stale';
+    },
+    async acquireLease(input: { quarantineId: string; expectedVersion: number; ownerId: string; acquiredAt: number }): Promise<LeaseAcquireResult> {
+      const parsed = z.object({ quarantineId: idSchema, expectedVersion: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER - 1), ownerId: leaseOwner,
+        acquiredAt: z.number().int().min(0).max(8.64e15) }).strict().parse(input);
+      const token = parsed.expectedVersion + 1;
+      // ONE conditional write: realm + id + RETRYABLE + exact version. No read-then-write.
+      const result = await rows.updateOne({ _id: parsed.quarantineId as never, realm, status: 'RETRYABLE', version: parsed.expectedVersion }, [{ $set: {
+        status: literal('REPLAYING'), version: literal(token), updatedAt: '$$NOW',
+        lease: { ownerId: literal(parsed.ownerId), acquiredAt: literal(new Date(parsed.acquiredAt)), token: literal(token) },
+        audit: auditPush({ action: 'transition', outcome: 'lease-acquired', reasonCode: null, evidence: null }) } }], { writeConcern, maxTimeMS: 3000 } as never);
+      if (result.modifiedCount === 1) return Object.freeze({ result: 'acquired' as const, leaseToken: token });
+      const current = await get(parsed.quarantineId);
+      return Object.freeze({ result: !current ? 'not-found' as const : current.status === 'RETRYABLE' || current.status === 'REPLAYING' ? 'stale' as const : 'not-allowed' as const });
+    },
+    async settleReplay(input: { quarantineId: string; holder: ReplayHolder; to: 'RESOLVED' | 'RETRYABLE' | 'BLOCKED'; outcome: string; evidence: string | null; expectedVersion?: number },
+      transaction?: unknown): Promise<TransitionResult> {
+      const parsed = z.object({ quarantineId: idSchema, holder: holderSchema, to: z.enum(['RESOLVED', 'RETRYABLE', 'BLOCKED']), outcome: code, evidence: evidence.nullable(),
+        expectedVersion: z.number().int().min(1).optional() }).strict().parse(input);
+      if (parsed.holder.kind === 'unleased' && parsed.to === 'RETRYABLE') return 'not-allowed';
+      const filter: Record<string, unknown> = { _id: parsed.quarantineId, realm, ...(parsed.expectedVersion === undefined ? {} : { version: parsed.expectedVersion }) };
+      if (parsed.holder.kind === 'lease') Object.assign(filter, { status: 'REPLAYING', 'lease.ownerId': parsed.holder.ownerId, 'lease.token': parsed.holder.leaseToken });
+      else filter.status = 'RETRYABLE';
+      const update = [{ $set: { status: literal(parsed.to), updatedAt: '$$NOW', version: { $add: ['$version', 1] },
+        audit: auditPush({ action: 'transition', outcome: parsed.outcome, reasonCode: null, evidence: parsed.evidence }) } }, { $unset: 'lease' }];
+      // Inside a transaction the write concern belongs to the transaction (setting it per operation is an error).
+      const options = transaction === undefined ? { writeConcern, maxTimeMS: 3000 } : { session: transaction as ClientSession, maxTimeMS: 3000 };
+      const result = await rows.updateOne(filter as never, update, options as never);
       return result.modifiedCount === 1 ? 'transitioned' : 'stale';
     },
     async appendAudit(rawId: string, rawEntry: QuarantineAuditEntry) {

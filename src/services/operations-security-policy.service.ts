@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { catalogueRealmSchema } from '../auth/identity-catalogue.schemas.js';
 import { isBlockingPlaceholder } from '../adapters/ingestion-production-placeholders.js';
 import { DEFAULT_AUTHORITY_TIMEOUT_MS, runBounded } from './authority-call.js';
+import { leasePolicyDecisionSchema, timeAuthorityResultSchema } from './replay-lease-governance.js';
 import type { AuthorizationDecision, OperatorCapability, OperatorPrincipal } from '../iot/ingestion-operations.contracts.js';
 import type { TrustGateRealm } from '../iot/trust-gate.contracts.js';
 import type {
@@ -39,11 +40,9 @@ const sodDecisionSchema = z.discriminatedUnion('decision', [
   z.object({ realm: catalogueRealmSchema, decision: z.literal('permit'), policyRevision: revision }).strict(),
   z.object({ realm: catalogueRealmSchema, decision: z.literal('conflict'), conflictingCapabilities: z.array(capabilitySchema).max(CAPABILITIES.length), policyRevision: revision }).strict(),
 ]);
-const timeSchema = z.discriminatedUnion('status', [
-  z.object({ realm: catalogueRealmSchema, status: z.literal('trusted'), at: instant, authorityRevision: revision }).strict(),
-  z.object({ realm: catalogueRealmSchema, status: z.literal('untrusted') }).strict(),
-]);
-const leaseDecisionSchema = z.object({ realm: catalogueRealmSchema, status: z.enum(['ACTIVE', 'EXPIRED']), recoveryByNonOwner: z.enum(['never', 'when-expired']), policyRevision: revision }).strict();
+// BE13-10B: time and lease-decision schemas are shared with the runtime lease governance (one semantics).
+const timeSchema = timeAuthorityResultSchema;
+const leaseDecisionSchema = leasePolicyDecisionSchema;
 const leaseSchema = z.object({ realm: catalogueRealmSchema, quarantineId: quarantineIdSchema, leaseId: safeRef, ownerOperatorId: safeRef, acquiredAt: instant,
   state: z.enum(['ACTIVE', 'RELEASED']), version: z.number().int().min(1) }).strict();
 const evidenceInputSchema = z.object({ quarantineId: quarantineIdSchema, evidence: z.object({ evidenceType: z.enum(['policy-approval', 'authority-restored', 'dependency-restored', 'data-verified', 'operator-decision']),

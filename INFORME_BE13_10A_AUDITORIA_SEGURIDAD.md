@@ -30,7 +30,7 @@
 | ID | Severidad | Estado |
 | --- | --- | --- |
 | H1 readiness lanzaba ante un getter hostil | BAJO | CORREGIDO |
-| H2 S7 de BE13-09 (liberar un lease sin propiedad) | MEDIO | Contrato listo; **abierto en runtime** hasta persistir el propietario y conectar el governor (requiere decidir la expiración) |
+| H2 S7 de BE13-09 (liberar un lease sin propiedad) | MEDIO | Contrato listo en BE13-10A; **CERRADO en BE13-10B** (propiedad persistida, expiración fail-closed, fencing transaccional) |
 | H3 literal `Date.now` en un comentario | INFORMATIVO | CORREGIDO |
 
 Sin hallazgos ALTOS ni CRÍTICOS.

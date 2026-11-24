@@ -25,13 +25,16 @@ import type {
 import type {
   IngestionQuarantineStore,
   IngestionRetryPolicy,
+  LeaseAcquireResult,
   PersistenceRecoveryPort,
   QuarantineStatus,
   ResilientMeasurementIngestion,
 } from '../iot/ingestion-recovery.contracts.js';
+import type { OperationsTimeAuthority, ReplayLeasePolicy } from '../iot/operations-security-policy.contracts.js';
 import type { TrustGateRealm } from '../iot/trust-gate.contracts.js';
 import { runBounded } from './authority-call.js';
 import { createResilientMeasurementIngestionRoot, describeIngestionRootReadiness } from './measurement-ingestion-root.js';
+import { evaluateReplayLeaseExpiry, readTrustedTime } from './replay-lease-governance.js';
 
 // BE13-09 — operations governance (offline). Trust model: authorization, audit,
 // metrics and alerts are authorities INJECTED by the bootstrap. Whoever can
@@ -81,6 +84,8 @@ function decorateQuarantine(realm: TrustGateRealm, inner: IngestionQuarantineSto
     },
     get: id => inner.get(id),
     transition: input => inner.transition(input),
+    acquireLease: input => inner.acquireLease(input),
+    settleReplay: (input, transaction) => inner.settleReplay(input, transaction),
     appendAudit: (id, entry) => inner.appendAudit(id, entry),
     ...(typeof inner.summarize === 'function' ? { summarize: () => inner.summarize!() } : {}),
   });
@@ -113,20 +118,24 @@ function decorateRetryPolicy(inner: IngestionRetryPolicy, metrics: IngestionMetr
 }
 
 // ---------------------------------------------------------------- operations service
-type Op = 'unblock' | 'block' | 'resolve' | 'discard' | 'release-lease';
+// BE13-10B: lease release/recovery are NOT generic transitions any more (see leaseOp): REPLAYING is only left by lease CAS.
+type Op = 'unblock' | 'block' | 'resolve' | 'discard';
 const OP_RULES: Readonly<Record<Op, { capability: OperatorCapability; to: QuarantineStatus; from: readonly QuarantineStatus[]; evidence: (retryClass: string) => readonly EvidenceType[] }>> = freeze<Readonly<Record<Op, { capability: OperatorCapability; to: QuarantineStatus; from: readonly QuarantineStatus[]; evidence: (retryClass: string) => readonly EvidenceType[] }>>>({
   'unblock': { capability: 'QUARANTINE_UNBLOCK', to: 'RETRYABLE', from: ['BLOCKED', 'OPEN'],
     // Human-decision blocks need a structured policy approval; still DECLARED_UNVERIFIED.
     evidence: c => (c === 'policy-blocked' ? ['policy-approval'] : ['dependency-restored', 'authority-restored']) },
   'block': { capability: 'QUARANTINE_BLOCK', to: 'BLOCKED', from: ['OPEN', 'RETRYABLE'], evidence: () => ['operator-decision'] },
   'resolve': { capability: 'QUARANTINE_RESOLVE', to: 'RESOLVED', from: ['RETRYABLE'], evidence: () => ['data-verified'] },
+  // REPLAYING is deliberately absent: an entry under an active lease can never be discarded (S7). After an authorized
+  // expired-lease recovery it is RETRYABLE again, and discard is a separate, audited operation.
   'discard': { capability: 'QUARANTINE_DISCARD', to: 'DISCARDED', from: ['OPEN', 'RETRYABLE', 'BLOCKED'], evidence: () => ['operator-decision'] },
-  'release-lease': { capability: 'QUARANTINE_REPLAY', to: 'RETRYABLE', from: ['REPLAYING'], evidence: () => ['operator-decision'] },
 });
+const LEASE_EVIDENCE: readonly EvidenceType[] = ['operator-decision'];
 
 function createOperations(realm: TrustGateRealm, deps: { quarantine: IngestionQuarantineStore; audit: IngestionAuditStore; authorization: OperatorAuthorizationPort;
-  recovery: PersistenceRecoveryPort; replayer: ResilientMeasurementIngestion; metrics: IngestionMetricsPort; alerts: IngestionAlertPort }): IngestionOperations {
-  const { quarantine, audit, authorization, recovery, replayer, metrics, alerts } = deps;
+  recovery: PersistenceRecoveryPort; replayer: ResilientMeasurementIngestion; metrics: IngestionMetricsPort; alerts: IngestionAlertPort;
+  timeAuthority: OperationsTimeAuthority; leasePolicy: ReplayLeasePolicy }): IngestionOperations {
+  const { quarantine, audit, authorization, recovery, replayer, metrics, alerts, timeAuthority, leasePolicy } = deps;
   const appendReceiptSchema = z.object({ realm: z.literal(realm), auditId: z.string().regex(/^a_[0-9a-f]{64}$/), sequence: z.number().int().min(1) }).strict();
   const denied = (reason: OperationDenial) => Object.freeze({ status: 'denied' as const, reason });
 
@@ -228,16 +237,35 @@ function createOperations(realm: TrustGateRealm, deps: { quarantine: IngestionQu
     if (record.version !== version.data) return deny('stale-version');
     if (!(await auditRequired({ realm, quarantineId: record.quarantineId, eventId: record.eventId, action: 'replay-requested', ...actor, outcome: 'requested', reasonCode: record.reasonCode, evidence: null })))
       return denied('audit-unavailable');
-    // Lease: RETRYABLE(v) → REPLAYING by CAS. A concurrent replay, discard or resolve loses here.
-    const leased = await quarantine.transition({ quarantineId: record.quarantineId, from: 'RETRYABLE', to: 'REPLAYING', expectedVersion: record.version,
-      evidence: 'operator:' + principal.operatorId.slice(0, 200), outcome: 'replay-started' });
-    if (leased !== 'transitioned') return deny(leased === 'stale' ? 'stale-version' : 'transition-not-allowed');
+    // BE13-10B lease: owner = the AUTHORIZED principal's operatorId; acquiredAt = TRUSTED time (never the caller, never a
+    // wall-clock read). Without trusted time no lease is taken (fail-closed). ONE CAS: RETRYABLE(v) → REPLAYING + lease.
+    const acquiredAt = await readTrustedTime(timeAuthority, realm);
+    if (acquiredAt === null) return deny('time-authority-unavailable');
+    let acquired: LeaseAcquireResult;
+    try { acquired = await quarantine.acquireLease({ quarantineId: record.quarantineId, expectedVersion: record.version, ownerId: principal.operatorId, acquiredAt }); }
+    catch { acquired = Object.freeze({ result: 'stale' as const }); }
+    if (acquired.result !== 'acquired')
+      return deny(acquired.result === 'stale' ? 'stale-version' : acquired.result === 'not-found' ? 'quarantine-not-found' : 'transition-not-allowed');
+    const lease = Object.freeze({ ownerId: principal.operatorId, leaseToken: acquired.leaseToken });
+    const holder = Object.freeze({ kind: 'lease' as const, ...lease });
+    await auditBestEffort(audit, { realm, quarantineId: record.quarantineId, eventId: record.eventId, action: 'lease-acquired', ...actor, outcome: 'acquired', reasonCode: record.reasonCode, evidence: null });
     if (!(await auditRequired({ realm, quarantineId: record.quarantineId, eventId: record.eventId, action: 'replay-started', ...actor, outcome: 'started', reasonCode: record.reasonCode, evidence: null }))) {
-      await quarantine.transition({ quarantineId: record.quarantineId, from: 'REPLAYING', to: 'RETRYABLE', evidence: 'audit-unavailable', outcome: 'replay-aborted' }).catch(() => 'stale');
+      await quarantine.settleReplay({ quarantineId: record.quarantineId, holder, to: 'RETRYABLE', evidence: 'audit-unavailable', outcome: 'replay-aborted' }).catch(() => 'stale');
       return denied('audit-unavailable');
     }
     const result = await replayer.replay({ quarantineId: record.quarantineId, protectedDocument: input.protectedDocument, provenanceEvidence: input.provenanceEvidence,
-      field: input.field, leased: true });
+      field: input.field, lease });
+    if (result.status === 'replay-rejected' && result.reasonCode === 'replay-fence-unsupported') {
+      // Nothing was attempted: give the lease back (owner CAS) and refuse.
+      await quarantine.settleReplay({ quarantineId: record.quarantineId, holder, to: 'RETRYABLE', evidence: 'replay-fence-unsupported', outcome: 'replay-aborted' }).catch(() => 'stale');
+      return deny('replay-fence-unsupported');
+    }
+    if (result.status === 'replay-rejected' && result.reasonCode === 'stale-replay-lease') {
+      // S7: the lease was lost before the final write; the fence prevented the measurement. Nothing to settle: not ours any more.
+      await auditBestEffort(audit, { realm, quarantineId: record.quarantineId, eventId: record.eventId, action: 'stale-replay-blocked', ...actor, outcome: 'stale-replay-lease', reasonCode: record.reasonCode, evidence: null });
+      await emitMetric(metrics, 'replay_total', { stage: 'operations', outcome: 'stale-replay-lease' });
+      return denied('stale-replay-lease');
+    }
     const outcome = result.status === 'replayed' ? result.outcome.status : result.reasonCode;
     const auditComplete = await auditBestEffort(audit, { realm, quarantineId: record.quarantineId, eventId: record.eventId, action: 'replay-result', ...actor,
       outcome: outcome.replace(/[^a-z0-9-]/g, '-'), reasonCode: record.reasonCode, evidence: null });
@@ -248,13 +276,65 @@ function createOperations(realm: TrustGateRealm, deps: { quarantine: IngestionQu
       auditComplete, replay: result });
   }
 
+  // BE13-10B — lease release (owner) and expired-lease recovery (non-owner). Both end the lease with ONE CAS on
+  // (realm, id, REPLAYING, exact owner, exact token, exact version) back to RETRYABLE, after a REQUIRED audit.
+  async function leaseOp(kind: 'owner-release' | 'expired-recovery', credential: unknown,
+    input: { quarantineId: string; expectedVersion: number; evidence: ResolutionEvidenceInput }): Promise<OperationResult> {
+    const id = quarantineIdSchema.safeParse(input?.quarantineId), version = versionSchema.safeParse(input?.expectedVersion);
+    if (!id.success || !version.success) return denied('invalid-request');
+    const ev = evidenceSchema.safeParse(input?.evidence);
+    // Owner release is part of the replay lifecycle (QUARANTINE_REPLAY). Recovering SOMEONE ELSE's lease returns a stuck
+    // entry to RETRYABLE: semantically an unblock (QUARANTINE_UNBLOCK), so SoD/mapping can separate it from replaying.
+    const principal = await authorize(credential, kind === 'owner-release' ? 'QUARANTINE_REPLAY' : 'QUARANTINE_UNBLOCK', id.data);
+    if (typeof principal === 'string') return denied(principal);
+    if (!ev.success) return denied('evidence-required');
+    const record = await load(id.data);
+    if (!record) return denied('quarantine-not-found');
+    const actor = { actorId: principal.operatorId, actorCapabilities: principal.capabilities };
+    const evidence = Object.freeze({ evidenceType: ev.data.evidenceType, reference: ev.data.reference, verification: 'DECLARED_UNVERIFIED' as const });
+    const refuse = async (reason: OperationDenial) => {
+      await auditBestEffort(audit, { realm, quarantineId: record.quarantineId, eventId: record.eventId, action: 'lease-release-denied', ...actor, outcome: reason,
+        reasonCode: record.reasonCode, evidence });
+      await emitMetric(metrics, 'quarantine_transition_total', { stage: 'operations', outcome: reason });
+      return denied(reason);
+    };
+    const lease = record.lease;
+    if (record.status !== 'REPLAYING' || !lease) return refuse('transition-not-allowed');
+    if (record.version !== version.data) return refuse('stale-version');
+    if (!LEASE_EVIDENCE.includes(ev.data.evidenceType)) return refuse('evidence-type-not-accepted');
+    if (kind === 'owner-release') {
+      // Stable authorized identity, never an object reference or a request field.
+      if (lease.ownerId !== principal.operatorId) return refuse('lease-owned-by-another-operator');
+    } else {
+      const expiry = await evaluateReplayLeaseExpiry({ realm, timeAuthority, leasePolicy, quarantineId: record.quarantineId, lease });
+      if (expiry.status !== 'EXPIRED')
+        return refuse(expiry.basis === 'time-untrusted' ? 'time-authority-unavailable' : expiry.basis === 'policy-unavailable' ? 'lease-policy-unavailable' : 'lease-active');
+    }
+    if (!(await auditRequired({ realm, quarantineId: record.quarantineId, eventId: record.eventId, action: kind === 'owner-release' ? 'lease-release-requested' : 'lease-recovery-requested',
+      ...actor, outcome: kind, reasonCode: record.reasonCode, evidence }))) return denied('audit-unavailable');
+    const ended = kind === 'owner-release' ? 'lease-released-owner' : 'lease-recovered-expired';
+    let result: string;
+    try {
+      result = await quarantine.settleReplay({ quarantineId: record.quarantineId, holder: { kind: 'lease', ownerId: lease.ownerId, leaseToken: lease.token }, to: 'RETRYABLE',
+        expectedVersion: record.version, outcome: ended, evidence: `${evidence.evidenceType}:${evidence.reference}`.slice(0, 256) });
+    } catch { result = 'stale'; }
+    if (result !== 'transitioned') return refuse('stale-version'); // a concurrent recovery/completion won the CAS
+    const auditComplete = await auditBestEffort(audit, { realm, quarantineId: record.quarantineId, eventId: record.eventId, action: ended, ...actor, outcome: 'done',
+      reasonCode: record.reasonCode, evidence });
+    if (!auditComplete) await emitAlert(alerts, { type: 'AUDIT_RESULT_MISSING', severity: 'CRITICAL', reasonCode: null });
+    await emitMetric(metrics, 'quarantine_transition_total', { stage: 'operations', outcome: 'RETRYABLE' });
+    const after = await load(record.quarantineId);
+    return Object.freeze({ status: 'done', quarantineId: record.quarantineId, quarantineStatus: after?.status ?? 'RETRYABLE', version: after?.version ?? record.version + 1, auditComplete });
+  }
+
   return freeze<IngestionOperations>({
     view, replay,
     unblock: (c, i) => transitionOp('unblock', c, i),
     block: (c, i) => transitionOp('block', c, i),
     resolve: (c, i) => transitionOp('resolve', c, i),
     discard: (c, i) => transitionOp('discard', c, i),
-    releaseLease: (c, i) => transitionOp('release-lease', c, i),
+    releaseLease: (c, i) => leaseOp('owner-release', c, i),
+    recoverExpiredLease: (c, i) => leaseOp('expired-recovery', c, i),
   });
 }
 
@@ -264,6 +344,9 @@ const OPS_REQUIREMENTS: ReadonlyArray<readonly [string, (d: IngestionOperationsB
   ['audit', d => d.audit, ['append', 'listForQuarantine', 'ping']],
   ['metrics', d => d.metrics, ['increment']],
   ['alerts', d => d.alerts, ['emit']],
+  // BE13-10B lease governance
+  ['timeAuthority', d => d.timeAuthority, ['now']],
+  ['leasePolicy', d => d.leasePolicy, ['evaluate']],
 ];
 const hasMethods = (v: unknown, methods: readonly string[]) => typeof v === 'object' && v !== null && methods.every(m => typeof (v as Record<string, unknown>)[m] === 'function');
 const validRetention = (r: unknown): r is AuditRetentionPolicy => typeof r === 'object' && r !== null && ['retain-indefinitely', 'pending-decision'].includes((r as { mode?: unknown }).mode as string);
@@ -279,10 +362,11 @@ export function describeOperationsReadiness(input: unknown): OperationsReadiness
   let retention: unknown; try { retention = deps.retention; } catch { retention = undefined; }
   dependencies.retention = !validRetention(retention) ? 'MISSING' : retention.mode === 'pending-decision' ? 'BLOCKED' : 'INJECTED_UNVERIFIED';
   const technicalTestReady = technical.overall === 'READY_FOR_TEST';
-  const operationsTestReady = technicalTestReady && ['authorization', 'audit', 'metrics', 'alerts', 'retention'].every(n => dependencies[n] === 'INJECTED_UNVERIFIED');
+  const operationsTestReady = technicalTestReady && ['authorization', 'audit', 'metrics', 'alerts', 'retention', 'timeAuthority', 'leasePolicy']
+    .every(n => dependencies[n] === 'INJECTED_UNVERIFIED');
   return Object.freeze({ technicalTestReady, operationsTestReady, productionReady: false as const, dependencies: Object.freeze(dependencies),
     limitations: Object.freeze(['DEVICE_STATUS_HISTORY_REQUIRED', 'AUDIT_RETENTION_PRODUCTION_PENDING', 'EVIDENCE_DECLARED_UNVERIFIED', 'OPERATOR_AUTHENTICATION_EXTERNAL',
-      'NO_RUNTIME_NO_ENDPOINTS']) });
+      'NO_RUNTIME_NO_ENDPOINTS', 'LEASE_DURATION_PENDING', 'TIME_AUTHORITY_PENDING']) });
 }
 
 const STATUSES: readonly QuarantineStatus[] = ['OPEN', 'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED'];
@@ -311,7 +395,7 @@ export function createIngestionOperationsBootstrap(deps: IngestionOperationsBoot
   const root = createResilientMeasurementIngestionRoot({ ...deps, realmAuthority: { authorizedRealm: () => realm }, quarantine, recovery,
     retryPolicy: decorateRetryPolicy(deps.retryPolicy, deps.metrics) });
   const operations = createOperations(realm, { quarantine, audit: deps.audit, authorization: deps.authorization, recovery: deps.recovery, replayer: root,
-    metrics: deps.metrics, alerts: deps.alerts });
+    metrics: deps.metrics, alerts: deps.alerts, timeAuthority: deps.timeAuthority, leasePolicy: deps.leasePolicy });
 
   async function ingest(protectedDocument: unknown, provenanceEvidence: unknown, selection: { readonly field: string }) {
     const result = await root.ingest(protectedDocument, provenanceEvidence, selection);

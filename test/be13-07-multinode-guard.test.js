@@ -37,8 +37,8 @@ test('MN launcher: closed chaos actions, loopback publishing, ownership labels a
   assert.match(launcher, /--network "container:\$holderId"/);
   assert.match(launcher, /Owned resource cleanup unconfirmed/);
   // Closed list of runners with literal paths; the suite name never becomes part of a path.
-  assert.match(launcher, /ValidateSet\('be13-07','be13-08','be13-09'\)/);
-  assert.match(launcher, /'be13-08'\{'dist\/scripts\/audit-be13-08-multinode-local\.js'\}'be13-09'\{'dist\/scripts\/audit-be13-09-multinode-local\.js'\}default\{'dist\/scripts\/audit-be13-07-multinode-local\.js'\}/);
+  assert.match(launcher, /ValidateSet\('be13-07','be13-08','be13-09','be13-10b'\)/);
+  assert.match(launcher, /'be13-08'\{'dist\/scripts\/audit-be13-08-multinode-local\.js'\}'be13-09'\{'dist\/scripts\/audit-be13-09-multinode-local\.js'\}'be13-10b'\{'dist\/scripts\/audit-be13-10b-multinode-local\.js'\}default\{'dist\/scripts\/audit-be13-07-multinode-local\.js'\}/);
   assert.match(launcher, /& node \$runner/);
   assert.doesNotMatch(launcher, /& node ["']?\$Suite/);
   assert.doesNotMatch(launcher, /--privileged|-v |--volume|mongodb\+srv/);
