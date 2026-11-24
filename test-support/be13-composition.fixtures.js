@@ -1,6 +1,7 @@
 // SYNTHETIC TEST SUPPORT for BE13-05. Not production code, not a persistence
 // layer, not an approved policy. Lives outside test/ so `node --test` does not
 // load it as a suite. Everything here is an explicit test double.
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -127,7 +128,8 @@ export const objectsOf = (v, out = new Set()) => { if (v !== null && typeof v ==
 export function createInMemoryPersistence(calls = []) {
   const claims = new Map(), measurements = new Map();
   const id = k => JSON.stringify([k.realm, k.sourceId, k.operation, k.eventId, k.field]);
-  const mid = k => 'm_' + Buffer.from(id(k)).toString('hex').padEnd(64, '0').slice(0, 64);
+  // BE13-11A: hash the whole key (the former truncation made distinct events collide and silently overwrite each other).
+  const mid = k => 'm_' + createHash('sha256').update(id(k)).digest('hex');
   return {
     claims, measurements,
     async lookup(k) { calls.push(['persist:lookup', k]); const c = claims.get(id(k));

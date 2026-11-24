@@ -7,15 +7,18 @@ import type { AlertEvent, IngestionAlertPort, IngestionMetricsPort, MetricLabels
 // Labels are mapped onto closed vocabularies so no identifier (eventId, clientId,
 // sensorId, deviceId, quarantineId, sourceId, realm) can ever become a label value.
 const METRICS: ReadonlySet<string> = new Set(['ingestion_total', 'ingestion_accepted_total', 'ingestion_duplicate_total', 'ingestion_quarantined_total',
-  'retry_attempt_total', 'recovery_outcome_total', 'quarantine_transition_total', 'replay_total', 'authorization_denied_total']);
-const STAGES: ReadonlySet<string> = new Set(['mapper', 'trust-gate', 'builder', 'be12', 'composition', 'persistence', 'recovery', 'retry', 'operations']);
+  'retry_attempt_total', 'recovery_outcome_total', 'quarantine_transition_total', 'replay_total', 'authorization_denied_total',
+  'broker_delivery_total', 'provenance_result_total', 'mqtt_boundary_rejected_total']);
+const STAGES: ReadonlySet<string> = new Set(['mapper', 'trust-gate', 'builder', 'be12', 'composition', 'persistence', 'recovery', 'retry', 'operations', 'boundary']);
 const CLASSES: ReadonlySet<string> = new Set(['transient', 'ambiguous-commit', 'validation', 'security', 'conflict', 'policy-blocked', 'consistency', 'unknown']);
 const OUTCOMES: ReadonlySet<string> = new Set(['accepted', 'duplicate', 'recovered-committed', 'quarantined', 'uncertain', 'committed', 'not-committed', 'inconsistent',
   'done', 'denied', 'stale-version', 'transition-not-allowed', 'replayed', 'replay-rejected', 'retry', 'stop', 'unauthenticated', 'forbidden', 'realm-out-of-scope',
   'audit-unavailable', 'evidence-required', 'evidence-type-not-accepted', 'resolve-not-verified', 'quarantine-not-found', 'invalid-request',
-  'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED', 'OPEN']);
+  'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED', 'OPEN',
+  'ingested', 'rejected', 'verified', 'unverified', 'unavailable']);
 const ALERTS: ReadonlySet<string> = new Set(['QUARANTINE_BACKLOG_HIGH', 'RETRY_EXHAUSTED', 'PERSISTENCE_INCONSISTENT', 'AUTHORIZATION_DENIED_SPIKE',
-  'RECOVERY_INCONSISTENT', 'REALM_ISOLATION_VIOLATION', 'AUDIT_RESULT_MISSING']);
+  'RECOVERY_INCONSISTENT', 'REALM_ISOLATION_VIOLATION', 'AUDIT_RESULT_MISSING',
+  'PROVENANCE_REJECTION_SPIKE', 'BROKER_VERIFIER_UNAVAILABLE', 'TECHNICAL_IDENTITY_MISMATCH']);
 const SEVERITIES: ReadonlySet<string> = new Set(['INFO', 'WARNING', 'CRITICAL']);
 const OBSERVABILITY_TIMEOUT_MS = 1_000;
 

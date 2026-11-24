@@ -19,6 +19,13 @@ const CLASS_BY_CODE: Readonly<Record<string, RetryClass>> = Object.freeze({
   'unverified-provenance': 'security', 'conflicting-identity': 'security', 'unverified-hardware': 'security', 'realm-mismatch': 'security',
   'contradictory-authority': 'security', 'invalid-authority-response': 'security', 'invalid-missing-reason': 'security', 'attribution-drift': 'security',
   'unverified-device': 'security', 'ambiguous-device': 'security', 'overlapping-association': 'security', 'overlap': 'security',
+  // BE13-11A broker boundary. Provenance failures are SECURITY (never retried); only an unreachable verifier is transient.
+  'broker-provenance-unverified': 'security', 'broker-provenance-rejected': 'security', 'broker-principal-unknown': 'security',
+  'broker-realm-mismatch': 'security', 'broker-context-mismatch': 'security', 'technical-identity-mismatch': 'security',
+  'broker-verifier-unavailable': 'transient',
+  'broker-context-malformed': 'validation', 'payload-too-large': 'validation', 'payload-invalid-utf8': 'validation', 'payload-malformed': 'validation',
+  'payload-dangerous-key': 'validation', 'payload-limits-exceeded': 'validation', 'topic-not-routed': 'validation', 'no-configured-field': 'validation',
+  'retained-message-blocked': 'policy-blocked', 'boundary-not-configured': 'policy-blocked',
   // conflict
   'idempotency-conflict': 'conflict',
   // waiting for a human decision or for missing reference data (BLOCKED_BY_POLICY)

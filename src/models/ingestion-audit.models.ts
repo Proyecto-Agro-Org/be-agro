@@ -14,7 +14,9 @@ const capabilities = ['QUARANTINE_VIEW', 'QUARANTINE_REPLAY', 'QUARANTINE_UNBLOC
 const actions = ['quarantine-created', 'quarantine-recurred', 'classification-changed', 'recovery-outcome', 'replay-requested', 'replay-denied', 'replay-started',
   'replay-result', 'transition-requested', 'transition-result', 'resolved', 'discarded', 'authorization-denied',
   // BE13-10B — replay lease governance
-  'lease-acquired', 'lease-release-requested', 'lease-released-owner', 'lease-recovery-requested', 'lease-recovered-expired', 'lease-release-denied', 'stale-replay-blocked'];
+  'lease-acquired', 'lease-release-requested', 'lease-released-owner', 'lease-recovery-requested', 'lease-recovered-expired', 'lease-release-denied', 'stale-replay-blocked',
+  // BE13-11A — broker boundary
+  'broker-provenance-verified', 'broker-provenance-rejected', 'broker-verifier-unavailable', 'broker-delivery-malformed', 'technical-identity-mismatch'];
 const safeRef = { bsonType: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9:_./-]+$' };
 
 // additionalProperties:false rejects rawPayload, stack, messages, secrets, tokens, URIs.
@@ -51,7 +53,9 @@ export const auditIndexes = [
   { key: { realm: 1, occurredAt: 1 }, name: 'audit_realm_occurred' },
 ] as const;
 
-// BE13-10B — LOCAL, additive validator upgrade (new lease actions only); existing audit documents stay valid.
+// BE13-10B / BE13-11A — LOCAL, additive validator upgrade: applies the CURRENT validator (lease actions of BE13-10B and
+// broker-boundary actions of BE13-11A). Only new enum values are added: existing audit documents stay valid.
+export const upgradeAuditValidatorBe1311a = (connection: Connection, prefix: string) => upgradeAuditValidatorBe1310b(connection, prefix);
 export async function upgradeAuditValidatorBe1310b(connection: Connection, prefix: string) {
   const n = auditCollections(prefix), db = connection.db;
   if (!db || (await db.listCollections({ name: n.audit }).toArray()).length !== 1) throw new TypeError('Existing audit namespace required');

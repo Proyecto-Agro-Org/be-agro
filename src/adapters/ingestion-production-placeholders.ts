@@ -100,3 +100,16 @@ export function createBlockingSecurityPolicies() {
       return Object.freeze({ realm: request?.realm, stream: request?.stream, legalHold: true, holdReference: null }); } }),
   });
 }
+
+// BE13-11A — broker boundary placeholders. No broker authentication, identity source, payload limit or topic route is
+// approved: the verifier never verifies, the mapping knows no principal, limits/config admit nothing, retained is blocked.
+// A boundary assembled with them accepts NO delivery; readiness reports each as BLOCKED.
+export function createBlockingMqttBoundaryPlaceholders() {
+  return Object.freeze({
+    brokerProvenanceVerifier: register({ async verify(request: { realm?: unknown } | undefined) {
+      return Object.freeze({ status: 'UNVERIFIED' as const, realm: request?.realm, reason: 'not-authenticated' as const, verifierRevision: 0 }); } }),
+    brokerIdentityMapping: register({ async resolve(request: { realm?: unknown } | undefined) { return Object.freeze({ status: 'unknown' as const, realm: request?.realm }); } }),
+    payloadLimits: register({ maxBytes: 1, maxDepth: 1, maxKeys: 1, maxStringLength: 1 }),
+    boundaryConfig: register({ topicRoutes: Object.freeze([]), retained: 'block' as const, fields: Object.freeze([]), verifierTimeoutMs: 1, auditVerifiedDeliveries: false }),
+  });
+}
