@@ -328,6 +328,8 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().catch(error => {
-  console.error('BE1307_LOCAL_FAILED ' + JSON.stringify({ stage, errorClass: error instanceof Error ? error.name : 'Unknown', code: error instanceof Error && /^MN_[A-Z_0-9]+$/.test(error.message) ? error.message : undefined }));
+  console.error('BE1307_LOCAL_FAILED ' + JSON.stringify({ stage, errorClass: error instanceof Error ? error.name : 'Unknown', code: error instanceof Error && /^MN_[A-Z_0-9]+$/.test(error.message) ? error.message : undefined,
+    serverCode: typeof (error as { code?: unknown })?.code === 'number' ? (error as { code: number }).code : undefined,
+    codeName: typeof (error as { codeName?: unknown })?.codeName === 'string' && /^[A-Za-z]+$/.test((error as { codeName: string }).codeName) ? (error as { codeName: string }).codeName : undefined }));
   process.exitCode = 1;
 });
