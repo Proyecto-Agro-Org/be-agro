@@ -198,7 +198,7 @@ async function main() {
       assert.equal(r.retryClass, 'policy-blocked'); assert.ok(raw);
       assert.equal(JSON.stringify(raw).includes('x-emqx-key'), false);
       assert.deepEqual(Object.keys(raw!).sort(), ['_id', 'attemptCount', 'audit', 'cause', 'createdAt', 'device', 'documentDigest', 'eventId', 'field', 'fingerprint', 'firstSeenAt',
-        'lastSeenAt', 'operation', 'realm', 'reasonCode', 'retryClass', 'sourceId', 'stage', 'status', 'updatedAt']);
+        'lastSeenAt', 'operation', 'realm', 'reasonCode', 'retryClass', 'sourceId', 'stage', 'status', 'updatedAt', 'version']); // BE13-09 added version; no lease outside REPLAYING (BE13-10B)
     });
     await check('Q10 repeated quarantine is deduplicated', async () => {
       const r = await ingest(root, { eventId: 'q09', clientid: 'nobody', payload: { temperature: 1, secret: 'x-emqx-key=abc' } }) as Extract<ResilientIngestionResult, { status: 'quarantined' }>;
