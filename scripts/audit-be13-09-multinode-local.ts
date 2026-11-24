@@ -134,6 +134,7 @@ async function main() {
     await check('O04 replay audit created in order', async () => {
       const trail = await audit.listForQuarantine(e1.id, 100);
       const actions = trail.map(a => a.action);
+      console.log('O04 trail ' + JSON.stringify(trail.map(a => [a.sequence, a.action, a.outcome])));
       // O01 (x2) and O03 (x1) denials are audited on the same stream, before the authorized replay.
       assert.deepEqual(actions, ['quarantine-created', 'authorization-denied', 'authorization-denied', 'authorization-denied', 'replay-requested', 'replay-started', 'replay-result'], JSON.stringify(actions));
       assert.ok(trail.every((a, i) => a.sequence === i + 1));
