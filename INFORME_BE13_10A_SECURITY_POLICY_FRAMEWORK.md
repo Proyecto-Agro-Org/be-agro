@@ -49,7 +49,7 @@ credencial opaca → `OperatorIdentityProvider` (identidad: subject, issuer, atr
 
 ## Riesgos residuales
 
-- S7 sigue abierto en runtime (ver H2).
+- S7 seguía abierto en runtime al cierre de BE13-10A (ver H2); **se cerró en BE13-10B** (`ADR_BE13_10B_S7_CLOSURE.md`).
 - Todo depende de la frontera del bootstrap: código en proceso puede inyectar políticas permisivas (`INJECTED_UNVERIFIED` lo hace visible, no lo impide).
 - El `leaseId` es un identificador, no un autenticador; la propiedad se prueba solo con la identidad autenticada.
 - El tiempo confiable proviene de una autoridad inyectada no decidida.
