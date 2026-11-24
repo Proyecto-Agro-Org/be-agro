@@ -10,16 +10,19 @@ export type AuthorityCallResult<T> = { readonly ok: true; readonly value: T } | 
 
 export const DEFAULT_AUTHORITY_TIMEOUT_MS = 5_000;
 
+// Runs an operation under an operational timeout. Late settlements are absorbed.
+export function runBounded(operation: () => unknown, timeoutMs: number): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
+    let pending: Promise<unknown>;
+    try { pending = Promise.resolve(operation()); }
+    catch (error) { clearTimeout(timer); reject(error); return; }
+    pending.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+  });
+}
+
 export function createAuthorityCaller(realm: string, timeoutMs: number) {
-  function bounded(operation: () => unknown): Promise<unknown> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
-      let pending: Promise<unknown>;
-      try { pending = Promise.resolve(operation()); }
-      catch (error) { clearTimeout(timer); reject(error); return; }
-      pending.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
-    });
-  }
+  const bounded = (operation: () => unknown) => runBounded(operation, timeoutMs);
 
   return async function call<S extends z.ZodType>(schema: S, operation: () => unknown): Promise<AuthorityCallResult<z.output<S>>> {
     let raw: unknown;
