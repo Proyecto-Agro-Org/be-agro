@@ -62,7 +62,9 @@ export type AuditAction =
   // BE13-11A — broker boundary (no raw payload, no credentials, no tokens)
   | 'broker-provenance-verified' | 'broker-provenance-rejected' | 'broker-verifier-unavailable' | 'broker-delivery-malformed' | 'technical-identity-mismatch'
   // BE13-11B — durable inbox (never the raw payload)
-  | 'inbox-persisted' | 'inbox-recovery-started' | 'inbox-recovery-rejected' | 'inbox-integrity-failed' | 'inbox-processed';
+  | 'inbox-persisted' | 'inbox-recovery-started' | 'inbox-recovery-rejected' | 'inbox-integrity-failed' | 'inbox-processed'
+  // BE13-11C — inbox reconciliation (never the raw payload)
+  | 'inbox-reconciliation-candidate' | 'inbox-reconciliation-claimed' | 'inbox-reconciliation-completed' | 'inbox-reconciliation-stale' | 'inbox-reconciliation-integrity-failed';
 export interface AuditAppend {
   readonly realm: TrustGateRealm;
   readonly quarantineId: string | null;
@@ -95,7 +97,9 @@ export type MetricName =
   | 'ingestion_total' | 'ingestion_accepted_total' | 'ingestion_duplicate_total' | 'ingestion_quarantined_total'
   | 'retry_attempt_total' | 'recovery_outcome_total' | 'quarantine_transition_total' | 'replay_total' | 'authorization_denied_total'
   | 'broker_delivery_total' | 'provenance_result_total' | 'mqtt_boundary_rejected_total'
-  | 'broker_inbox_persist_total' | 'broker_inbox_recovery_total' | 'broker_inbox_integrity_failure_total';
+  | 'broker_inbox_persist_total' | 'broker_inbox_recovery_total' | 'broker_inbox_integrity_failure_total'
+  // BE13-11C
+  | 'broker_inbox_reconciliation_total' | 'broker_inbox_orphan_candidate_total';
 // Only low-cardinality labels; values are mapped onto closed vocabularies before emission.
 export interface MetricLabels {
   readonly stage?: IngestionStage | 'operations' | 'boundary';
@@ -110,7 +114,9 @@ export type AlertType = 'QUARANTINE_BACKLOG_HIGH' | 'RETRY_EXHAUSTED' | 'PERSIST
   // BE13-11A (facts, no thresholds; PROVENANCE_REJECTION_SPIKE is reserved: it needs a threshold that is not decided)
   | 'PROVENANCE_REJECTION_SPIKE' | 'BROKER_VERIFIER_UNAVAILABLE' | 'TECHNICAL_IDENTITY_MISMATCH'
   // BE13-11B (facts, no thresholds)
-  | 'BROKER_INBOX_PERSISTENCE_UNAVAILABLE' | 'BROKER_INBOX_INTEGRITY_FAILURE' | 'BROKER_INBOX_RECOVERY_FAILURE';
+  | 'BROKER_INBOX_PERSISTENCE_UNAVAILABLE' | 'BROKER_INBOX_INTEGRITY_FAILURE' | 'BROKER_INBOX_RECOVERY_FAILURE'
+  // BE13-11C (facts, no thresholds)
+  | 'BROKER_INBOX_ORPHAN_DETECTED' | 'BROKER_INBOX_RECONCILIATION_FAILED';
 export type AlertSeverity = 'INFO' | 'WARNING' | 'CRITICAL';
 // Facts, not thresholds: thresholding/aggregation is external and not decided.
 export interface AlertEvent { readonly type: AlertType; readonly severity: AlertSeverity; readonly reasonCode: string | null }
