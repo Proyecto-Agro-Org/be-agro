@@ -33,8 +33,8 @@ test('V1 no production module imports test-support; placeholders export only blo
     assert.equal(/(from\s*['"][^'"]*test-support|import\s*\(\s*['"`][^'"`]*test-support|require\s*\(\s*['"][^'"]*test-support)/.test(readFileSync(file, 'utf8')), false, file);
   }
   assert.deepEqual(Object.keys(placeholdersModule).sort(), ['createBlockingBe12Authorities', 'createBlockingProvenanceVerifier', 'createBlockingRetryPolicy',
-    'createBlockingRetryScheduler', 'createDenyAllOperatorAuthorization', 'createProductionPlaceholders', 'createUnconfiguredAlerts', 'createUnconfiguredMetrics',
-    'isBlockingPlaceholder']); // BE13-09: deny-all authorization + no-op observability (registered as blocking placeholders)
+    'createBlockingRetryScheduler', 'createBlockingSecurityPolicies', 'createDenyAllOperatorAuthorization', 'createProductionPlaceholders', 'createUnconfiguredAlerts', 'createUnconfiguredMetrics',
+    'isBlockingPlaceholder']); // BE13-09: deny-all authorization + no-op observability; BE13-10A: conservative security policies (all registered as blocking)
   assert.deepEqual(Object.keys(rootModule).sort(), ['createMeasurementIngestionRoot', 'createResilientMeasurementIngestionRoot', 'describeIngestionRootReadiness']);
 });
 
