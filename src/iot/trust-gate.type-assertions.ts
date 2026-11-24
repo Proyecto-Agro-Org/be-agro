@@ -10,3 +10,11 @@ export const readyIsNotTrustedMeasurementEvent: Assignable<ReadyForAttribution, 
 export const trustedMeasurementEventIsNotReady: Assignable<TrustedMeasurementEvent, ReadyForAttribution> = false;
 export const readyIsNotAttributionResult: Assignable<ReadyForAttribution, AttributionResult> = false;
 export const gateResultIsNotAttributionResult: Assignable<TrustGateResult, AttributionResult> = false;
+
+// BE13-04: the builder result carries exactly a BE-12 TrustedMeasurementEvent
+// but is itself neither an event nor a BE-12 AttributionResult.
+import type { TrustedEventReady, TrustedEventResult } from './trusted-event.contracts.js';
+export const trustedEventReadyIsNotAttributionResult: Assignable<TrustedEventReady, AttributionResult> = false;
+export const trustedEventResultIsNotTrustedMeasurementEvent: Assignable<TrustedEventResult, TrustedMeasurementEvent> = false;
+export const trustedEventCarriesBE12Event: Assignable<TrustedEventReady['event'], TrustedMeasurementEvent> = true;
+export const be12EventFitsTrustedEventSlot: Assignable<TrustedMeasurementEvent, TrustedEventReady['event']> = true;
