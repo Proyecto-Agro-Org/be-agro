@@ -7,6 +7,8 @@ import {
   createBlockingTemporalAuthority,
 } from '../adapters/trust-gate-blocking.adapters.js';
 import { isIssuedProtectedCandidate } from '../iot/protected-ingest.mapper.js';
+import { bindPort, createAuthorityCaller, DEFAULT_AUTHORITY_TIMEOUT_MS } from './authority-call.js';
+import { buildAssociationQuery, buildCatalogueQuery, buildDeviceQuery, buildHardwareQuery, buildTemporalQuery } from '../iot/trust-gate.queries.js';
 import { canonicalAuthorityResponse, digestCanonical } from '../iot/trust-gate.fingerprint.js';
 import type {
   ReadyForAttribution,
@@ -29,7 +31,6 @@ import {
   temporalAuthorityDecisionSchema,
 } from '../iot/trust-gate.schemas.js';
 
-const DEFAULT_AUTHORITY_TIMEOUT_MS = 5_000;
 
 // Internal control-flow marker. Never leaves the gate: it is converted into a
 // closed quarantine code without message, stack or adapter diagnostics.
@@ -40,15 +41,15 @@ const stop = (reason: TrustGateQuarantineCode): never => { throw new GateStop(re
 const hasOwn = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 const signature = canonicalAuthorityResponse;
 
-function bindPort<T>(port: unknown, method: string, fallback: () => T, name: string): (query: never) => unknown {
-  if (port === undefined) {
-    const blocking = fallback() as Record<string, (query: never) => unknown>;
-    return blocking[method].bind(blocking);
-  }
-  if (typeof port !== 'object' || port === null) throw new TypeError(`Invalid ${name} authority`);
-  const fn = (port as Record<string, unknown>)[method];
-  if (typeof fn !== 'function') throw new TypeError(`Invalid ${name} authority`);
-  return fn.bind(port) as (query: never) => unknown;
+// ReadyForAttribution objects emitted by evaluate(), mapped to the exact
+// candidate they were derived from. Module-private: no exported way to add an
+// entry. Same scope as the BE13-02 candidate registry: in-process provenance,
+// not authenticity, and no defence against hostile code inside the process.
+const issuedReady = new WeakMap<object, object>();
+
+export function isIssuedReadyFor(ready: unknown, candidate: unknown): boolean {
+  return typeof ready === 'object' && ready !== null && typeof candidate === 'object' && candidate !== null &&
+    issuedReady.get(ready) === candidate;
 }
 
 export function createAttributionTrustGate(ports: TrustGatePorts, options: TrustGateOptions): TrustGate {
@@ -65,27 +66,10 @@ export function createAttributionTrustGate(ports: TrustGatePorts, options: Trust
   const evaluateCatalogue = bindPort(ports.catalogue, 'evaluate', createBlockingMeasurementCatalogue, 'catalogue');
   const verifyHardware = bindPort(ports.hardware, 'verify', createBlockingHardwareAuthority, 'hardware');
 
-  function bounded(operation: () => unknown): Promise<unknown> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('timeout')), timeoutMs);
-      let pending: Promise<unknown>;
-      try { pending = Promise.resolve(operation()); }
-      catch (error) { clearTimeout(timer); reject(error); return; }
-      pending.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
-    });
-  }
-
+  const call = createAuthorityCaller(realm, timeoutMs);
   async function ask<S extends z.ZodType>(schema: S, operation: () => unknown): Promise<z.output<S>> {
-    let raw: unknown;
-    try { raw = await bounded(operation); } catch { return stop('dependency-error'); }
-    let parsed: z.output<S> | undefined;
-    try {
-      const result = schema.safeParse(raw);
-      if (result.success) parsed = result.data;
-    } catch { /* Hostile getters/proxies: discard diagnostics. */ }
-    if (parsed === undefined) return stop('invalid-authority-response');
-    if ((parsed as { realm: string }).realm !== realm) return stop('realm-mismatch');
-    return parsed;
+    const result = await call(schema, operation);
+    return result.ok ? result.value : stop(result.reason);
   }
 
   const quarantined = (reason: TrustGateQuarantineCode, eventId: string | null): TrustGateQuarantined =>
@@ -128,7 +112,7 @@ export function createAttributionTrustGate(ports: TrustGatePorts, options: Trust
       });
 
       // 2. Device (BE-11 PhysicalDevice). Never pick the "first" match.
-      const deviceQuery = Object.freeze({ realm, sourceId, device, limit: 2 as const });
+      const deviceQuery = buildDeviceQuery(realm, sourceId, device);
       const devices = await ask(deviceResolutionSchema, () => resolveDevice(deviceQuery as never));
       if (devices.devices.length === 0) return quarantined('unresolved-device', eventId);
       if (devices.devices.some(row => row.sourceId !== sourceId || !sameKey(row.key))) return quarantined('contradictory-authority', eventId);
@@ -139,7 +123,7 @@ export function createAttributionTrustGate(ports: TrustGatePorts, options: Trust
 
       // 3. Hardware/provenance authority, separate from BE13-02 ingest provenance.
       const declaredOrigin = candidate.provenance.dataOriginDeclared;
-      const hardwareQuery = Object.freeze({ realm, eventId, sourceId, device, physicalDeviceId: physical.id, dataOriginDeclared: declaredOrigin });
+      const hardwareQuery = buildHardwareQuery(realm, eventId, sourceId, device, physical.id, declaredOrigin);
       const hardware = await ask(hardwareDecisionSchema, () => verifyHardware(hardwareQuery as never));
       if (hardware.status !== 'verified') return quarantined('unverified-hardware', eventId);
       if (hardware.physicalDeviceId !== physical.id) return quarantined('contradictory-authority', eventId);
@@ -148,7 +132,7 @@ export function createAttributionTrustGate(ports: TrustGatePorts, options: Trust
 
       // 4. Temporal authority. The instant must be one of the candidate's own
       // clocks, as named by the authority, and never after reception.
-      const temporalQuery = Object.freeze({ realm, eventId, sourceId, physicalDeviceId: physical.id, timestamps });
+      const temporalQuery = buildTemporalQuery(realm, eventId, sourceId, physical.id, timestamps);
       const temporal = await ask(temporalAuthorityDecisionSchema, () => decideTime(temporalQuery as never));
       if (temporal.status === 'unresolved') return quarantined('unresolved-time', eventId);
       if (temporal.status === 'untrusted') return quarantined('untrusted-clock', eventId);
@@ -160,7 +144,7 @@ export function createAttributionTrustGate(ports: TrustGatePorts, options: Trust
       const at = temporal.at;
 
       // 5. Historical association at the authorized instant: [validFrom, validTo).
-      const associationQuery = Object.freeze({ realm, physicalDeviceId: physical.id, at, limit: 2 as const });
+      const associationQuery = buildAssociationQuery(realm, physical.id, at);
       const associations = await ask(associationAtResolutionSchema, () => findAssociationAt(associationQuery as never));
       if (associations.records.some(row => row.physicalDeviceId !== physical.id || row.sourceId !== sourceId || !sameKey(row.device) ||
         !(row.validFrom <= at && (row.validTo === null || at < row.validTo)))) return quarantined('contradictory-authority', eventId);
@@ -169,8 +153,7 @@ export function createAttributionTrustGate(ports: TrustGatePorts, options: Trust
       const association = associations.records[0];
 
       // 6. Catalogue: approval only; no normalization or conversion.
-      const catalogueQuery = Object.freeze({ realm, sourceId, physicalDeviceId: physical.id, sensorId: association.sensorId, field,
-        valueKind: value === null ? 'null' as const : 'number' as const, at });
+      const catalogueQuery = buildCatalogueQuery(realm, sourceId, physical.id, association.sensorId, field, value, at);
       const catalogue = await ask(catalogueDecisionSchema, () => evaluateCatalogue(catalogueQuery as never));
       if (catalogue.status === 'unknown-magnitude') return quarantined('unapproved-magnitude', eventId);
       if (catalogue.status === 'incompatible-unit') return quarantined('incompatible-unit', eventId);
@@ -232,6 +215,7 @@ export function createAttributionTrustGate(ports: TrustGatePorts, options: Trust
         }),
         revalidation: 'required',
       });
+      issuedReady.set(ready, input as object);
       return ready;
     } catch (error) {
       if (error instanceof GateStop) return quarantined(error.reason, eventId);
