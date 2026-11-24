@@ -234,7 +234,11 @@ async function main() {
         const failed = evSince(started).filter(e => e.kind === 'failed');
         await restore(victim);
         const transientReal = at !== 'before-call' && attempts >= 2 && failed.length > 0;
-        return { classification: at === 'before-call' ? 'REAL (failover before the operation)' : transientReal ? 'REAL TransientTransactionError path (actual primary loss; whole transaction retried)' : 'REAL failover; retry not required',
+        const commitFailures = failed.filter(e => e.command === 'commitTransaction');
+        const commitRetried = commitFailures.length >= 2 || (commitFailures.length >= 1 && failed.some(e => e.command === 'commitTransaction' && e.codeName === 'NoSuchTransaction'));
+        return { classification: at === 'before-call' ? 'REAL (failover before the operation)'
+          : commitRetried ? 'REAL UnknownTransactionCommitResult path (network error on commitTransaction, commit retried, then TransientTransactionError NoSuchTransaction → whole transaction retried)'
+          : transientReal ? 'REAL TransientTransactionError path (actual primary loss; whole transaction retried)' : 'REAL failover; retry not required',
           detail: { victim: victim + 1, attempts, failedCommands: failed.map(e => [e.command, e.codeName, e.labels]) } };
       });
     };
@@ -277,8 +281,12 @@ async function main() {
       const after = await counts(); assert.deepEqual([after[0] - before[0], after[1] - before[1]], [1, 1]); await orphanFree();
       const retry = await persistence.persistAtomically(inputFor('mn14', 1));
       assert.equal(retry.status, 'duplicate');
-      const real = wce.length > 0 && commits >= 2;
-      return { classification: real ? 'REAL UnknownTransactionCommitResult (write-concern failure on commit, driver retried commitTransaction)' : 'not reproduced',
+      let labels: unknown; try { labels = (error as { errorLabels?: unknown })?.errorLabels; } catch { labels = undefined; }
+      const surfaced = Array.isArray(labels) && labels.includes('UnknownTransactionCommitResult');
+      const real = wce.length > 0 && (commits >= 2 || surfaced);
+      return { classification: real ? (surfaced
+          ? 'REAL UnknownTransactionCommitResult surfaced to the caller (write-concern MaxTimeMSExpired on commit; data committed; idempotent retry → duplicate)'
+          : 'REAL UnknownTransactionCommitResult (write-concern failure on commit, driver retried commitTransaction)') : 'not reproduced',
         notVerifiable: !real, detail: { outcome: r?.status ?? 'error', errorLabels: (error as { errorLabels?: unknown })?.errorLabels, commits, commitEvents: ev.map(e => [e.kind, e.codeName, e.wce, e.labels]) } };
     });
 
