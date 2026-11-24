@@ -40,7 +40,7 @@ credencial opaca → `OperatorIdentityProvider` (identidad: subject, issuer, atr
 | ID | Severidad | Hallazgo | Corrección |
 | --- | --- | --- | --- |
 | H1 | BAJO | `describeSecurityPolicyReadiness` lanzaba ante un getter hostil en una dependencia (X10) | Acceso envuelto: getter/proxy hostil → `MISSING` |
-| H2 | MEDIO (heredado) | S7 de BE13-09: `releaseLease` no exige propiedad ni expiración | **Contrato listo** (`ReplayLeaseGovernor`: propiedad por identidad autenticada, expiración solo por política con tiempo confiable, CAS). **Sigue abierto en runtime**: falta persistir propietario/`acquiredAt` en la cuarentena y conectar el governor, después de decidir la expiración |
+| H2 | MEDIO (heredado) | S7 de BE13-09: `releaseLease` no exige propiedad ni expiración | **Contrato listo** (`ReplayLeaseGovernor`: propiedad por identidad autenticada, expiración solo por política con tiempo confiable, CAS). **Sigue abierto en runtime**: el replay de BE13-09 no usa el governor; falta persistir propietario/`acquiredAt` en la cuarentena y conectarlo (BE13-10B), después de decidir la expiración |
 | H3 | INFORMATIVO | Un comentario del contrato contenía el literal `Date.now` y disparaba el escaneo de fuentes (X9) | Redacción ajustada; el código no lee el reloj |
 
 ## Readiness

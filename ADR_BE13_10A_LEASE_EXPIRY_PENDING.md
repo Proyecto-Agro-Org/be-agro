@@ -26,6 +26,6 @@ BE13-09 introdujo el lease `REPLAYING` (CAS). Un lease huérfano no expira, y `r
 | Autoridad temporal aprobada | sin ella nada expira |
 | ¿Qué pasa con un replay que termina tras perder el lease? | hoy la medición puede persistir (idempotente); la transición final falla por CAS |
 
-## Para cerrar S7 en runtime (BE13-10, tras decidir)
+## Para cerrar S7 en runtime (BE13-10B, tras decidir)
 
 Persistir `leaseOwner` y `leaseAcquiredAt` en la cuarentena (migración de esquema con validator), hacer que el replay de BE13-09 adquiera el lease con el governor y que `releaseLease` delegue en él, y repetir la campaña Mongo de concurrencia (O11–O13 + recuperación).
