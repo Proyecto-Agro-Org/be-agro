@@ -43,7 +43,14 @@ export interface MeasurementDocument {
 const realm = { enum: ['test', 'development', 'preview', 'production'] };
 const text = { bsonType: 'string', minLength: 1, maxLength: 256 };
 const hex = { bsonType: 'string', pattern: '^[0-9a-f]{64}$' };
-const epoch = { bsonType: ['int', 'long', 'double'], minimum: 0 };
+// Finite numbers only: NaN/±Infinity are rejected by the range bounds (verified against MongoDB 8.0.38).
+const MAX_DOUBLE = 1.7976931348623157e308;
+const finite = { bsonType: ['int', 'long', 'double'], minimum: -MAX_DOUBLE, maximum: MAX_DOUBLE };
+// Same bounds as the BE-12 `epoch` schema: integer milliseconds in [0, 8.64e15].
+const epoch = { bsonType: ['int', 'long', 'double'], minimum: 0, maximum: 8_640_000_000_000_000, multipleOf: 1 };
+const revision = { bsonType: ['int', 'long', 'double'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER, multipleOf: 1 };
+// BE-12 metadata: scalar values only (string ≤ 256, finite number, boolean, null), at most 20 entries.
+const metadata = { bsonType: 'object', maxProperties: 20, additionalProperties: { anyOf: [{ bsonType: 'string', maxLength: 256 }, finite, { bsonType: ['bool', 'null'] }] } };
 const key = { realm, sourceId: text, operation: { enum: ['measurement', 'device-status'] }, eventId: text, field: text };
 
 export const idempotencyValidator = { $jsonSchema: { bsonType: 'object', additionalProperties: false,
@@ -51,21 +58,31 @@ export const idempotencyValidator = { $jsonSchema: { bsonType: 'object', additio
   properties: { _id: hex, ...key, fingerprint: hex, state: { enum: ['committed'] }, measurementId: { bsonType: 'string', pattern: '^m_[0-9a-f]{64}$' },
     committedAt: { bsonType: 'date' } } } };
 
-export const measurementValidator = { $jsonSchema: { bsonType: 'object', additionalProperties: false,
+export const measurementValidator = {
+  // Cross-field invariants of the BE-12 TrustedMeasurementEvent schema plus key coherence.
+  $expr: { $and: [
+    { $eq: [{ $eq: ['$event.value', null] }, { $ne: ['$event.missingReason', null] }] },
+    { $eq: ['$event.simulated', { $eq: ['$event.provenance', 'simulated'] }] },
+    { $gte: ['$event.persistedAt', '$event.receivedAt'] },
+    { $eq: ['$attribution.realm', '$realm'] },
+    { $eq: ['$event.eventId', '$eventId'] },
+    { $eq: ['$event.sourceId', '$sourceId'] },
+  ] },
+  $jsonSchema: { bsonType: 'object', additionalProperties: false,
   required: ['_id', 'realm', 'sourceId', 'operation', 'eventId', 'field', 'fingerprint', 'event', 'attribution', 'storedAt'],
   properties: { _id: { bsonType: 'string', pattern: '^m_[0-9a-f]{64}$' }, ...key, fingerprint: hex,
     event: { bsonType: 'object', additionalProperties: false,
       required: ['eventId', 'sourceId', 'device', 'receivedAt', 'declaredAt', 'persistedAt', 'magnitude', 'unit', 'value', 'missingReason', 'provenance', 'simulated', 'metadata'],
       properties: { eventId: text, sourceId: text, device: { bsonType: 'object', additionalProperties: false, required: ['kind', 'value'],
         properties: { kind: { enum: ['mqtt-clientid', 'device-id'] }, value: text } },
-        receivedAt: epoch, declaredAt: { bsonType: ['int', 'long', 'double', 'null'], minimum: 0 }, persistedAt: epoch, magnitude: text, unit: text,
-        value: { bsonType: ['int', 'long', 'double', 'null'] },
+        receivedAt: epoch, declaredAt: { anyOf: [epoch, { bsonType: 'null' }] }, persistedAt: epoch, magnitude: text, unit: text,
+        value: { anyOf: [finite, { bsonType: 'null' }] },
         missingReason: { enum: ['absent', 'invalid', 'unknown-unit', 'not-calibrated', 'insufficient-dependency', null] },
-        provenance: { enum: ['physical', 'derived', 'estimated', 'simulated', 'manual', 'laboratory'] }, simulated: { bsonType: 'bool' }, metadata: { bsonType: 'object' } } },
+        provenance: { enum: ['physical', 'derived', 'estimated', 'simulated', 'manual', 'laboratory'] }, simulated: { bsonType: 'bool' }, metadata } },
     attribution: { bsonType: 'object', additionalProperties: false,
       required: ['realm', 'attributedAt', 'clock', 'physicalDeviceId', 'clientId', 'fieldId', 'areaId', 'sensorId', 'associationId', 'associationRevision'],
       properties: { realm, attributedAt: epoch, clock: { enum: ['received-at', 'declared-at-approved'] }, physicalDeviceId: text, clientId: text, fieldId: text,
-        areaId: text, sensorId: text, associationId: text, associationRevision: { bsonType: ['int', 'long', 'double'], minimum: 0 } } },
+        areaId: text, sensorId: text, associationId: text, associationRevision: revision } },
     storedAt: { bsonType: 'date' } } } };
 
 // Index inventory (documented in CONTRATO_BE13_06_ATOMIC_PERSISTENCE.md):

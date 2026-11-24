@@ -116,6 +116,8 @@ test('BE13-06 schema: collections, strict validators and unique key indexes', ()
   assert.throws(() => ingestionCollections('prod'));
   assert.equal(idempotencyValidator.$jsonSchema.additionalProperties, false);
   assert.equal(measurementValidator.$jsonSchema.additionalProperties, false);
+  assert.equal(measurementValidator.$expr.$and.length, 6, 'BE-12 cross-field invariants and key coherence');
+  assert.ok(measurementValidator.$jsonSchema.properties.event.properties.value.anyOf, 'finite or null only');
   assert.ok(measurementValidator.$jsonSchema.required.includes('storedAt') && measurementValidator.$jsonSchema.properties.event.required.includes('persistedAt'));
   for (const list of Object.values(ingestionIndexes)) {
     assert.equal(list.length, 1); assert.equal(list[0].unique, true);
