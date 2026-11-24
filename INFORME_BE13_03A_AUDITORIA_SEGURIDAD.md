@@ -132,3 +132,9 @@ Las de BE13-03 (política temporal, `missingReason`, `declaredAt`, `persistedAt`
 2. Decidir el tratamiento de dispositivos hoy inactivos con eventos históricos (L1).
 3. Adapters productivos que filtren por realm en almacenamiento.
 4. No usar el registry como control de seguridad frente a código no confiable.
+
+## Revisión pre-publicación (ciclo de integración a `dev`)
+
+- **Cambio BE13-02 (`protected-ingest.mapper.ts`)**: aditivo. `map()` devuelve el mismo objeto congelado con las mismas claves; las cuarentenas no se registran; `WeakSet` sin retención; sin efecto en determinismo; los 64 tests BE13-02/02A sin cambios. Puede "evitarse" accidentalmente solo hacia el lado seguro: un candidate copiado o serializado pierde procedencia y el gate lo rechaza. Se documentó el export en `CONTRATO_BE13_02_CANDIDATE.md`. `isIssuedProtectedCandidate` representa **solo procedencia dentro del mismo proceso**: no autenticidad criptográfica, ni hardware, ni EMQX, ni defensa frente a código hostil en el proceso. Sin defecto.
+- **Fingerprints**: canonicalización = salida Zod estricta + `JSON.stringify`. Verificado: invariante al orden de propiedades; arrays sensibles al orden; `-0` ≡ `0`; sin normalización Unicode (NFC ≠ NFD); `undefined`, claves faltantes y `Date` rechazados (huella `null`); objetos congelados sin efecto. Con claves fijas por schema y tipos JSON primitivos no hay colisiones estructurales por serialización. Es huella de consistencia de contenido, no firma, MAC ni autenticación. Sin defecto; 2 regresiones agregadas.
+- Validación: `npm test` **556/556**, HTTP 13/13, typecheck/build/diff-check OK. Diff contra `origin/dev` sin secretos, `.env`, `app.ts`, rutas, dependencias ni configuración Vercel/Atlas/EMQX.

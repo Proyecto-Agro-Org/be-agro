@@ -395,3 +395,34 @@ test('BE13-03A #22 ready-for-attribution cannot pass as a TrustedMeasurementEven
   }, { realm: REALM });
   await assert.rejects(be12.resolve(ready), error => error.code === 'VALIDATION_ERROR');
 });
+
+// ============================================================ Pre-publication review (BE13-03 → dev)
+test('BE13-03A review: map() output is unchanged and only genuine candidates are registered', () => {
+  const quarantined = createProtectedIngestMapper(createIngestProvenanceAuthority({ verify: () => null }).authority).map(documentFromEnvelope(fixture('F01')));
+  assert.deepEqual(quarantined, { status: 'quarantined', reason: 'unverified-provenance' });
+  assert.equal(isIssuedProtectedCandidate(quarantined), false, 'quarantine results are never registered');
+  for (const value of [null, undefined, 1, 'x', {}, fixture('F13')]) assert.equal(isIssuedProtectedCandidate(value), false);
+  const c = candidate();
+  assert.equal(isIssuedProtectedCandidate(c), true);
+  assert.equal(Object.isFrozen(c), true);
+  assert.deepEqual(Object.keys(c), ['status', 'kind', 'sourceId', 'storeOperation', 'operation', 'eventId', 'device', 'declaredTechnicalIdentity',
+    'idempotencyKey', 'timestamps', 'payload', 'provenance', 'eligibleForMeasurementMapping']);
+});
+
+test('BE13-03A review: fingerprint canonicalization is deterministic and content-sensitive', () => {
+  const dev = device({ version: 0 });
+  const reversed = Object.fromEntries(Object.entries(dev).reverse()); reversed.key = { value: dev.key.value, kind: dev.key.kind };
+  const fp = response => fingerprintAuthorityResponse('device', response);
+  assert.equal(fp({ realm: REALM, devices: [dev] }), fp({ devices: [reversed], realm: REALM }), 'property order does not matter');
+  assert.equal(fp(Object.freeze({ realm: REALM, devices: Object.freeze([Object.freeze({ ...dev })]) })), fp({ realm: REALM, devices: [dev] }));
+  assert.equal(fp({ realm: REALM, devices: [{ ...dev, version: -0 }] }), fp({ realm: REALM, devices: [dev] }), '-0 and 0 are the same number');
+  const two = [dev, device({ id: 'device-2' })];
+  assert.notEqual(fp({ realm: REALM, devices: two }), fp({ realm: REALM, devices: [...two].reverse() }), 'array order is content');
+  assert.notEqual(fp({ realm: REALM, devices: [{ ...dev, id: 'café' }] }), fp({ realm: REALM, devices: [{ ...dev, id: 'café' }] }),
+    'no Unicode normalization: different code points are different content');
+  assert.equal(fp({ realm: REALM, devices: [{ ...dev, extra: undefined }] }), null, 'undefined extra keys are rejected, not ignored');
+  assert.equal(fingerprintAuthorityResponse('temporal', { realm: REALM, status: 'trusted', at: new Date(5), clock: 'received-at', policyRevision: 1 }), null,
+    'dates are not coerced');
+  const { validTo, ...noValidTo } = association();
+  assert.equal(fingerprintAuthorityResponse('association', { realm: REALM, complete: true, records: [noValidTo] }), null, 'missing is not null');
+});

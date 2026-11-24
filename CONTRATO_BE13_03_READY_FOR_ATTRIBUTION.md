@@ -59,7 +59,7 @@ Toda respuesta lleva `realm` y se valida con Zod estricto (campos extra rechazad
 }
 ```
 
-Profundamente congelado, sin referencias a objetos de autoridades ni al payload. `revisions` no basta para revalidar: una autoridad puede devolver la misma revisión con contenido distinto. `fingerprints` liga cada revisión al contenido exacto de la respuesta; la etapa siguiente relee la autoridad, recalcula con `fingerprintAuthorityResponse(kind, respuesta)` (`src/iot/trust-gate.fingerprint.ts`) y compara. La huella es un control de integridad sobre datos canonicalizados, no una firma.
+Profundamente congelado, sin referencias a objetos de autoridades ni al payload. `revisions` no basta para revalidar: una autoridad puede devolver la misma revisión con contenido distinto. `fingerprints` liga cada revisión al contenido exacto de la respuesta; la etapa siguiente relee la autoridad, recalcula con `fingerprintAuthorityResponse(kind, respuesta)` (`src/iot/trust-gate.fingerprint.ts`) y compara. La huella es solo un control de consistencia de contenido sobre datos canonicalizados (orden de claves fijado por el schema; arrays sensibles al orden; sin normalización Unicode): no es firma, ni MAC, ni prueba criptográfica de autoridad, ni autenticación.
 
 No contiene `attributedAt`, `missingReason`, `persistedAt` obligatorio ni `provenance` BE-12: **no es `TrustedMeasurementEvent` ni `AttributionResult`**.
 

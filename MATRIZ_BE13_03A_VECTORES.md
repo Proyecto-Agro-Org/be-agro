@@ -45,8 +45,8 @@ Leyenda de resultado sobre el código original (`1994efe`): **DEMOSTRADO** (defe
 
 | Suite | Resultado |
 | --- | --- |
-| BE13-03A nueva | 26/26 |
+| BE13-03A nueva | 28/28 (26 + 2 de revisión pre-publicación) |
 | BE13-03 | 39/39 |
 | BE13-02 + BE13-02A | 64/64 |
-| `npm test` | 554/554 |
+| `npm test` | 556/556 |
 | HTTP | 13/13 |

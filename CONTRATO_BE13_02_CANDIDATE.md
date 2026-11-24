@@ -64,3 +64,11 @@ Telemetría exige el mismo topic no nulo, sin comodines y de hasta 1024 bytes qu
 ## Idempotencia
 
 El mapper conserva la tupla técnica pero no compara digests, no entrega ACK, no persiste y no afirma exactly-once. La capacidad puede reutilizarse para la misma tupla y no atesta los bytes del payload; esto se expresa en la salida mediante `payloadIntegrity:'not-attested'`. Replay, retry y transacciones siguen siendo responsabilidad de `iot-ingest`.
+
+## Registro de candidates emitidos (agregado en BE13-03/BE13-03A)
+
+El módulo `protected-ingest.mapper.ts` exporta además `isIssuedProtectedCandidate(value)`. Devuelve `true` solo para el objeto exacto devuelto por un `map()` exitoso de **esa instancia del módulo**; se implementa con un `WeakSet` privado (no hay forma exportada de registrar objetos, no retiene memoria).
+
+- No altera el resultado de `map()`: mismas claves, mismos valores, mismo congelamiento. Las cuarentenas no se registran.
+- Copias, clones, Proxy, objetos deserializados o candidates de otra instancia del módulo devuelven `false`. Un candidate que cruce una frontera de serialización (cola, worker, persistencia) pierde esa procedencia.
+- Representa **solo procedencia dentro del mismo proceso**. No es autenticidad criptográfica, ni autenticación de hardware, ni de EMQX, ni protección frente a código hostil que ya ejecuta en el proceso (que puede crear su propia authority y su propio mapper).
