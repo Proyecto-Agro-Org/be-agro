@@ -76,3 +76,27 @@ export function createUnconfiguredMetrics() {
 export function createUnconfiguredAlerts() {
   return register({ emit(_event: unknown) { /* no provider approved */ } });
 }
+
+// BE13-10A — security policy placeholders. No identity provider, mapping, SoD
+// rule set, lease duration, retention period or evidence verifier is approved:
+// every placeholder answers with the MOST conservative outcome (deny, conflict,
+// lease never expires, time untrusted, evidence unverified, retention pending,
+// legal hold ON). Readiness reports each one as BLOCKED.
+type RealmRequest = { readonly realm?: unknown; readonly stream?: unknown; readonly evidence?: { readonly reference?: unknown } } | undefined;
+export function createBlockingSecurityPolicies() {
+  return Object.freeze({
+    identityProvider: register({ async identify(_request: unknown) { return Object.freeze({ status: 'denied' as const, reason: 'unauthenticated' as const }); } }),
+    capabilityMapping: register({ async map(request: RealmRequest) { return Object.freeze({ status: 'denied' as const, realm: request?.realm, reason: 'unknown-identity' as const }); } }),
+    separationOfDuties: register({ async evaluate(request: RealmRequest & { capabilities?: unknown }) {
+      return Object.freeze({ realm: request?.realm, decision: 'conflict' as const, conflictingCapabilities: Object.freeze([]), policyRevision: 0 }); } }),
+    leasePolicy: register({ async evaluate(request: RealmRequest) {
+      return Object.freeze({ realm: request?.realm, status: 'ACTIVE' as const, recoveryByNonOwner: 'never' as const, policyRevision: 0 }); } }),
+    timeAuthority: register({ async now(request: RealmRequest) { return Object.freeze({ realm: request?.realm, status: 'untrusted' as const }); } }),
+    evidenceVerifier: register({ async verify(request: RealmRequest) {
+      return Object.freeze({ realm: request?.realm, reference: request?.evidence?.reference, status: 'UNVERIFIED' as const, verifierRevision: 0 }); } }),
+    retention: register({ async policyFor(request: RealmRequest) {
+      return Object.freeze({ realm: request?.realm, policy: Object.freeze({ mode: 'pending-decision' as const }), policyRevision: 0 }); } }),
+    legalHold: register({ async holdFor(request: RealmRequest) {
+      return Object.freeze({ realm: request?.realm, stream: request?.stream, legalHold: true, holdReference: null }); } }),
+  });
+}

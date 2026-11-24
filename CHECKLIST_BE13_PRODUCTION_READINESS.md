@@ -1,6 +1,6 @@
 # BE-13 — Checklist de preparación para Production
 
-Estado actualizado al cierre de BE13-09 (rama local, base `dev` `c046956`). **Nada está habilitado en runtime.** Un ítem solo se marca READY con evidencia; READY local no implica READY en Atlas.
+Estado actualizado al cierre de BE13-10A (rama local, base `dev` `98dd2d8`). Decisiones pendientes: `MATRIZ_DECISIONES_HUMANAS_BE13.md`. **Nada está habilitado en runtime.** Un ítem solo se marca READY con evidencia; READY local no implica READY en Atlas.
 
 | Ítem | Estado | Evidencia / motivo |
 | --- | --- | --- |
@@ -23,8 +23,9 @@ Estado actualizado al cierre de BE13-09 (rama local, base `dev` `c046956`). **Na
 | Alerting | PENDING | BE13-09: puerto de alertas (hechos sin identificadores; 5 emitidas, 2 reservadas). Faltan umbrales, enrutamiento y on-call |
 | Retry policy | PENDING | Mecanismo implementado (BE13-08): clasificación determinista, política y scheduler inyectables, techo duro de 10, placeholders productivos bloqueantes. Faltan los valores productivos (`maxAttempts`, backoff) |
 | DLQ / quarantine store | READY (local) | BE13-08 + BE13-09: máquina de estados con lease `REPLAYING` y CAS por versión; operaciones autorizadas; probado en multi-nodo (24/24 ×2). Pendiente: reprocesamiento operado en runtime |
-| Operator authorization | PENDING | BE13-09: puerto deny-by-default, 8 capacidades, realm scope, evidencia `DECLARED_UNVERIFIED`. Falta IdP, mapeo rol→capacidad y verificación de evidencia |
-| Operations audit | PENDING | BE13-09: colección append-only con `$jsonSchema`, secuencia transaccional sin huecos, fail-closed en acciones administrativas. No WORM. Retención: decisión pendiente (sin TTL) |
+| Operator authorization | PENDING | BE13-09: puerto deny-by-default, 8 capacidades, realm scope, evidencia `DECLARED_UNVERIFIED`. Falta IdP, mapeo rol→capacidad y verificación de evidencia |. BE13-10A: contratos de IdP, mapeo, SoD y verificación de evidencia con placeholders bloqueantes; ningún proveedor elegido |
+| Operations audit | PENDING | BE13-09: colección append-only con `$jsonSchema`, secuencia transaccional sin huecos, fail-closed en acciones administrativas. No WORM. Retención: decisión pendiente (sin TTL) |. BE13-10A: retención por stream y legal hold (sin borrado) |
+| Replay lease expiry | PENDING | BE13-10A: contrato y governor (propiedad por identidad, expiración solo por política con tiempo confiable, CAS). S7 abierto en runtime hasta decidir la expiración y persistir el propietario |
 | Deployment | BLOCKED | Root no montado; bootstrap de operaciones offline (BE13-09) sin montar; no hay worker ni consumer |
 | Rollback | PENDING | Sin procedimiento; colecciones nuevas se crean por aprovisionamiento explícito (reversible), sin migraciones de datos existentes |
 | Composition root | READY (offline) | Dependencias obligatorias, placeholders bloqueantes, readiness estático; 31 pruebas |
