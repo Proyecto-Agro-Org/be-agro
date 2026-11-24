@@ -17,7 +17,7 @@ Estado actualizado al cierre de BE13-10A (rama local, base `dev` `98dd2d8`). Dec
 | Transaction resilience | PENDING | Failover, reintento transitorio, commit ambiguo y concurrencia probados localmente (REAL). **R1 resuelto en BE13-08** con recovery majority (25/25 × 2, Q05 REAL). F05 y Atlas NO VERIFICABLES |
 | Idempotencia / atomicidad | READY (local) | BE13-06: claim + medición en una transacción; 29/29 ×2 single-node; multi-nodo consistente; pendiente revalidar en la topología objetivo |
 | Secrets management | PENDING | Ningún secreto en el repo; no existe aún mecanismo de credenciales para Atlas/EMQX |
-| EMQX | BLOCKED | Sin integración ni conexión. BE13-11A define la frontera que un adapter real deberá atravesar; faltan las decisiones 18–28 de la matriz, gestión de secretos y un adapter revisado |
+| EMQX | BLOCKED | Sin integración ni conexión. BE13-11A define la frontera que un adapter real deberá atravesar; faltan las decisiones 18–28 de la matriz, gestión de secretos y un adapter revisado. BE13-11B: persistir antes de ingerir (inbox durable Mongo, H1 cerrado; 27/27 ×2 con majority caída y failover); faltan las decisiones 29–36 |
 | Atlas | BLOCKED | No utilizado; requiere autorización, credenciales gestionadas y campaña propia |
 | Monitoring | PENDING | BE13-09: puerto de métricas con 9 contadores y etiquetas de vocabulario cerrado (best-effort); snapshot operativo por conteos. Falta backend aprobado y SLO |
 | Alerting | PENDING | BE13-09: puerto de alertas (hechos sin identificadores; 5 emitidas, 2 reservadas). Faltan umbrales, enrutamiento y on-call |

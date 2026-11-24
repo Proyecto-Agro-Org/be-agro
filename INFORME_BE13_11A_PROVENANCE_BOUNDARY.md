@@ -26,7 +26,7 @@ Decisión: `ADR_BE13_11A_PROVENANCE_TRUST_BOUNDARY.md`. Contratos: `CONTRATO_BE1
 
 | ID | Severidad | Hallazgo | Corrección |
 | --- | --- | --- | --- |
-| H1 | MEDIO (arquitectura) | BE13-04 exige un instante persistido (`persistedAt`) y bloquea sin él. Un consumer MQTT directo no tiene "documento crudo persistido": sin ese dato, toda medición quedaría `BLOCKED` con `unresolved-persisted-at` | `rawPersistedAt`: hecho observado **opcional** del adapter (inbox durable). Sin él, el bloqueo fail-closed se mantiene. Si el adapter debe tener inbox es decisión humana |
+| H1 | MEDIO (arquitectura) | BE13-04 exige un instante persistido (`persistedAt`) y bloquea sin él. Un consumer MQTT directo no tiene "documento crudo persistido": sin ese dato, toda medición quedaría `BLOCKED` con `unresolved-persisted-at` | `rawPersistedAt` observado (BE13-11A). **CERRADO en BE13-11B:** el instante solo existe en el Durable Broker Inbox (`INFORME_BE13_11B_DURABLE_INBOX.md`) |
 | H2 | BAJO (preexistente, BE13-06) | El doble de persistencia en memoria derivaba el `measurementId` truncando la clave: dos eventos distintos colisionaban y uno sobrescribía al otro en silencio (lo reveló P17) | `sha256` de la clave completa |
 | H3 | INFORMATIVO (diseño) | Poner en cuarentena las entregas rechazadas permitiría a un publicador no autenticado inundar la cuarentena | Los rechazos del boundary no crean cuarentenas (resultado + audit + métricas) |
 | H4 | INFORMATIVO | Las claves del payload en camelCase (`clientId`, `retryClass`) hacen malformado el sobre (forma de campo snake_case) | Comportamiento fail-closed documentado; el contrato del dispositivo debe usar snake_case |

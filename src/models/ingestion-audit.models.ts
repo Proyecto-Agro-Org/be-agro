@@ -16,7 +16,9 @@ const actions = ['quarantine-created', 'quarantine-recurred', 'classification-ch
   // BE13-10B — replay lease governance
   'lease-acquired', 'lease-release-requested', 'lease-released-owner', 'lease-recovery-requested', 'lease-recovered-expired', 'lease-release-denied', 'stale-replay-blocked',
   // BE13-11A — broker boundary
-  'broker-provenance-verified', 'broker-provenance-rejected', 'broker-verifier-unavailable', 'broker-delivery-malformed', 'technical-identity-mismatch'];
+  'broker-provenance-verified', 'broker-provenance-rejected', 'broker-verifier-unavailable', 'broker-delivery-malformed', 'technical-identity-mismatch',
+  // BE13-11B — durable inbox
+  'inbox-persisted', 'inbox-recovery-started', 'inbox-recovery-rejected', 'inbox-integrity-failed', 'inbox-processed'];
 const safeRef = { bsonType: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9:_./-]+$' };
 
 // additionalProperties:false rejects rawPayload, stack, messages, secrets, tokens, URIs.
@@ -56,6 +58,8 @@ export const auditIndexes = [
 // BE13-10B / BE13-11A — LOCAL, additive validator upgrade: applies the CURRENT validator (lease actions of BE13-10B and
 // broker-boundary actions of BE13-11A). Only new enum values are added: existing audit documents stay valid.
 export const upgradeAuditValidatorBe1311a = (connection: Connection, prefix: string) => upgradeAuditValidatorBe1310b(connection, prefix);
+// BE13-11B: same additive upgrade (durable inbox actions).
+export const upgradeAuditValidatorBe1311b = upgradeAuditValidatorBe1311a;
 export async function upgradeAuditValidatorBe1310b(connection: Connection, prefix: string) {
   const n = auditCollections(prefix), db = connection.db;
   if (!db || (await db.listCollections({ name: n.audit }).toArray()).length !== 1) throw new TypeError('Existing audit namespace required');

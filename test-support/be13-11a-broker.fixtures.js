@@ -3,7 +3,42 @@
 import { fixture, world, RECEIVED, PERSISTED, createInMemoryPersistence, createTestOnlyRetryPolicy, createDeterministicScheduler, createInMemoryRecovery,
   createInMemoryQuarantine, createInMemoryAudit, createSyntheticOperatorAuthority, createRecordingMetrics, createRecordingAlerts,
   createSyntheticLeaseGovernance } from './be13-composition.fixtures.js';
-import { createMqttIngestionBoundary } from '../dist/src/services/mqtt-ingestion-boundary.service.js';
+import { createMqttIngestionBoundary, createDurableBrokerAdmissionService } from '../dist/src/services/mqtt-ingestion-boundary.service.js';
+import { brokerContextFingerprint, brokerProvenanceFingerprint, payloadSha256 } from '../dist/src/iot/broker-fingerprints.js';
+
+// BE13-11B — TEST_ONLY in-memory Durable Broker Inbox. Same refusal rules as the Mongo store (bytes/context must match);
+// the "server clock" is synthetic (TEST_ONLY), one hour after RECEIVED (an adapter clock AHEAD of the store clock would make
+// persistedAt < receivedAt, which BE13-02 rejects as invalid-timestamp: see INFORME_BE13_11B H2). Not durable, not a database.
+export function createInMemoryBrokerInbox(realm = 'test', { start = RECEIVED + 3_600_000 } = {}) {
+  const rows = new Map(); let seq = 0; let serverClock = start;
+  const inbox = {
+    rows, failing: false, answer: null,
+    async persistVerifiedDelivery(r) {
+      if (inbox.failing) throw new Error('inbox down');
+      if (inbox.answer) return typeof inbox.answer === 'function' ? inbox.answer(r) : inbox.answer;
+      if (r.realm !== realm) throw new Error('INBOX_REALM_MISMATCH');
+      const bytes = Uint8Array.from(r.rawPayload), sha = payloadSha256(bytes);
+      if (sha !== r.rawPayloadSha256) throw new Error('INBOX_PAYLOAD_HASH_MISMATCH');
+      const ctx = brokerContextFingerprint(realm, { connectionReference: r.connectionReference, authenticatedPrincipalReference: r.principalReference, mqttClientId: r.mqttClientId,
+        topic: r.topic, qos: r.qos, retain: r.retain, packetId: r.packetId, receivedAt: r.receivedAt }, sha);
+      if (ctx !== r.contextFingerprint) throw new Error('INBOX_CONTEXT_MISMATCH');
+      const provenanceFingerprint = brokerProvenanceFingerprint({ realm, sourceId: r.sourceId, principalReference: r.principalReference, technicalDeviceKey: r.technicalDeviceKey,
+        connectionReference: r.connectionReference, contextFingerprint: ctx, rawPayloadSha256: sha, verifiedAt: r.verifiedAt, verifierRevision: r.verifierRevision, mappingRevision: r.mappingRevision });
+      const inboxId = 'ib_' + (++seq).toString(16).padStart(32, '0');
+      serverClock += 1;
+      const { rawPayload: _drop, ...rest } = r;
+      rows.set(inboxId, { ...rest, inboxId, realm, rawPayload: bytes, rawPayloadBytes: bytes.byteLength, rawPersistedAt: serverClock, provenanceFingerprint });
+      return { inboxId, realm, rawPersistedAt: serverClock, rawPayloadSha256: sha, rawPayloadBytes: bytes.byteLength, provenanceFingerprint };
+    },
+    async getById({ realm: r, inboxId }) {
+      if (inbox.failing) throw new Error('inbox down');
+      const row = rows.get(inboxId);
+      return row && row.realm === r && r === realm ? { ...row, rawPayload: Uint8Array.from(row.rawPayload) } : null;
+    },
+    async ping() { return !inbox.failing; },
+  };
+  return inbox;
+}
 
 export const TEST_ONLY_LIMITS = Object.freeze({ maxBytes: 4096, maxDepth: 8, maxKeys: 64, maxStringLength: 256 });
 export const TEST_ONLY_CONFIG = Object.freeze({ topicRoutes: Object.freeze([{ prefix: 'synthetic/agro/', messageType: 'telemetry' }]), retained: 'block',
@@ -21,7 +56,7 @@ export const bytesOf = value => Buffer.from(typeof value === 'string' ? value : 
 // brokerObserved — what a future adapter would observe.
 export function observed(patch = {}) {
   return { connectionReference: 'conn:synthetic-1', authenticatedPrincipalReference: PRINCIPAL, mqttClientId: KEY, topic: 'synthetic/agro/device-001/telemetry',
-    qos: 1, retain: false, packetId: 7, receivedAt: RECEIVED, rawPersistedAt: PERSISTED, ...patch };
+    qos: 1, retain: false, packetId: 7, receivedAt: RECEIVED, ...patch }; // BE13-11B: no rawPersistedAt (only the inbox assigns it)
 }
 export const delivery = ({ obs = {}, env = {}, payload } = {}) => ({ brokerObserved: observed(obs), payload: payload ?? bytesOf(envelope(env)) });
 
@@ -50,7 +85,7 @@ export function syntheticMapping(mode = { kind: 'ok' }) {
 }
 
 const ALL = ['QUARANTINE_VIEW', 'QUARANTINE_REPLAY', 'QUARANTINE_UNBLOCK', 'QUARANTINE_BLOCK', 'QUARANTINE_RESOLVE', 'QUARANTINE_DISCARD', 'AUDIT_VIEW', 'OPERATIONS_VIEW'];
-export async function boundarySetup({ extra = {}, verifierMode, mappingMode, persistence: persistenceOverride } = {}) {
+export async function boundarySetup({ extra = {}, verifierMode, mappingMode, persistence: persistenceOverride, durableInbox } = {}) {
   const w = world();
   const persistence = persistenceOverride ?? createInMemoryPersistence(w.calls);
   const quarantine = await createInMemoryQuarantine(), audit = createInMemoryAudit(), metrics = createRecordingMetrics(), alerts = createRecordingAlerts();
@@ -64,5 +99,10 @@ export async function boundarySetup({ extra = {}, verifierMode, mappingMode, per
     authorization: createSyntheticOperatorAuthority({ 'tok-admin': { operatorId: 'op-admin', realms: ['test'], capabilities: ALL, authenticationReference: 'synthetic:admin' } }),
     audit, metrics, alerts, retention: { mode: 'retain-indefinitely' }, timeAuthority: lease.timeAuthority, leasePolicy: lease.leasePolicy,
     brokerProvenanceVerifier: verifier, brokerIdentityMapping: mapping, payloadLimits: TEST_ONLY_LIMITS, boundaryConfig: TEST_ONLY_CONFIG, ...extra };
-  return { w, persistence, quarantine, audit, metrics, alerts, verifier, mapping, deps, boundary: createMqttIngestionBoundary(deps) };
+  // BE13-11B: the accepted path is persist-before-ingest. `boundary.deliver` = durable admit (persist-and-process);
+  // `direct` is the BE13-11A non-durable boundary (no persisted instant → BE13-04 blocks).
+  const inbox = durableInbox ?? createInMemoryBrokerInbox('test');
+  const admission = createDurableBrokerAdmissionService({ ...deps, durableInbox: inbox });
+  const boundary = Object.freeze({ realm: admission.realm, deliver: raw => admission.admit(raw, { mode: 'persist-and-process' }), operations: admission.operations, readiness: admission.readiness });
+  return { w, persistence, quarantine, audit, metrics, alerts, verifier, mapping, deps, inbox, admission, boundary, direct: createMqttIngestionBoundary(deps) };
 }
