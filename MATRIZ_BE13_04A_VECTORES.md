@@ -1,6 +1,6 @@
 # BE13-04A — Matriz de vectores adversariales
 
-Archivo: `test/be13-04a-adversarial.test.js` — **18/18**. Dobles explícitos, incluidos dobles deliberadamente mentirosos.
+Archivo: `test/be13-04a-adversarial.test.js` — **19/19**. Dobles explícitos, incluidos dobles deliberadamente mentirosos.
 
 | V | Vector | Resultado | Severidad |
 | --- | --- | --- | --- |
@@ -22,6 +22,7 @@ Archivo: `test/be13-04a-adversarial.test.js` — **18/18**. Dobles explícitos, 
 | V16 | Throws hostiles, thenable hostil, timeout, mutación tardía | `dependency-error`; sin efecto | SIN HALLAZGO |
 | V17 | Diagnósticos en cuarentena | solo `status`/`reason`/`eventId` | SIN HALLAZGO |
 | V18 | Cuarentena del gate usada como ready | `invalid-ready` | SIN HALLAZGO |
+| V19 | Matriz de revalidación 5 autoridades × 7 mutaciones | `stale-*` / `invalid-authority-response` / `realm-mismatch` | SIN HALLAZGO |
 
 ## Fuera de prueba automatizada
 

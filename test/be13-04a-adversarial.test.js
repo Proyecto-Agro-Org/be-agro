@@ -266,3 +266,33 @@ test('BE13-04A V18 gate quarantine results are never registered as ready', async
   assert.equal(isIssuedReadyFor(quarantined, c), false);
   assert.equal((await world().builder().build(c, quarantined)).reason, 'invalid-ready');
 });
+
+test('BE13-04A V19 revalidation matrix: 5 authorities × {content, revision, both, malformed, empty, realm}', async () => {
+  const stale = { devices: 'stale-device', associations: 'stale-association', temporal: 'stale-temporal-policy', catalogue: 'stale-catalog', hardware: 'stale-hardware' };
+  const revisionField = { devices: o => ({ ...o, devices: o.devices.map(x => ({ ...x, version: x.version + 1 })) }),
+    associations: o => ({ ...o, records: o.records.map(x => ({ ...x, revision: x.revision + 1 })) }),
+    temporal: o => ({ ...o, policyRevision: o.policyRevision + 1 }), catalogue: o => ({ ...o, catalogueRevision: o.catalogueRevision + 1 }),
+    hardware: o => ({ ...o, attestationRevision: o.attestationRevision + 1 }) };
+  const contentField = { devices: o => ({ ...o, devices: o.devices.map(x => ({ ...x, updatedAt: 999 })) }),
+    associations: o => ({ ...o, records: o.records.map(x => ({ ...x, clientId: 'client-Z' })) }),
+    temporal: o => ({ ...o, clock: 'broker-declared-approved', at: SENT }), catalogue: o => ({ ...o, unit: 'kelvin' }),
+    hardware: o => ({ ...o, method: 'other' }) };
+  const empty = { devices: o => ({ ...o, devices: [] }), associations: o => ({ ...o, records: [] }), temporal: o => ({ realm: o.realm, status: 'unresolved' }),
+    catalogue: o => ({ realm: o.realm, status: 'unknown-magnitude' }), hardware: o => ({ realm: o.realm, status: 'unverified' }) };
+  const kinds = {
+    content: [contentField, null], revision: [revisionField, null],
+    both: [Object.fromEntries(Object.keys(stale).map(k => [k, o => revisionField[k](contentField[k](o))])), null],
+    empty: [empty, null],
+    malformed: [Object.fromEntries(Object.keys(stale).map(k => [k, o => ({ ...o, unexpected: true })])), 'invalid-authority-response'],
+    undefined: [Object.fromEntries(Object.keys(stale).map(k => [k, () => undefined])), 'invalid-authority-response'],
+    realm: [Object.fromEntries(Object.keys(stale).map(k => [k, o => ({ ...o, realm: 'preview' })])), 'realm-mismatch'],
+  };
+  for (const [kind, [mutators, expected]] of Object.entries(kinds)) {
+    for (const name of Object.keys(stale)) {
+      const { w, c, ready } = await setup(); const method = Object.keys(w.authorities[name])[0], original = w.authorities[name][method];
+      w.authorities[name][method] = async q => mutators[name](await original(q));
+      const result = await w.builder().build(c, ready);
+      assert.equal(result.reason, expected ?? stale[name], `${kind}/${name}`);
+    }
+  }
+});

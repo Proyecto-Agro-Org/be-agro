@@ -35,3 +35,25 @@ Un caller del mismo proceso puede construir políticas y revalidadores que aprue
 ## Recomendación
 
 BE13-04 queda listo para revisión local. No publicar ni integrar hasta decidir: políticas de clock/declaredAt/missingReason/persistedAt, `DEVICE_STATUS_HISTORY_REQUIRED`, y el mecanismo de comparación BE-12 ↔ `attribution` en la composición.
+
+## Revisión final pre-publicación
+
+### Extracción de helpers sin cambio observable
+
+Prueba diferencial (script local, fuera del repo): el gate de `dev` `6f6c5c8` (antes de extraer `authority-call.ts` y `trust-gate.queries.ts`) y el gate de esta rama se ejecutaron sobre los mismos 30 escenarios, que cubren 19 resultados distintos (6 `ready-for-attribution` y 18 códigos de cuarentena). **30/30 resultados idénticos**, fingerprints incluidos. Las suites BE13-02/02A/03/03A siguen en 131/131. Única diferencia: el texto del `TypeError` de construcción cambia de "authority" a "port" (tipo de error sin cambios).
+
+### WeakMap `ready → candidate`
+
+- Identidad de objeto: copias, spread, JSON, `structuredClone`, Proxy, `Object.create`, otra instancia del módulo y otro candidate de igual contenido → rechazados (V1–V4, V18).
+- Memoria (Node 24, `--expose-gc`, 20 000 pares con payload ~2 KB): base 8,7 MB; candidates + readies vivos 53,0 MB; solo readies vivos 51,6 MB (un ready vivo mantiene vivo a su candidate, por diseño); readies descartados 10,8 MB. Sin fuga: el WeakMap no retiene readies descartados ni sus candidates.
+- `isIssuedReadyFor` es **procedencia dentro del mismo proceso**. No es autenticación, firma, MAC ni atestación, y no protege frente a código hostil en el proceso.
+
+### Revalidación
+
+Matriz V19: 5 autoridades × {contenido distinto con igual revisión, solo revisión, ambos, vacía, malformada, `undefined`, otro realm} = 35 combinaciones, todas fail-closed con el código esperado. La comparación usa la misma canonicalización que BE13-03 (`trust-gate.fingerprint.ts`), cubre la respuesta completa, compara valores (no referencias) y no tiene defaults.
+
+### Estrategia A1 para BE13-05
+
+Composición externa sin modificar BE-12: después de `resolve()` de BE-12, comparar su `AttributionResult` con `attribution` y el evento de BE13-04: `eventId`, `sourceId`, `realm`, `physicalDeviceId`, `clientId`, `fieldId`, `areaId`, `sensorId`, `associationId`, `associationRevision`, `attributedAt = authorizedAt` y `clock`. Cualquier diferencia → cuarentena `attribution-drift`, sin persistir.
+
+Validación: 611/611 (610 + V19), HTTP 13/13.

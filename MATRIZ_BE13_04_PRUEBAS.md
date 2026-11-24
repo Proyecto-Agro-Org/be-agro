@@ -54,7 +54,7 @@ Archivo: `test/be13-04-trusted-event-builder.test.js` — **36/36**. Flujo real 
 | Suite | Resultado |
 | --- | --- |
 | BE13-04 funcional | 36/36 |
-| BE13-04A adversarial | 18/18 |
+| BE13-04A adversarial | 19/19 |
 | Previas (incluye BE13-02/03 tras refactor) | 556/556 |
-| `npm test` | **610/610** |
+| `npm test` | **611/611** |
 | HTTP | 13/13 |
