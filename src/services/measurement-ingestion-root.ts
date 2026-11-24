@@ -151,9 +151,9 @@ const recoveryReportSchema = z.discriminatedUnion('state', [
     'fingerprint-mismatch', 'malformed-claim', 'malformed-measurement', 'unexpected-identity']) }).strict(),
 ]);
 const recordedSchema = z.object({ realm: catalogueRealmSchema, quarantineId: z.string().regex(/^q_[0-9a-f]{64}$/),
-  status: z.enum(['OPEN', 'RETRYABLE', 'BLOCKED', 'RESOLVED', 'DISCARDED']), attemptCount: z.number().int().min(1) }).strict();
+  status: z.enum(['OPEN', 'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED']), attemptCount: z.number().int().min(1) }).strict();
 const replayRecordSchema = z.object({ quarantineId: z.string().regex(/^q_[0-9a-f]{64}$/), realm: catalogueRealmSchema,
-  status: z.enum(['OPEN', 'RETRYABLE', 'BLOCKED', 'RESOLVED', 'DISCARDED']), reasonCode: z.string().regex(/^[a-z][a-z0-9-]{1,63}$/),
+  status: z.enum(['OPEN', 'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED']), reasonCode: z.string().regex(/^[a-z][a-z0-9-]{1,63}$/),
   sourceId: z.string().nullable(), operation: z.enum(['measurement', 'device-status']).nullable(), eventId: z.string().nullable(), field: z.string().nullable(),
   device: z.object({ kind: z.enum(['mqtt-clientid', 'device-id']), value: z.string() }).strict().nullable(), fingerprint: hex64.nullable() }).passthrough();
 
@@ -266,7 +266,8 @@ export function createResilientMeasurementIngestionRoot(deps: ResilientIngestion
     return run(mapped, field);
   }
 
-  async function replay(input: { readonly quarantineId: string; readonly protectedDocument: unknown; readonly provenanceEvidence: unknown; readonly field: string }): Promise<ReplayResult> {
+  async function replay(input: { readonly quarantineId: string; readonly protectedDocument: unknown; readonly provenanceEvidence: unknown; readonly field: string;
+    readonly leased?: boolean }): Promise<ReplayResult> {
     const reject = (reasonCode: Extract<ReplayResult, { status: 'replay-rejected' }>['reasonCode']): ReplayResult => Object.freeze({ status: 'replay-rejected', reasonCode });
     const idOk = typeof input?.quarantineId === 'string' && /^q_[0-9a-f]{64}$/.test(input.quarantineId);
     const fieldOk = logicalKey.safeParse(input?.field).success;
@@ -276,22 +277,27 @@ export function createResilientMeasurementIngestionRoot(deps: ResilientIngestion
     if (!record || record.realm !== realm || record.quarantineId !== input.quarantineId) return reject('quarantine-not-found');
     const current = record;
     const audit = async (outcome: string) => { try { await quarantine.appendAudit(current.quarantineId, { action: 'replay', outcome, reasonCode: current.reasonCode, evidence: null }); } catch { /* best effort */ } };
-    if (record.status !== 'RETRYABLE') { await audit('replay-not-allowed'); return reject('replay-not-allowed'); }
+    // BE13-09: a leased replay expects REPLAYING (taken by CAS by the operations service) and must always leave it.
+    const expected = input.leased === true ? 'REPLAYING' : 'RETRYABLE';
+    if (record.status !== expected) { await audit('replay-not-allowed'); return reject('replay-not-allowed'); }
+    const releaseLease = async (outcome: string) => {
+      if (expected === 'REPLAYING') { try { await quarantine.transition({ quarantineId: current.quarantineId, from: 'REPLAYING', to: 'RETRYABLE', evidence: 'replay', outcome }); } catch { /* reported by status */ } }
+    };
     const mapped = map(input.protectedDocument, input.provenanceEvidence);
     if (mapped.status !== 'candidate' || record.sourceId !== mapped.sourceId || record.operation !== mapped.storeOperation || record.eventId !== mapped.eventId ||
       record.field !== input.field || record.device?.kind !== mapped.device.kind || record.device?.value !== mapped.device.value) {
-      await audit('replay-identity-mismatch'); return reject('replay-identity-mismatch');
+      await audit('replay-identity-mismatch'); await releaseLease('replay-identity-mismatch'); return reject('replay-identity-mismatch');
     }
     if (record.fingerprint === null || record.fingerprint !== technicalInputFingerprint(realm, mapped, input.field)) {
-      await audit('replay-fingerprint-mismatch'); return reject('replay-fingerprint-mismatch');
+      await audit('replay-fingerprint-mismatch'); await releaseLease('replay-fingerprint-mismatch'); return reject('replay-fingerprint-mismatch');
     }
     const outcome = await run(mapped, input.field);
     const done = outcome.status === 'accepted' || outcome.status === 'duplicate' || outcome.status === 'recovered-committed';
     const blocked = outcome.status === 'quarantined' && outcome.quarantineStatus === 'BLOCKED';
     try {
-      if (done) await quarantine.transition({ quarantineId: current.quarantineId, from: 'RETRYABLE', to: 'RESOLVED', evidence: 'replay', outcome: outcome.status });
-      else if (blocked) await quarantine.transition({ quarantineId: current.quarantineId, from: 'RETRYABLE', to: 'BLOCKED', evidence: 'replay', outcome: outcome.reasonCode });
-      else await audit(outcome.status === 'quarantined' ? outcome.reasonCode : outcome.reasonCode);
+      if (done) await quarantine.transition({ quarantineId: current.quarantineId, from: expected, to: 'RESOLVED', evidence: 'replay', outcome: outcome.status });
+      else if (blocked) await quarantine.transition({ quarantineId: current.quarantineId, from: expected, to: 'BLOCKED', evidence: 'replay', outcome: outcome.reasonCode });
+      else { await audit(outcome.reasonCode); await releaseLease(outcome.reasonCode); }
     } catch { /* the store result below reflects whatever was persisted */ }
     let after;
     try { after = await quarantine.get(current.quarantineId); } catch { after = null; }

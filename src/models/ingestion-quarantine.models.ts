@@ -13,11 +13,11 @@ const text = { bsonType: 'string', minLength: 1, maxLength: 256 };
 const nullableText = { anyOf: [text, { bsonType: 'null' }] };
 const code = { bsonType: 'string', pattern: '^[a-z][a-z0-9-]{1,63}$' };
 const hexOrNull = { anyOf: [{ bsonType: 'string', pattern: '^[0-9a-f]{64}$' }, { bsonType: 'null' }] };
-const status = { enum: ['OPEN', 'RETRYABLE', 'BLOCKED', 'RESOLVED', 'DISCARDED'] };
+const status = { enum: ['OPEN', 'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED'] };
 
 export const quarantineValidator = { $jsonSchema: { bsonType: 'object', additionalProperties: false,
   required: ['_id', 'realm', 'stage', 'sourceId', 'operation', 'eventId', 'field', 'device', 'reasonCode', 'cause', 'retryClass', 'fingerprint',
-    'documentDigest', 'status', 'attemptCount', 'firstSeenAt', 'lastSeenAt', 'createdAt', 'updatedAt', 'audit'],
+    'documentDigest', 'status', 'version', 'attemptCount', 'firstSeenAt', 'lastSeenAt', 'createdAt', 'updatedAt', 'audit'],
   properties: {
     _id: { bsonType: 'string', pattern: '^q_[0-9a-f]{64}$' },
     realm,
@@ -28,6 +28,7 @@ export const quarantineValidator = { $jsonSchema: { bsonType: 'object', addition
     reasonCode: code, cause: { anyOf: [code, { bsonType: 'null' }] },
     retryClass: { enum: ['transient', 'ambiguous-commit', 'validation', 'security', 'conflict', 'policy-blocked', 'consistency', 'unknown'] },
     fingerprint: hexOrNull, documentDigest: hexOrNull, status,
+    version: { bsonType: ['int', 'long'], minimum: 1, maximum: 9_007_199_254_740_991 },
     attemptCount: { bsonType: ['int', 'long'], minimum: 1, maximum: 1_000_000 },
     firstSeenAt: { bsonType: 'date' }, lastSeenAt: { bsonType: 'date' }, createdAt: { bsonType: 'date' }, updatedAt: { bsonType: 'date' },
     audit: { bsonType: 'array', maxItems: 100, items: { bsonType: 'object', additionalProperties: false, required: ['action', 'at', 'outcome', 'reasonCode', 'evidence'],
