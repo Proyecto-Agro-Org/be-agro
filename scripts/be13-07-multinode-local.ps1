@@ -40,7 +40,7 @@ try{
   if($LASTEXITCODE -ne 0 -or $created -notmatch '^[a-f0-9]{64}$'){throw 'Holder creation failed'};$holderId=$created.Trim();docker start $holderId|Out-Null;if($LASTEXITCODE -ne 0){throw 'Holder start failed'}
   for($i=0;$i -lt 3;$i++){
     $stage="create-node-$($i+1)";$p=$ports[$i]
-    $created=docker create --name "$resource-n$($i+1)" --label "agro.mn.run=$runId" --label "agro.mn.role=node$($i+1)" --network "container:$holderId" --memory 768m --cpus 1 --tmpfs /data/db:rw,size=512m,mode=1777 --tmpfs /data/configdb:rw,size=32m,mode=1777 $image --replSet agro_mn --port $p --bind_ip_all
+    $created=docker create --name "$resource-n$($i+1)" --label "agro.mn.run=$runId" --label "agro.mn.role=node$($i+1)" --network "container:$holderId" --memory 1280m --cpus 1 --tmpfs /data/db:rw,size=1024m,mode=1777 --tmpfs /data/configdb:rw,size=32m,mode=1777 $image --replSet agro_mn --port $p --bind_ip_all
     if($LASTEXITCODE -ne 0 -or $created -notmatch '^[a-f0-9]{64}$'){throw 'Node creation failed'};$nodeIds+=$created.Trim();docker start $created.Trim()|Out-Null;if($LASTEXITCODE -ne 0){throw 'Node start failed'}
   }
   for($i=0;$i -lt 3;$i++){$stage="wait-node-$($i+1)";$null=Wait-MnProbe $nodeIds[$i] $ports[$i] 'quit(db.adminCommand({ping:1}).ok===1?0:1)' 45 'Node readiness deadline'}
