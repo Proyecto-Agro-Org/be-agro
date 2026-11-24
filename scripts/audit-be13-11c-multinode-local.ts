@@ -144,7 +144,7 @@ async function main() {
     const stateOf = (id: string) => stateRows.findOne({ _id: id as never }, majority);
     const R = reconcilerOn(connection);
     const ids: Record<string, string> = {};
-    const names = ['A', 'B', 'C', 'D', 'E', 'F', 'G'] as const;
+    const names = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
 
     await check('C01 N4 exact reproduction: ambiguous inbox write (real paused secondaries) → caller has NO receipt, record appears later', async () => {
       await waitHealthy();
@@ -248,6 +248,18 @@ async function main() {
       assert.deepEqual([st.status, st.version], ['completed', 3]); // claim v1 → takeover v2 → completed v3
       assert.equal(await createMongoBrokerInboxReconciliationStore({ connection: conns[1]!, prefix: INGEST, realm: 'test' }).complete({ realm: 'test', claim: claimA!, outcome: 'recovered-and-processed' }), false);
       assert.equal(await mCount('e11b-11c-A'), 1);
+    });
+    await check('C10b stale completion while the state is STILL claimed: after takeover the old holder cannot complete; only the new holder can', async () => {
+      const s1 = createMongoBrokerInboxReconciliationStore({ connection: conns[1]!, prefix: INGEST, realm: 'test' }), s2 = createMongoBrokerInboxReconciliationStore({ connection: conns[2]!, prefix: INGEST, realm: 'test' });
+      const h1 = await s1.claim({ realm: 'test', inboxId: ids.H!, claimLeaseMs: POLICY.claimLeaseMs });
+      assert.ok(h1);
+      assert.equal(await s2.claim({ realm: 'test', inboxId: ids.H!, claimLeaseMs: POLICY.claimLeaseMs }), null); // live claim: no takeover
+      await sleep(POLICY.claimLeaseMs + 500);
+      const h2 = await s2.claim({ realm: 'test', inboxId: ids.H!, claimLeaseMs: POLICY.claimLeaseMs });
+      assert.equal(h2?.version, 2);
+      assert.equal(await s1.complete({ realm: 'test', claim: h1!, outcome: 'recovered-and-processed' }), false);
+      assert.equal((await stateOf(ids.H!) as unknown as { status: string }).status, 'claimed');
+      assert.equal(await s2.complete({ realm: 'test', claim: h2!, outcome: 'blocked' }), true);
     });
     await check('C11 failover after claim: claim (majority) → primary stopped → a reconciler on the NEW primary takes over after the lease → one measurement', async () => {
       await waitHealthy();
