@@ -12,6 +12,12 @@ import type {
   IdempotencyKey,
   MeasurementIngestionComposition,
   MeasurementIngestionDependencies,
+  PersistentCompositionAccepted,
+  PersistentCompositionQuarantineCode,
+  PersistentCompositionQuarantined,
+  PersistentCompositionResult,
+  PersistentMeasurementIngestionComposition,
+  PersistentMeasurementIngestionDependencies,
 } from '../iot/ingestion-composition.contracts.js';
 import {
   authorityTimeoutSchema,
@@ -20,6 +26,8 @@ import {
   compositionSelectionSchema,
   idempotencyClaimSchema,
   idempotencyLookupSchema,
+  persistenceLookupSchema,
+  persistenceOutcomeSchema,
 } from '../iot/ingestion-composition.schemas.js';
 import type { TrustGateRealm } from '../iot/trust-gate.contracts.js';
 import { trustedMeasurementEventSchema } from '../measurements/schemas.js';
@@ -30,9 +38,9 @@ import { assembleTrustedMeasurementEvent, createTrustedEventBuilder } from './tr
 const BE12_FAILURES = new Set(['unknown-device', 'ambiguous-device', 'unverified-device', 'inactive-device', 'untrusted-clock', 'no-window', 'overlap', 'invalid-catalogue']);
 
 class CompositionStop {
-  constructor(readonly reason: CompositionQuarantineCode, readonly cause: string | null = null) {}
+  constructor(readonly reason: PersistentCompositionQuarantineCode, readonly cause: string | null = null) {}
 }
-const stop = (reason: CompositionQuarantineCode, cause: string | null = null): never => { throw new CompositionStop(reason, cause); };
+const stop = (reason: PersistentCompositionQuarantineCode, cause: string | null = null): never => { throw new CompositionStop(reason, cause); };
 
 function requireMethod(value: unknown, method: string, name: string): void {
   if (typeof value !== 'object' || value === null || typeof (value as Record<string, unknown>)[method] !== 'function')
@@ -46,7 +54,19 @@ function bind<T extends object>(value: T, method: string) {
 // Composition root factory. Every dependency is mandatory: no permissive or
 // silent defaults. The caller (future bootstrap) is the productive trust
 // boundary: it decides which adapters and policies are trusted.
+type FinalizationMode = 'claim' | 'persist';
+
 export function createMeasurementIngestionComposition(deps: MeasurementIngestionDependencies): MeasurementIngestionComposition {
+  return createComposition(deps, 'claim') as MeasurementIngestionComposition;
+}
+
+// BE13-06: same pipeline, but the last step is persistMeasurementAtomically
+// (claim + measurement write in one transaction) instead of a bare claim.
+export function createPersistentMeasurementIngestionComposition(deps: PersistentMeasurementIngestionDependencies): PersistentMeasurementIngestionComposition {
+  return createComposition(deps, 'persist') as PersistentMeasurementIngestionComposition;
+}
+
+function createComposition(deps: MeasurementIngestionDependencies | PersistentMeasurementIngestionDependencies, mode: FinalizationMode) {
   if (typeof deps !== 'object' || deps === null) throw new TypeError('Composition dependencies required');
   const realmResult = compositionOptionsSchema.safeParse(deps.realmContext);
   if (!realmResult.success) throw new TypeError('Missing composition dependency: realmContext');
@@ -62,8 +82,10 @@ export function createMeasurementIngestionComposition(deps: MeasurementIngestion
   requireMethod(deps.catalogue, 'evaluate', 'catalogue');
   if (typeof deps.policies !== 'object' || deps.policies === null) throw new TypeError('Missing composition dependency: policies');
   for (const name of ['clock', 'declaredAt', 'missingReason', 'persistenceTime'] as const) requireMethod(deps.policies[name], 'decide', `policies.${name}`);
-  requireMethod(deps.idempotency, 'lookup', 'idempotency');
-  requireMethod(deps.idempotency, 'claim', 'idempotency');
+  const store = mode === 'claim' ? (deps as MeasurementIngestionDependencies).idempotency : (deps as PersistentMeasurementIngestionDependencies).persistence;
+  const storeName = mode === 'claim' ? 'idempotency' : 'persistence';
+  requireMethod(store, 'lookup', storeName);
+  requireMethod(store, mode === 'claim' ? 'claim' : 'persistAtomically', storeName);
   requireMethod(deps.be12, 'resolve', 'be12');
 
   const identity = createIngestionIdentityPorts(deps.identityStore, realm);
@@ -73,20 +95,21 @@ export function createMeasurementIngestionComposition(deps: MeasurementIngestion
     clock: deps.policies.clock, declaredAt: deps.policies.declaredAt, missingReason: deps.policies.missingReason, persistenceTime: deps.policies.persistenceTime,
   } }, { realm, authorityTimeoutMs: timeoutMs });
   const call = createAuthorityCaller(realm, timeoutMs);
-  const lookup = bind(deps.idempotency, 'lookup');
-  const claim = bind(deps.idempotency, 'claim');
+  const lookup = bind(store, 'lookup');
+  const finalize = bind(store, mode === 'claim' ? 'claim' : 'persistAtomically');
+  const unavailable: PersistentCompositionQuarantineCode = mode === 'claim' ? 'idempotency-unavailable' : 'persistence-unavailable';
   const resolveBe12 = bind(deps.be12, 'resolve');
 
   async function idempotency<S extends z.ZodType>(schema: S, operation: () => unknown): Promise<z.output<S>> {
     const result = await call(schema, operation);
     if (result.ok) return result.value;
-    return result.reason === 'realm-mismatch' ? stop('realm-mismatch', 'idempotency') : stop('idempotency-unavailable');
+    return result.reason === 'realm-mismatch' ? stop('realm-mismatch', storeName) : stop(unavailable);
   }
 
-  const quarantined = (reason: CompositionQuarantineCode, cause: string | null, eventId: string | null): CompositionQuarantined =>
+  const quarantined = (reason: PersistentCompositionQuarantineCode, cause: string | null, eventId: string | null): PersistentCompositionQuarantined =>
     Object.freeze({ status: 'quarantined', reason, cause, eventId });
 
-  async function ingest(candidateInput: unknown, selectionInput: unknown): Promise<CompositionResult> {
+  async function ingest(candidateInput: unknown, selectionInput: unknown): Promise<CompositionResult | PersistentCompositionResult> {
     let eventId: string | null = null;
     try {
       if (!isIssuedProtectedCandidate(candidateInput)) return quarantined('invalid-candidate', null, null);
@@ -104,9 +127,12 @@ export function createMeasurementIngestionComposition(deps: MeasurementIngestion
       const fingerprint = technicalInputFingerprint(realm, candidate, field);
       // Results never alias the key object handed to the injected idempotency port.
       const idemOut = () => Object.freeze({ key: Object.freeze({ ...key }), fingerprint });
-      const known = await idempotency(idempotencyLookupSchema, () => lookup(key as never));
+      const duplicate = (measurementId: string | null) => mode === 'claim'
+        ? Object.freeze({ status: 'duplicate' as const, eventId: eventId as string, idempotency: idemOut() })
+        : Object.freeze({ status: 'duplicate' as const, eventId: eventId as string, idempotency: idemOut(), measurementId });
+      const known = await idempotency(mode === 'claim' ? idempotencyLookupSchema : persistenceLookupSchema, () => lookup(key as never));
       if (known.status === 'present') {
-        if (known.fingerprint === fingerprint) return Object.freeze({ status: 'duplicate', eventId, idempotency: idemOut() });
+        if (known.fingerprint === fingerprint) return duplicate('measurementId' in known && typeof known.measurementId === 'string' ? known.measurementId : null);
         return quarantined('idempotency-conflict', null, eventId);
       }
 
@@ -161,26 +187,38 @@ export function createMeasurementIngestionComposition(deps: MeasurementIngestion
       const drifted = drift.find(([, differs]) => differs);
       if (drifted) return quarantined('attribution-drift', drifted[0], eventId);
 
-      // 6. Atomic claim, last. A failed pipeline never consumes the key.
-      const claimed = await idempotency(idempotencyClaimSchema, () => claim(Object.freeze({ ...key, fingerprint }) as never));
-      if (claimed.status === 'replay') return Object.freeze({ status: 'duplicate', eventId, idempotency: idemOut() });
-      if (claimed.status === 'conflict') return quarantined('idempotency-conflict', null, eventId);
-
-      const attribution: CompositionAttribution = Object.freeze({
+      const attributionOf = (): CompositionAttribution => Object.freeze({
         realm, attributedAt: expected.authorizedAt, clock: expected.clock, physicalDeviceId: expected.physicalDeviceId,
         clientId: expected.clientId, fieldId: expected.fieldId, areaId: expected.areaId, sensorId: expected.sensorId,
         associationId: expected.associationId, associationRevision: expected.associationRevision,
       });
       const event = assembleTrustedMeasurementEvent(built.event);
       if (event === null) return quarantined('internal-error', null, eventId);
-      const accepted: CompositionAccepted = Object.freeze({ status: 'accepted', event, attribution,
-        idempotency: idemOut(), persisted: false });
-      return accepted;
+
+      if (mode === 'claim') {
+        // 6. Atomic claim, last. A failed pipeline never consumes the key.
+        const claimed = await idempotency(idempotencyClaimSchema, () => finalize(Object.freeze({ ...key, fingerprint }) as never));
+        if (claimed.status === 'replay') return duplicate(null);
+        if (claimed.status === 'conflict') return quarantined('idempotency-conflict', null, eventId);
+        const accepted: CompositionAccepted = Object.freeze({ status: 'accepted', event, attribution: attributionOf(), idempotency: idemOut(), persisted: false });
+        return accepted;
+      }
+
+      // 6'. BE13-06: claim + measurement write in ONE transaction, only after reconciliation.
+      const forStore = assembleTrustedMeasurementEvent(built.event);
+      if (forStore === null) return quarantined('internal-error', null, eventId);
+      const stored = await idempotency(persistenceOutcomeSchema, () => finalize(Object.freeze({ key: Object.freeze({ ...key }), fingerprint,
+        event: forStore, attribution: attributionOf() }) as never));
+      if (stored.status === 'duplicate') return duplicate(stored.measurementId);
+      if (stored.status === 'conflict') return quarantined('idempotency-conflict', null, eventId);
+      const persisted: PersistentCompositionAccepted = Object.freeze({ status: 'accepted', event, attribution: attributionOf(), idempotency: idemOut(),
+        persisted: true, measurementId: stored.measurementId });
+      return persisted;
     } catch (error) {
       if (error instanceof CompositionStop) return quarantined(error.reason, error.cause, eventId);
       return quarantined('internal-error', null, eventId);
     }
   }
 
-  return Object.freeze({ ingest: ingest as MeasurementIngestionComposition['ingest'] });
+  return Object.freeze({ ingest });
 }

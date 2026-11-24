@@ -121,3 +121,24 @@ export function world(overrides = {}) {
 
 export const deepFrozen = v => v === null || typeof v !== 'object' || (Object.isFrozen(v) && Object.values(v).every(deepFrozen));
 export const objectsOf = (v, out = new Set()) => { if (v !== null && typeof v === 'object' && !out.has(v)) { out.add(v); Object.values(v).forEach(x => objectsOf(x, out)); } return out; };
+
+// BE13-06: in-memory stand-in for persistMeasurementAtomically. Single-threaded
+// and therefore trivially "atomic"; NOT a transaction and NOT persistence.
+export function createInMemoryPersistence(calls = []) {
+  const claims = new Map(), measurements = new Map();
+  const id = k => JSON.stringify([k.realm, k.sourceId, k.operation, k.eventId, k.field]);
+  const mid = k => 'm_' + Buffer.from(id(k)).toString('hex').padEnd(64, '0').slice(0, 64);
+  return {
+    claims, measurements,
+    async lookup(k) { calls.push(['persist:lookup', k]); const c = claims.get(id(k));
+      return c ? { realm: k.realm, status: 'present', fingerprint: c.fingerprint, measurementId: c.measurementId } : { realm: k.realm, status: 'absent' }; },
+    async persistAtomically(input) {
+      calls.push(['persist:atomic', input]);
+      const k = input.key, current = claims.get(id(k));
+      if (current) return current.fingerprint === input.fingerprint ? { realm: k.realm, status: 'duplicate', measurementId: current.measurementId } : { realm: k.realm, status: 'conflict' };
+      const measurementId = mid(k);
+      claims.set(id(k), { fingerprint: input.fingerprint, measurementId }); measurements.set(measurementId, structuredClone(input));
+      return { realm: k.realm, status: 'persisted', measurementId };
+    },
+  };
+}

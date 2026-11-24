@@ -22,7 +22,7 @@ test('BE13-05A V2 the composition accepts only candidates: a ready or trusted ev
   for (const injected of [accepted, accepted.event, { status: 'ready-for-attribution' }, { status: 'trusted-event', event: accepted.event }]) {
     assert.equal((await ingest(world(), injected)).reason, 'invalid-candidate');
   }
-  assert.deepEqual(Object.keys(compositionModule), ['createMeasurementIngestionComposition']);
+  assert.deepEqual(Object.keys(compositionModule).sort(), ['createMeasurementIngestionComposition', 'createPersistentMeasurementIngestionComposition'], 'factories only; no registry exports');
 });
 
 test('BE13-05A V3 every dependency is mandatory; no permissive defaults; realm only from context', () => {

@@ -26,3 +26,20 @@ export const authorityTimeoutSchema = z.number().int().min(1).max(60_000).option
 export const be12VerifiedSchema = z.object({ status: z.literal('verified'), attributedAt: epoch, clock: z.enum(['received-at', 'declared-at-approved']),
   physicalDeviceId: logicalKey, realm: catalogueRealmSchema, clientId: logicalKey, fieldId: logicalKey, areaId: logicalKey, sensorId: logicalKey,
   associationId: logicalKey, associationRevision: securityVersionSchema }).passthrough();
+
+const measurementIdSchema = z.string().regex(/^m_[0-9a-f]{64}$/);
+export const persistenceLookupSchema = z.discriminatedUnion('status', [
+  z.object({ realm: catalogueRealmSchema, status: z.literal('absent') }).strict(),
+  z.object({ realm: catalogueRealmSchema, status: z.literal('present'), fingerprint: fingerprintHex, measurementId: measurementIdSchema }).strict(),
+]);
+export const persistenceOutcomeSchema = z.discriminatedUnion('status', [
+  z.object({ realm: catalogueRealmSchema, status: z.literal('persisted'), measurementId: measurementIdSchema }).strict(),
+  z.object({ realm: catalogueRealmSchema, status: z.literal('duplicate'), measurementId: measurementIdSchema }).strict(),
+  z.object({ realm: catalogueRealmSchema, status: z.literal('conflict') }).strict(),
+]);
+export const idempotencyKeySchema = z.object({ realm: catalogueRealmSchema, sourceId: logicalKey, operation: z.enum(['measurement', 'device-status']),
+  eventId: logicalKey, field: logicalKey }).strict();
+export const compositionAttributionSchema = z.object({ realm: catalogueRealmSchema, attributedAt: epoch, clock: z.enum(['received-at', 'declared-at-approved']),
+  physicalDeviceId: logicalKey, clientId: logicalKey, fieldId: logicalKey, areaId: logicalKey, sensorId: logicalKey, associationId: logicalKey,
+  associationRevision: securityVersionSchema }).strict();
+export { fingerprintHex, measurementIdSchema };
