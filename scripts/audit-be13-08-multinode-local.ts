@@ -271,7 +271,7 @@ async function main() {
     });
     await check('Q22 quarantine $jsonSchema rejects invalid documents (real Mongo)', async () => {
       const base = () => ({ _id: 'q_' + 'd'.repeat(64), realm: 'test', stage: 'persistence', sourceId: 's', operation: 'measurement', eventId: 'e', field: 'f', device: null,
-        reasonCode: 'dependency-error', cause: null, retryClass: 'transient', fingerprint: null, documentDigest: null, status: 'RETRYABLE', attemptCount: 1,
+        reasonCode: 'dependency-error', cause: null, retryClass: 'transient', fingerprint: null, documentDigest: null, status: 'RETRYABLE', attemptCount: 1, version: 1, // version: required since BE13-09
         firstSeenAt: new Date(0), lastSeenAt: new Date(0), createdAt: new Date(0), updatedAt: new Date(0), audit: [] as unknown[] });
       const invalid: Record<string, (d: Record<string, unknown>) => void> = {
         'invalid status': d => { d.status = 'DONE'; }, 'missing realm': d => { delete d.realm; }, 'empty reason': d => { d.reasonCode = ''; },
