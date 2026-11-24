@@ -1,0 +1,1 @@
+{"version":1,"eventId":"synthetic-retry-001","sentAt":1795115604000,"clientid":"synthetic-device-001","payload":{"temperature":21},"mqtt":{"topic":"synthetic/agro/device-001/telemetry","messageType":"telemetry","dataOrigin":"simulated"}}

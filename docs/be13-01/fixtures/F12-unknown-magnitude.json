@@ -1,0 +1,1 @@
+{"version":1,"eventId":"synthetic-unknown-magnitude-001","sentAt":1795115609000,"clientid":"synthetic-device-001","payload":{"unapproved_measurement":12.5,"unit":"synthetic-unit"},"mqtt":{"topic":"synthetic/agro/device-001/telemetry","messageType":"telemetry","dataOrigin":"unknown"}}

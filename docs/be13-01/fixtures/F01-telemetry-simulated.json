@@ -1,0 +1,1 @@
+{"version":1,"eventId":"synthetic-telemetry-001","sentAt":1795115600000,"clientid":"synthetic-device-001","deviceTimestamp":1795115595000,"payload":{"temperature":0,"soil_moisture":null},"mqtt":{"topic":"synthetic/agro/device-001/telemetry","messageType":"telemetry","dataOrigin":"simulated"}}
