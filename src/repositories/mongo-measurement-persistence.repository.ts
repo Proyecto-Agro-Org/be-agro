@@ -20,7 +20,7 @@ import { ingestionCollections } from '../models/ingestion-persistence.models.js'
 // claim cannot be created nothing is written. Requires a replica set.
 // The guarantee is local to this store; it is not global exactly-once.
 
-export type PersistenceStage = 'after-claim' | 'after-measurement';
+export type PersistenceStage = 'after-read' | 'after-claim' | 'after-measurement';
 export interface PersistenceTestSeams {
   // TEST SEAM ONLY. Never set by the composition. Throwing aborts the transaction.
   readonly faultInjection?: (stage: PersistenceStage, attempt: number) => void | Promise<void>;
@@ -90,6 +90,7 @@ export function createMongoMeasurementPersistence(options: { connection: Connect
           // 1. Verify claim inside the snapshot.
           const existing = await readClaim(key, session);
           if (existing) { outcome = classify(existing, fingerprint); return; }
+          await seams.faultInjection?.('after-read', attempt);
           // 2. Create the claim (reversible until commit).
           const claimed = await claims.updateOne({ _id: claimId as never }, {
             $setOnInsert: { realm, sourceId: key.sourceId, operation: key.operation, eventId: key.eventId, field: key.field, fingerprint, state: 'committed', measurementId },
