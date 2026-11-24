@@ -53,6 +53,7 @@ La guardia de exportaciones cerradas de placeholders (BE13-07A V1) y el esquema 
 - El audit no es WORM: una cuenta Mongo con privilegios de escritura puede modificarlo. No se afirma inmutabilidad.
 - El audit de resultado es best-effort: el estado puede cambiar sin entrada de resultado (se emite `AUDIT_RESULT_MISSING`; la entrada `transition-requested` previa siempre existe).
 - Un lease `REPLAYING` huérfano (caída del proceso) no expira solo: requiere `releaseLease` autorizado.
+- **Liberación sin prueba de propiedad** (revisión pre-push): `releaseLease` no distingue un lease huérfano de uno en uso. Si un operador libera un lease mientras su replay sigue corriendo y luego descarta la entrada, el replay en curso puede persistir la medición de una entrada `DISCARDED`. Requiere dos acciones humanas autorizadas y auditadas (`transition-requested` obligatorio). Se cierra con propiedad + expiración del lease (BE13-10A); no se introduce expiración en BE13-09.
 - Bypass en proceso: código con acceso directo al store de cuarentena evita la autorización. La frontera de confianza es el bootstrap.
 - El contador de secuencia es un documento por stream; el stream `realm` concentra contención.
 - Docker local ≠ Atlas.
