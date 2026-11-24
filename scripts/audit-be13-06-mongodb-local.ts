@@ -356,8 +356,74 @@ async function main() {
       assert.deepEqual(await counts(), before);
     });
 
+    const validatorEvidence: Record<string, unknown> = {};
+    await check('A06 measurement validator enforces the BE-12 contract (0 ≠ null ≠ absent; no NaN/Infinity; cross-field invariants)', async () => {
+      const base = () => ({ _id: 'm_' + 'c'.repeat(64), realm: 'test', sourceId: 'synthetic-ingest', operation: 'measurement', eventId: 'v-event', field: 'temperature',
+        fingerprint: 'c'.repeat(64), storedAt: new Date(0),
+        event: { eventId: 'v-event', sourceId: 'synthetic-ingest', device: { kind: 'mqtt-clientid', value: 'd' }, receivedAt: 10, declaredAt: null, persistedAt: 11,
+          magnitude: 'temperature', unit: 'u', value: 1, missingReason: null, provenance: 'simulated', simulated: true, metadata: {} },
+        attribution: { realm: 'test', attributedAt: 10, clock: 'received-at', physicalDeviceId: 'd1', clientId: 'c', fieldId: 'f', areaId: 'a', sensorId: 's',
+          associationId: 'as', associationRevision: 1 } });
+      type Doc = ReturnType<typeof base>;
+      const invalid: Record<string, (d: Doc) => void> = {
+        'value NaN': d => { d.event.value = Number.NaN; },
+        'value Infinity': d => { d.event.value = Number.POSITIVE_INFINITY; },
+        'value -Infinity': d => { d.event.value = Number.NEGATIVE_INFINITY; },
+        'value absent': d => { delete (d.event as Partial<Doc['event']>).value; },
+        'value null without missingReason': d => { (d.event as { value: unknown }).value = null; },
+        'value 0 with missingReason': d => { d.event.value = 0; (d.event as { missingReason: unknown }).missingReason = 'absent'; },
+        'missingReason absent': d => { delete (d.event as Partial<Doc['event']>).missingReason; },
+        'receivedAt Infinity': d => { d.event.receivedAt = Number.POSITIVE_INFINITY; },
+        'receivedAt fractional': d => { d.event.receivedAt = 10.5; },
+        'persistedAt before receivedAt': d => { d.event.persistedAt = 9; },
+        'simulated true with physical provenance': d => { d.event.provenance = 'physical'; },
+        'empty magnitude': d => { d.event.magnitude = ''; },
+        'metadata nested object': d => { (d.event.metadata as Record<string, unknown>).x = { y: 1 }; },
+        'associationRevision fractional': d => { d.attribution.associationRevision = 1.5; },
+        'attribution realm differs': d => { d.attribution.realm = 'preview'; },
+        'event eventId differs from key': d => { d.event.eventId = 'other'; },
+        'event sourceId differs from key': d => { d.event.sourceId = 'other'; },
+        'attributedAt Infinity': d => { d.attribution.attributedAt = Number.POSITIVE_INFINITY; },
+      };
+      const accepted: string[] = [];
+      for (const [name, mutate] of Object.entries(invalid)) {
+        const doc = base(); mutate(doc);
+        try { await measurements.insertOne(doc as never); accepted.push(name); await measurements.deleteOne({ _id: doc._id as never }); }
+        catch (error) { if ((error as { code?: number }).code !== 121) throw error; }
+      }
+      const valid: Record<string, (d: Doc) => void> = {
+        'value 0': d => { d.event.value = 0; },
+        'value null with missingReason': d => { (d.event as { value: unknown }).value = null; (d.event as { missingReason: unknown }).missingReason = 'absent'; },
+        'physical provenance': d => { d.event.provenance = 'physical'; d.event.simulated = false; },
+        'metadata scalars': d => { Object.assign(d.event.metadata as Record<string, unknown>, { a: 'x', b: 1, c: true, d: null }); },
+      };
+      const rejected: string[] = [];
+      for (const [name, mutate] of Object.entries(valid)) {
+        const doc = base(); mutate(doc);
+        try { await measurements.insertOne(doc as never); await measurements.deleteOne({ _id: doc._id as never }); }
+        catch { rejected.push(name); }
+      }
+      validatorEvidence.acceptedInvalid = accepted; validatorEvidence.rejectedValid = rejected;
+      console.log('A06 ' + JSON.stringify(validatorEvidence));
+      assert.deepEqual(accepted, [], 'validator accepted contract violations');
+      assert.deepEqual(rejected, [], 'validator rejected valid documents');
+    });
+    await check('A07 winning plans for idempotency and measurement lookups', async () => {
+      const k = { realm: 'test' as const, sourceId: base.sourceId, operation: 'measurement' as const, eventId: base.eventId, field: 'temperature' };
+      const { idempotencyDocumentId } = await import('../src/repositories/mongo-measurement-persistence.repository.js');
+      const plan = async (c: typeof claims, filter: object) => { const e = await c.find(filter).explain('queryPlanner') as { queryPlanner: { winningPlan: unknown } };
+        return JSON.stringify(e.queryPlanner.winningPlan); };
+      const claimPlan = await plan(claims, { _id: idempotencyDocumentId(k), realm: 'test' });
+      const keyPlan = await plan(claims, { ...k });
+      const measurementPlan = await plan(measurements, { ...k });
+      validatorEvidence.plans = { claimLookup: claimPlan, claimByKey: keyPlan, measurementByKey: measurementPlan };
+      assert.ok(/IDHACK|EXPRESS|_id_/.test(claimPlan), 'claim lookup uses the _id index');
+      assert.ok(keyPlan.includes('idempotency_key_unique'));
+      assert.ok(measurementPlan.includes('measurement_key_unique'));
+    });
+
     stage = 'write-evidence';
-    writeBe11Evidence(process.cwd(), 'be13-06-mongodb.json', { gitSha: sha, mongoVersion: build.version, topology: request.topology, run: request.runId, results, race: raceEvidence,
+    writeBe11Evidence(process.cwd(), 'be13-06-mongodb.json', { gitSha: sha, mongoVersion: build.version, topology: request.topology, run: request.runId, results, race: raceEvidence, validator: validatorEvidence,
       indexes: { idempotency: await claims.listIndexes().toArray(), measurements: await measurements.listIndexes().toArray() },
       finalCounts: await counts(), limitations: ['single node; no failover', 'synthetic authorities and policies', 'no Atlas, EMQX or production data'] });
   } finally {
