@@ -18,3 +18,7 @@ export const trustedEventReadyIsNotAttributionResult: Assignable<TrustedEventRea
 export const trustedEventResultIsNotTrustedMeasurementEvent: Assignable<TrustedEventResult, TrustedMeasurementEvent> = false;
 export const trustedEventCarriesBE12Event: Assignable<TrustedEventReady['event'], TrustedMeasurementEvent> = true;
 export const be12EventFitsTrustedEventSlot: Assignable<TrustedMeasurementEvent, TrustedEventReady['event']> = true;
+
+// BE13-07: readiness can never be typed as production-ready.
+import type { IngestionRootReadiness } from './ingestion-root.contracts.js';
+export const readinessNeverProductionReady: Assignable<{ productionReady: true }, Pick<IngestionRootReadiness, 'productionReady'>> = false;

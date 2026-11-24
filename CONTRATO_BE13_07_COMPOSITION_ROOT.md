@@ -38,7 +38,7 @@ Los de la composición persistente (`accepted` con `persisted:true`, `duplicate`
 
 ## Readiness (`describeIngestionRootReadiness`)
 
-Diagnóstico estático y local (sin IO, sin secretos; **no es un health endpoint**). Por dependencia: `MISSING`, `BLOCKED` (placeholder registrado) o `INJECTED_UNVERIFIED` (implementación inyectada, **no verificada**). `overall`: `READY_FOR_TEST` solo si no hay ningún `MISSING` ni `BLOCKED`; nunca significa aprobación productiva. `limitations` siempre incluye `DEVICE_STATUS_HISTORY_REQUIRED`.
+Diagnóstico estático y local (sin IO, sin secretos; **no es un health endpoint**). Por dependencia: `MISSING`, `BLOCKED` (placeholder registrado) o `INJECTED_UNVERIFIED` (implementación inyectada, **no verificada**). `overall`: `READY_FOR_TEST` solo si no hay ningún `MISSING` ni `BLOCKED`; nunca significa aprobación productiva. `limitations` siempre incluye `DEVICE_STATUS_HISTORY_REQUIRED`. El resultado incluye además `productionReady: false` (literal, también verificado en compilación): este diagnóstico nunca puede declarar preparación productiva; `READY_FOR_TEST` ≠ `READY_FOR_PRODUCTION`.
 
 ## Separación de confianza
 

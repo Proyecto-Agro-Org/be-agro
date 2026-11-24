@@ -71,6 +71,8 @@ export interface IngestionRootReadiness {
   // READY_FOR_TEST only means "no missing dependency and no blocking placeholder";
   // it is NOT a production approval and does not verify any authority.
   readonly overall: 'READY_FOR_TEST' | 'BLOCKED';
+  // Always false: this static diagnosis can never declare production readiness.
+  readonly productionReady: false;
   readonly dependencies: Readonly<Record<string, DependencyReadiness>>;
   readonly limitations: readonly ['DEVICE_STATUS_HISTORY_REQUIRED'];
 }

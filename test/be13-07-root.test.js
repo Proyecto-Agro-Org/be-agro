@@ -199,6 +199,7 @@ test('Readiness: all production placeholders → BLOCKED per dependency; the def
 test('Readiness: synthetic doubles → READY_FOR_TEST; missing → MISSING; contains no secrets', () => {
   const { deps } = syntheticRoot();
   assert.equal(describeIngestionRootReadiness(deps).overall, 'READY_FOR_TEST');
+  for (const input of [deps, null, { ...deps, ...P() }]) assert.equal(describeIngestionRootReadiness(input).productionReady, false, 'READY_FOR_TEST is never production readiness');
   const missing = describeIngestionRootReadiness({ ...deps, persistence: undefined, deviceStatusHistory: undefined });
   assert.deepEqual([missing.overall, missing.dependencies.persistence, missing.dependencies.deviceStatusHistory], ['BLOCKED', 'MISSING', 'MISSING']);
   assert.deepEqual(describeIngestionRootReadiness(null).overall, 'BLOCKED');

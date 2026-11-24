@@ -63,7 +63,7 @@ export function describeIngestionRootReadiness(input: unknown): IngestionRootRea
   try { ack = acknowledged(deps.deviceStatusHistory); } catch { ack = false; }
   dependencies.deviceStatusHistory = ack ? 'INJECTED_UNVERIFIED' : 'MISSING';
   const overall = Object.values(dependencies).some(state => state !== 'INJECTED_UNVERIFIED') ? 'BLOCKED' : 'READY_FOR_TEST';
-  return Object.freeze({ overall, dependencies: Object.freeze(dependencies), limitations: Object.freeze(['DEVICE_STATUS_HISTORY_REQUIRED'] as const) });
+  return Object.freeze({ overall, productionReady: false as const, dependencies: Object.freeze(dependencies), limitations: Object.freeze(['DEVICE_STATUS_HISTORY_REQUIRED'] as const) });
 }
 
 export function createMeasurementIngestionRoot(deps: MeasurementIngestionRootDependencies): MeasurementIngestionRoot {
