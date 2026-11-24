@@ -8,7 +8,18 @@ import type {
 } from './protected-ingest.contracts.js';
 import { protectedIngestDocumentSchema, type ProtectedIngestDocument } from './protected-ingest.schemas.js';
 import { isIssuedIngestProvenanceAuthority } from './ingest-provenance.authority.js';
-import { registerIssuedCandidate } from './protected-candidate.registry.js';
+
+// Candidates emitted by map(). The set is module-private: there is no exported
+// way to add an object, so the only path into it is a successful map() with an
+// issued provenance authority. This enforces in-process provenance (the object
+// went through this mapper); it is NOT cryptographic authenticity and does not
+// resist code that already executes inside the backend process, which can mint
+// its own authority. WeakSet holds no strong references.
+const issuedCandidates = new WeakSet<object>();
+
+export function isIssuedProtectedCandidate(value: unknown): value is ProtectedMeasurementCandidate {
+  return typeof value === 'object' && value !== null && issuedCandidates.has(value);
+}
 
 const hasOwn = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 const quarantined = (reason: ProtectedIngestQuarantineCode): ProtectedIngestMapResult => Object.freeze({ status: 'quarantined', reason });
@@ -119,7 +130,9 @@ export function createProtectedIngestMapper(authority: IngestProvenanceAuthority
         }),
         eligibleForMeasurementMapping: operation === 'telemetry',
       };
-      return registerIssuedCandidate(Object.freeze(candidate));
+      const issued = Object.freeze(candidate);
+      issuedCandidates.add(issued);
+      return issued;
     } catch { return quarantined('internal-error'); }
   }
 

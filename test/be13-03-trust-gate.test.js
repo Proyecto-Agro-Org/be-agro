@@ -444,7 +444,7 @@ test('BE13-03 invalid composition fails at construction', () => {
 test('BE13-03 ready result exposes only the documented contract', async () => {
   const result = await evaluate(world());
   assert.deepEqual(Object.keys(result).sort(), ['areaId', 'association', 'associationId', 'authorizedAt', 'clientId', 'clock', 'device', 'eventId',
-    'field', 'fieldId', 'magnitude', 'physicalDeviceId', 'provenance', 'realm', 'revalidation', 'revisions', 'sensorId', 'sourceId', 'status',
+    'field', 'fieldId', 'fingerprints', 'magnitude', 'physicalDeviceId', 'provenance', 'realm', 'revalidation', 'revisions', 'sensorId', 'sourceId', 'status',
     'timestamps', 'unit', 'value'].sort());
   assert.equal(Object.hasOwn(result, 'payload'), false);
   assert.equal(Object.hasOwn(result, 'missingReason'), false);

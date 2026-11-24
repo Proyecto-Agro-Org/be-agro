@@ -151,6 +151,14 @@ export interface ReadyForAttributionRevisions {
   readonly hardwareAttestationRevision: number;
 }
 
+export interface ReadyForAttributionFingerprints {
+  readonly device: string;
+  readonly hardware: string;
+  readonly temporal: string;
+  readonly association: string;
+  readonly catalogue: string;
+}
+
 export interface ReadyForAttribution {
   readonly status: 'ready-for-attribution';
   readonly realm: TrustGateRealm;
@@ -180,6 +188,9 @@ export interface ReadyForAttribution {
     hardware: Readonly<{ status: 'verified'; origin: HardwareOrigin; method: string }>;
   }>;
   readonly revisions: ReadyForAttributionRevisions;
+  // SHA-256 (hex) of each canonical authority response (see trust-gate.fingerprint.ts).
+  // Detects "same revision, different content" when a later stage re-reads.
+  readonly fingerprints: ReadyForAttributionFingerprints;
   // BE13-04/BE-12 must re-read every authority before emitting attribution.
   readonly revalidation: 'required';
 }

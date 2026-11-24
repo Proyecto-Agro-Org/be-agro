@@ -10,7 +10,7 @@ IMPLEMENTADO y PROBADO offline con dobles de autoridades. No está compuesto en 
 gate.evaluate(candidate: ProtectedMeasurementCandidate, selection: { field: string }): Promise<TrustGateResult>
 ```
 
-- `candidate` debe ser **el mismo objeto** emitido por el mapper BE13-02 (`createProtectedIngestMapper`). Se verifica por identidad mediante `isIssuedCandidate` (`src/iot/protected-candidate.registry.ts`). Copias (`structuredClone`, spread, JSON, `Object.freeze({...})`), documentos legacy, documentos protegidos sin mapear, requests HTTP, eventos MQTT u objetos arbitrarios → `invalid-candidate`.
+- `candidate` debe ser **el mismo objeto** emitido por el mapper BE13-02 (`createProtectedIngestMapper`). Se verifica por identidad mediante `isIssuedProtectedCandidate`, exportado por `src/iot/protected-ingest.mapper.ts` sobre un WeakSet privado de ese módulo (no existe forma exportada de registrar). Es procedencia dentro del mismo proceso, no autenticidad criptográfica: ver `INFORME_BE13_03A_AUDITORIA_SEGURIDAD.md`. Un candidate emitido por otra instancia del módulo (p. ej. importado con otra URL) también se rechaza. Copias (`structuredClone`, spread, JSON, `Object.freeze({...})`), documentos legacy, documentos protegidos sin mapear, requests HTTP, eventos MQTT u objetos arbitrarios → `invalid-candidate`.
 - Además se revalida su forma (`gateCandidateSchema`, estricto): solo `measurement-candidate` / `telemetry` / `eligibleForMeasurementMapping: true`. Un `technical-event-candidate` → `invalid-candidate`.
 - `selection.field` (estricto, solo esa clave) nombra un campo técnico propio del payload. Elegir un campo no atribuye nada: la magnitud y la unidad solo provienen del catálogo inyectado. El caller no puede aportar `clientId`, `sensorId`, instante ni ningún otro dato de atribución.
 
@@ -54,11 +54,14 @@ Toda respuesta lleva `realm` y se valida con Zod estricto (campos extra rechazad
                 dataOriginDeclared, hardware: { status:'verified', origin, method } },
   revisions: { deviceVersion, associationId, associationRevision, temporalPolicyRevision,
                catalogueRevision, hardwareAttestationRevision },
+  fingerprints: { device, hardware, temporal, association, catalogue },   // SHA-256 hex del contenido canónico
   revalidation: 'required'
 }
 ```
 
-Profundamente congelado, sin referencias a objetos de autoridades ni al payload. No contiene `attributedAt`, `missingReason`, `persistedAt` obligatorio ni `provenance` BE-12: **no es `TrustedMeasurementEvent` ni `AttributionResult`**.
+Profundamente congelado, sin referencias a objetos de autoridades ni al payload. `revisions` no basta para revalidar: una autoridad puede devolver la misma revisión con contenido distinto. `fingerprints` liga cada revisión al contenido exacto de la respuesta; la etapa siguiente relee la autoridad, recalcula con `fingerprintAuthorityResponse(kind, respuesta)` (`src/iot/trust-gate.fingerprint.ts`) y compara. La huella es un control de integridad sobre datos canonicalizados, no una firma.
+
+No contiene `attributedAt`, `missingReason`, `persistedAt` obligatorio ni `provenance` BE-12: **no es `TrustedMeasurementEvent` ni `AttributionResult`**.
 
 ## Resultado `quarantined`
 

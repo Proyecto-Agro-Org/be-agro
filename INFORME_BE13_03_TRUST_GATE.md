@@ -13,13 +13,16 @@ Contrato detallado: `CONTRATO_BE13_03_READY_FOR_ATTRIBUTION.md`. Pruebas: `MATRI
 
 | Archivo | Rol |
 | --- | --- |
-| `src/iot/protected-candidate.registry.ts` | Registro en memoria (WeakSet) de candidates emitidos por BE13-02 |
-| `src/iot/protected-ingest.mapper.ts` | **Cambio aditivo de una línea**: registra el candidate congelado antes de devolverlo. Sin cambio de contrato ni comportamiento observable |
+| `src/iot/protected-ingest.mapper.ts` (registro privado) | WeakSet privado del módulo con los candidates emitidos; solo se exporta la consulta `isIssuedProtectedCandidate` (ver BE13-03A) |
+| `src/iot/trust-gate.fingerprint.ts` | Huellas SHA-256 del contenido canónico de cada respuesta de autoridad (BE13-03A) |
+| `src/iot/trust-gate.type-assertions.ts` | Aserción de compilación: `ReadyForAttribution` no es asignable a tipos BE-12 (BE13-03A) |
+| `src/iot/protected-ingest.mapper.ts` | Cambio aditivo: registra el candidate congelado en un WeakSet privado y exporta `isIssuedProtectedCandidate`. Sin cambio en el resultado de `map()` |
 | `src/iot/trust-gate.contracts.ts` | Puertos, decisiones, `ReadyForAttribution`, códigos de cuarentena |
 | `src/iot/trust-gate.schemas.ts` | Schemas Zod estrictos (reutilizan `physicalDeviceSchema` y `sensorDeviceAssociationSchema` de BE-11, `catalogueRealmSchema`, `epoch`, `logicalKey`) |
 | `src/adapters/trust-gate-blocking.adapters.ts` | Adapters por defecto que bloquean |
 | `src/services/attribution-trust-gate.service.ts` | Servicio coordinador |
 | `test/be13-03-trust-gate.test.js` | 39 pruebas |
+| `test/be13-03a-adversarial.test.js` | 26 regresiones de la auditoría BE13-03A |
 
 ## Autoridades
 
@@ -63,7 +66,7 @@ Candidate emitido → selección de campo → A → E → C → B (en el instant
 
 - Doble lectura de las cinco autoridades con comparación canónica (salidas Zod con orden de claves fijo). Cambio en asociación → `stale-association`; en el resto → `stale-resolution`.
 - Se capturan `deviceVersion`, `associationId`, `associationRevision`, `temporalPolicyRevision`, `catalogueRevision`, `hardwareAttestationRevision`, y se marca `revalidation:'required'`.
-- La doble lectura reduce pero no elimina TOCTOU: BE13-04/BE-12 deben releer y comparar revisiones antes de emitir atribución.
+- La doble lectura solo prueba estabilidad **entre las dos lecturas**; no elimina TOCTOU ni garantiza nada después de devolver el resultado. BE13-04/BE-12 deben releer cada autoridad y comparar revisiones **y** `fingerprints` (una revisión igual con contenido distinto solo se detecta por huella; ver BE13-03A).
 - Revisión de sesión de ingesta: NO_APLICA; no existe tal entidad en el código.
 
 ## Fail-closed — IMPLEMENTADO y PROBADO
@@ -86,7 +89,7 @@ Los resultados de cuarentena exponen solo `status`, `reason` y `eventId` (si el 
 | Vector | Hallazgo / mitigación | Estado |
 | --- | --- | --- |
 | Bypass de autoridades | No existe camino a `ready` sin las cinco autoridades; los defaults bloquean; gate vacío probado | MITIGADO |
-| Candidate falsificado | Objetos estructuralmente idénticos eran aceptables por forma; se agregó registro de identidad de candidates emitidos | CORREGIDO |
+| Candidate falsificado | Registro de identidad de candidates emitidos. **BE13-03A demostró que la primera versión exportaba la función de registro** y cualquier módulo podía registrar un clon; corregido moviendo el WeakSet al mapper. Sigue siendo procedencia intra-proceso, no autenticidad | CORREGIDO EN BE13-03A (alcance limitado) |
 | Spoofing de `clientId` | Sin entrada posible; probado con payload hostil | MITIGADO |
 | Mezcla de realms | `realm` obligatorio y comparado en cada respuesta | MITIGADO |
 | TOCTOU | Doble lectura + revisiones + `revalidation:'required'` | MITIGADO PARCIAL (residual documentado) |
@@ -100,7 +103,7 @@ Los resultados de cuarentena exponen solo `status`, `reason` y `eventId` (si el 
 ## Riesgos residuales y limitaciones
 
 - **Ninguna autoridad productiva existe.** `ready-for-attribution` solo se alcanza con dobles de prueba.
-- El registro de candidates y la capacidad BE13-02 son fronteras intra-proceso: código con ejecución arbitraria en el backend comparte el dominio de confianza.
+- El registro de candidates y la capacidad BE13-02 son fronteras intra-proceso: protegen contra callers accidentales o descuidados, no contra código con ejecución arbitraria en el backend, que puede crear su propia authority y su propio mapper. No hay autenticidad criptográfica.
 - `inactive-device` usa el lifecycle **actual** del dispositivo; BE-11 no expone lifecycle histórico. Un dispositivo hoy inactivo bloquea eventos históricos válidos (fail-closed).
 - La asociación BE-11 no lleva `realm` por registro; el realm se valida en el sobre de la respuesta.
 - La doble lectura no impide cambios posteriores a la segunda lectura.
@@ -113,7 +116,7 @@ Los resultados de cuarentena exponen solo `status`, `reason` y `eventId` (si el 
 | Categoría | Elementos |
 | --- | --- |
 | IMPLEMENTADO | Contratos, puertos, schemas, adapters bloqueantes, servicio coordinador, registro de candidates, códigos de cuarentena |
-| PROBADO | 39 pruebas BE13-03; 528/528 suite; 64/64 BE13-02; 13/13 HTTP |
+| PROBADO | 39 pruebas BE13-03 + 26 BE13-03A; 554/554 suite tras BE13-03A; 64/64 BE13-02; 13/13 HTTP |
 | PENDIENTE | Conversión a `TrustedMeasurementEvent` (BE13-04); mapeo `clock` → BE-12; `declaredAt`; `missingReason`; `persistedAt` nulo; lifecycle histórico de dispositivo |
 | BLOQUEADO | Política temporal productiva; catálogo BE-04 productivo; atestación de hardware; registro de dispositivos y asociaciones reales; EMQX; Atlas |
 
@@ -124,6 +127,6 @@ Los resultados de cuarentena exponen solo `status`, `reason` y `eventId` (si el 
 3. Regla para `persistedAt` nulo (esperar persistencia o rechazar).
 4. Catálogo BE-04 aprobado como autoridad con revisión versionada.
 5. Autoridad de hardware definida (método de atestación) o decisión explícita de diferirla.
-6. Revalidación en BE13-04/BE-12 comparando todas las `revisions` capturadas.
+6. Revalidación en BE13-04/BE-12 comparando todas las `revisions` **y** `fingerprints` capturadas (recalculadas con `fingerprintAuthorityResponse`).
 7. Adapters reales de dispositivos/asociaciones sobre repositorios BE-11, revisados y con pruebas de realm.
 8. BE-12 sin modificaciones para encajar; cualquier cambio de contrato BE-12 por PR propio.

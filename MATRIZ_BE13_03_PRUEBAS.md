@@ -60,4 +60,6 @@ Todos los casos positivos usan **dobles explícitos** de las cinco autoridades. 
 | BE13-03 nueva | 39/39 |
 | BE13-02 mapper + auditoría adversarial | 64/64 (sin regresión tras registrar candidates emitidos) |
 | Suite completa `npm test` | 528/528 (489 previas + 39 nuevas) |
+
+Nota BE13-03A: tras la auditoría se agregaron 26 regresiones en `test/be13-03a-adversarial.test.js` (suite completa 554/554) y la prueba de forma exacta incluye `fingerprints`. Ver `MATRIZ_BE13_03A_VECTORES.md`.
 | Regresión HTTP `scripts/verify-be10-http.mjs` | 13/13 |

@@ -33,7 +33,7 @@ BE-12 no fue modificado.
 | `clientId` | `clientId` | PENDIENTE_REVALIDACION | Solo de la asociación histórica |
 | `fieldId` / `areaId` / `sensorId` | idem | PENDIENTE_REVALIDACION | Idem |
 | `associationId` | `associationId` | PENDIENTE_REVALIDACION | |
-| `associationRevision` | `revisions.associationRevision` | PENDIENTE_REVALIDACION | Comparar al releer |
+| `associationRevision` | `revisions.associationRevision` + `fingerprints.association` | PENDIENTE_REVALIDACION | Comparar revisión y huella al releer (BE13-03A) |
 
 ## Diferencias de modelo a resolver en BE13-04
 
@@ -43,7 +43,7 @@ BE-12 no fue modificado.
 | Ventana de asociación | `AttributionWindow` (con `realm`) | `SensorDeviceAssociation` BE-11 + `realm` en sobre | Equivalente en campos de atribución |
 | Hardware | No existe puerto | Puerto E separado | BLOQUEADO hasta que BE-12/BE13-04 lo exija |
 | Catálogo | `accepts({magnitude, unit, provenance})` booleano | `evaluate(field…)` → magnitud/unidad aprobadas + revisión | Compatible: el resultado de BE13-03 alimenta `accepts` |
-| Revalidación | Doble lectura interna (`CONFLICT`) | Doble lectura interna + `revisions` + `revalidation:'required'` | Coherente |
+| Revalidación | Doble lectura interna (`CONFLICT`) | Doble lectura interna + `revisions` + `fingerprints` + `revalidation:'required'` | Coherente; ninguna de las dos elimina TOCTOU posterior |
 | Sesión de ingesta | — | — | NO_APLICA hoy; no existe revisión de sesión de ingesta en el código |
 
 ## Conclusión

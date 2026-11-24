@@ -6,7 +6,8 @@ import {
   createBlockingMeasurementCatalogue,
   createBlockingTemporalAuthority,
 } from '../adapters/trust-gate-blocking.adapters.js';
-import { isIssuedCandidate } from '../iot/protected-candidate.registry.js';
+import { isIssuedProtectedCandidate } from '../iot/protected-ingest.mapper.js';
+import { canonicalAuthorityResponse, digestCanonical } from '../iot/trust-gate.fingerprint.js';
 import type {
   ReadyForAttribution,
   TrustGate,
@@ -37,7 +38,7 @@ class GateStop {
 }
 const stop = (reason: TrustGateQuarantineCode): never => { throw new GateStop(reason); };
 const hasOwn = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
-const signature = (value: unknown) => JSON.stringify(value);
+const signature = canonicalAuthorityResponse;
 
 function bindPort<T>(port: unknown, method: string, fallback: () => T, name: string): (query: never) => unknown {
   if (port === undefined) {
@@ -94,7 +95,7 @@ export function createAttributionTrustGate(ports: TrustGatePorts, options: Trust
     let eventId: string | null = null;
     try {
       // 1. Candidate: identity (issued by BE13-02) AND shape (measurement only).
-      if (!isIssuedCandidate(input)) return quarantined('invalid-candidate', null);
+      if (!isIssuedProtectedCandidate(input)) return quarantined('invalid-candidate', null);
       let candidate: z.output<typeof gateCandidateSchema>;
       try {
         const parsed = gateCandidateSchema.safeParse(input);
@@ -192,7 +193,8 @@ export function createAttributionTrustGate(ports: TrustGatePorts, options: Trust
         realm,
         eventId,
         sourceId,
-        device,
+        // Fresh object: never the same reference handed to authorities.
+        device: Object.freeze({ kind: device.kind, value: device.value }),
         physicalDeviceId: physical.id,
         clientId: association.clientId,
         fieldId: association.fieldId,
@@ -220,6 +222,13 @@ export function createAttributionTrustGate(ports: TrustGatePorts, options: Trust
           temporalPolicyRevision: temporal.policyRevision,
           catalogueRevision: catalogue.catalogueRevision,
           hardwareAttestationRevision: hardware.attestationRevision,
+        }),
+        fingerprints: Object.freeze({
+          device: digestCanonical(signature(devices)),
+          hardware: digestCanonical(signature(hardware)),
+          temporal: digestCanonical(signature(temporal)),
+          association: digestCanonical(signature(associations)),
+          catalogue: digestCanonical(signature(catalogue)),
         }),
         revalidation: 'required',
       });
