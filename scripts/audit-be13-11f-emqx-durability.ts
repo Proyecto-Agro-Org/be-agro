@@ -305,15 +305,23 @@ async function main() {
         let during = 0, unreadable = false;
         try { const c = await mk().catch(() => null); await sleep(9000); during = await mCountTag('d13').catch(() => { unreadable = true; return 0; }); if (c) { await c.stop().catch(() => {}); live.delete(c); } } finally { for (const s of sec) chaos(request, 'unpause', s); }
         await waitHealthy(); assert.equal(during, 0, 'nothing was processed without a Mongo majority');
-        const c = await mk();
-        await waitFor('d13-accounted', async () => (await mCountTag('d13')) + (await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13-' } })) >= p.acked.size, 60000).catch(() => {});
+        // A consumer that withholds an ACK drops its connection (the adapter never reconnects by itself): a supervisor restarts it, as in 11E.
+        const withheld0 = metrics.filter(x => x.name === 'broker_adapter_delivery_total' && (x.labels as { outcome?: string }).outcome === 'withheld').length; let attempts = 0;
+        const accounted = async () => (await mCountTag('d13')) + (await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13-' } }));
+        let c = await mk();
+        for (; attempts < 8 && (await accounted()) < p.acked.size; attempts += 1) {
+          await waitFor('d13-accounted', async () => (await accounted()) >= p.acked.size, 20000).catch(() => {});
+          if ((await accounted()) >= p.acked.size) break;
+          await c.stop().catch(() => {}); live.delete(c); await sleep(1500); c = await mk();
+        }
+        const withheld = metrics.filter(x => x.name === 'broker_adapter_delivery_total' && (x.labels as { outcome?: string }).outcome === 'withheld').length - withheld0;
         await sleep(2000); await c.idle();
         // an attempt that hit the lost majority may sit RECEIPTED: the receipted recovery (TEST_ONLY policy) settles it, as in D14
         for (let i = 0; i < 6 && (await mCountTag('d13')) < p.acked.size; i += 1) { await sleep(2000); await c.reconciler.reconcileBrokerInbox({ mode: 'reconcile', limit: 100 }); }
         const m = await mCountTag('d13'), q = await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13-' } }), inboxN = await inboxRows.countDocuments({});
         await c.stop(); live.delete(c);
         noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m - q), acked: p.acked.size });
-        return { acked: p.acked.size, processedWhileMongoDown: unreadable ? 'unreadable-without-majority (nothing could be committed either)' : during, measurementsAfterHealing: m, quarantined: q, inboxRecords: inboxN, lostAfterPuback: Math.max(0, p.acked.size - m - q) };
+        return { acked: p.acked.size, processedWhileMongoDown: unreadable ? 'unreadable-without-majority (nothing could be committed either)' : during, measurementsAfterHealing: m, quarantined: q, inboxRecords: inboxN, supervisorRestarts: attempts, withheldDeliveries: withheld, lostAfterPuback: Math.max(0, p.acked.size - m - q) };
       });
       await scenario('D14', 'durable: broker recovered, THEN a Mongo primary failover: exactly one measurement per event', async () => {
         const first = await consumerOpen(); await first.close(true); await sleep(300);
@@ -384,6 +392,7 @@ async function main() {
     // ================================================================ GROUP 4: DURABLE-WIDE (flush 3 s) — the exact PUBACK-vs-durable-commit semantics
     await withLab({ durable: true, flushIntervalMs: 3000 }, async () => {
       await scenario('D27', 'PUBACK semantics: with a 3 s write buffer a kill right after the PUBACKs loses EVERY confirmed message (PUBACK precedes the durable write)', async () => {
+        await L().restart(); await sleep(2000);       // the API bootstrap (users, ACL, rule) is persisted by a graceful stop first: a SIGKILL seconds after bootstrap is a different experiment
         const { out } = await offlineQueue('d27', 50, 'kill', { immediate: true });
         assert.ok(out.acked > 0 && out.lostAfterPuback > 0, 'PUBACKed => NOT recovered: ' + JSON.stringify(out));
         return { ...out, pubAckLatencyIsMs: out.pubAckMs.p50, flushIntervalMs: 3000, conclusion: 'PUBACK latency stays ~1 ms while the durable flush takes up to 3 s: the broker confirms BEFORE the durable commit. The loss window equals the flush interval.' };
