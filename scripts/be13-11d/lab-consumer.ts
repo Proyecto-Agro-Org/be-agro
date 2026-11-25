@@ -119,7 +119,7 @@ export interface LabConsumer {
 }
 
 export async function startLabConsumer(options: { conn: Connection; brokerUrl: string; password: string; clientId?: string; hooks?: LabConsumerHooks; poisonPolicy?: PoisonLabPolicy;
-  metricsSink: MetricSink; realm?: string; clean?: boolean; subscribeTopic?: string; receiveMaximum?: number; handlerDelayMs?: number; timings?: TimingMap;
+  metricsSink: MetricSink; realm?: string; clean?: boolean; durableSession?: boolean; sessionExpirySeconds?: number; subscribeTopic?: string; receiveMaximum?: number; handlerDelayMs?: number; timings?: TimingMap;
   extras?: LabDepsExtras }): Promise<LabConsumer> {
   const realm = options.realm ?? 'test';
   const store = createMongoBrokerInboxReconciliationStore({ connection: options.conn, prefix: INGEST, realm: realm as never });
@@ -163,7 +163,7 @@ export async function startLabConsumer(options: { conn: Connection; brokerUrl: s
   };
   const adapter = createEmqxMqttBrokerAdapter({ brokerUrl: options.brokerUrl, clientId: options.clientId ?? 'lab-consumer-1', username: 'lab-consumer', password: options.password,
     mqttFactory: await loadMqttJsFactory(), poisonPolicy: options.poisonPolicy ?? 'ack-and-drop', metrics: deps.metrics,
-    ...(options.clean === undefined ? {} : { clean: options.clean }), ...(options.subscribeTopic === undefined ? {} : { subscribeTopic: options.subscribeTopic }),
+    ...(options.clean === undefined ? {} : { clean: options.clean }), ...(options.durableSession ? { durableSession: true } : {}), ...(options.sessionExpirySeconds === undefined ? {} : { sessionExpirySeconds: options.sessionExpirySeconds }), ...(options.subscribeTopic === undefined ? {} : { subscribeTopic: options.subscribeTopic }),
     ...(options.receiveMaximum === undefined ? {} : { receiveMaximum: options.receiveMaximum }),
     testHooks: { afterAck: delivery => { log.push({ at: 'acked', detail: 'puback-released' }); stamp(delivery, 'acked'); const id = receipts.get(delivery); if (id !== undefined) processFromRecord(id, delivery); } } });
   await adapter.start(handler);

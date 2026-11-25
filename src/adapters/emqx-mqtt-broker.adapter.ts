@@ -42,6 +42,14 @@ export function assertLabCredentialShape(username: unknown, password: unknown): 
   if (typeof password !== 'string' || password.length < 16 || password.length > 128 || !/^labpw-[0-9a-f]+$/.test(password)) throw new Error('LAB_CREDENTIAL_NOT_TEST_ONLY');
 }
 
+// BE13-11F: a durable (resumable) session needs clean:false, an explicit positive session expiry and a STABLE client id. A random id
+// per reconnect can never reclaim the previous session, and a clean start or zero expiry discards it.
+export function assertDurableSessionConfig(o: { readonly clean?: boolean | undefined; readonly sessionExpirySeconds?: number | undefined; readonly clientId: string }): void {
+  if (o.clean !== false) throw new Error('LAB_DURABLE_CONFIG_CLEAN_START_FORBIDDEN');
+  if (typeof o.sessionExpirySeconds !== 'number' || !Number.isInteger(o.sessionExpirySeconds) || o.sessionExpirySeconds < 1) throw new Error('LAB_DURABLE_CONFIG_SESSION_EXPIRY_REQUIRED');
+  if (typeof o.clientId !== 'string' || !/^[A-Za-z][A-Za-z0-9:_-]{2,127}$/.test(o.clientId) || /[0-9a-f]{12,}$/i.test(o.clientId)) throw new Error('LAB_DURABLE_CONFIG_STABLE_CLIENT_ID_REQUIRED');
+}
+
 // ---- broker-authored envelope (closed) ------------------------------------------------------------------------------------
 const base64 = z.string().max(64 * 1024 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/);
 const envelopeSchema = z.object({
@@ -97,6 +105,9 @@ export interface EmqxMqttBrokerAdapterOptions {
   readonly subscribeTopic?: string;                        // e.g. a `$share/<group>/agro/lab/verified` filter; deliveries still carry the broker-authored envelope
   readonly clean?: boolean;                                // false (default) = persistent session; true = clean start (queued QoS1 is NOT kept)
   readonly receiveMaximum?: number;                        // MQTT5 CONNECT property: how many unacknowledged QoS1/2 the broker may have in flight to this client
+  // BE13-11F LAB guard: with `durableSession: true` the adapter REFUSES a configuration that cannot recover a broker-side durable session
+  // (clean start, no/zero session expiry, no stable client id). It is not a production configuration.
+  readonly durableSession?: boolean;
   readonly testHooks?: { readonly afterAck?: (delivery: AdapterObservedDelivery) => void; readonly beforeHandler?: (delivery: AdapterObservedDelivery) => void };
 }
 export interface EmqxMqttBrokerAdapter {
@@ -112,6 +123,7 @@ export function createEmqxMqttBrokerAdapter(options: EmqxMqttBrokerAdapterOption
   const url = assertLoopbackBrokerUrl(options.brokerUrl);
   assertLabCredentialShape(options.username, options.password);
   if (typeof options.mqttFactory !== 'function') throw new TypeError('mqttFactory required');
+  if (options.durableSession === true) assertDurableSessionConfig(options);
   const topic = options.verifiedTopic ?? LAB_VERIFIED_TOPIC;
   const clock = options.clock ?? (() => Date.now());
   const poison: PoisonLabPolicy = options.poisonPolicy ?? 'withhold';
