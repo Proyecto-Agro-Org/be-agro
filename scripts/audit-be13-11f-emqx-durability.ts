@@ -302,8 +302,8 @@ async function main() {
         await waitHealthy(); const pr = await primaryIndex(), sec = [0, 1, 2].filter(i => i !== pr);
         const mk = async () => { const c = await startLabConsumer({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
         for (const s of sec) chaos(request, 'pause', s);
-        let during = 0;
-        try { const c = await mk().catch(() => null); await sleep(9000); during = await mCountTag('d13'); if (c) { await c.stop().catch(() => {}); live.delete(c); } } finally { for (const s of sec) chaos(request, 'unpause', s); }
+        let during = 0, unreadable = false;
+        try { const c = await mk().catch(() => null); await sleep(9000); during = await mCountTag('d13').catch(() => { unreadable = true; return 0; });  // a majority read cannot even be answered without a majority if (c) { await c.stop().catch(() => {}); live.delete(c); } } finally { for (const s of sec) chaos(request, 'unpause', s); }
         await waitHealthy(); assert.equal(during, 0, 'nothing was processed without a Mongo majority');
         const c = await mk();
         await waitFor('d13-accounted', async () => (await mCountTag('d13')) + (await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13-' } })) >= p.acked.size, 60000).catch(() => {});
@@ -313,7 +313,7 @@ async function main() {
         const m = await mCountTag('d13'), q = await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13-' } }), inboxN = await inboxRows.countDocuments({});
         await c.stop(); live.delete(c);
         noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m - q), acked: p.acked.size });
-        return { acked: p.acked.size, processedWhileMongoDown: during, measurementsAfterHealing: m, quarantined: q, inboxRecords: inboxN, lostAfterPuback: Math.max(0, p.acked.size - m - q) };
+        return { acked: p.acked.size, processedWhileMongoDown: unreadable ? 'unreadable-without-majority (nothing could be committed either)' : during, measurementsAfterHealing: m, quarantined: q, inboxRecords: inboxN, lostAfterPuback: Math.max(0, p.acked.size - m - q) };
       });
       await scenario('D14', 'durable: broker recovered, THEN a Mongo primary failover: exactly one measurement per event', async () => {
         const first = await consumerOpen(); await first.close(true); await sleep(300);
