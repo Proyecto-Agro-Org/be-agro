@@ -165,7 +165,7 @@ async function main() {
         const c = await consumerOpen({ hold: true }); const sent = ids('d01b', 200); const p = await publish(sent, { window: 8 }); await sleep(600);
         const heldBefore = c.received.size; await c.close(false);
         await L().restart(); await sleep(1500);
-        const rx = await consumerOpen(); await settle(rx, p.acked.size); const acc = account(sent, p.acked, rx.received);
+        const rx = await consumerOpen(); await settle(rx, p.acked.size, 9000, 60000); const acc = account(sent, p.acked, rx.received);
         assert.ok(acc.lostAfterPuback > 0, 'messages PUBACKed but not yet ACKed by the consumer were lost: ' + JSON.stringify(acc)); await rx.close(false);
         return { ...acc, deliveredButUnackedBeforeRestart: heldBefore, sessionPresent: rx.sessionPresent };
       });
@@ -210,7 +210,7 @@ async function main() {
       });
       await scenario('D19', 'durable: authenticator, ACL and rule are RESTORED from the volume after recreate (no reconfiguration)', async () => {
         console.log('D19 step: connecting publisher'); const ok = await pubOpen('lab-device-a'); assert.ok(ok, 'the lab-device-a credential still authenticates after the recreate'); console.log('D19 step: publisher connected');
-        const rx = await consumerOpen(); const sent = ids('d19', 5); const p = await publish(sent, { window: 1 }); await settle(rx, 5);
+        const rx = await consumerOpen(); const sent = ids('d19', 5); const p = await publish(sent, { window: 1 }); await settle(rx, 5, 9000, 30000);
         // what exactly survived a recreate with the same volume? (read-only diagnostics through the management API)
         const persisted = { rules: (await L().api('GET', '/rules')).body.slice(0, 160), authn: (await L().api('GET', '/authentication')).body.slice(0, 140), authzSources: (await L().api('GET', '/authorization/sources')).body.slice(0, 160),
           consumerAclRules: (await L().api('GET', '/authorization/sources/built_in_database/rules/users/lab-consumer')).body.slice(0, 160) };
