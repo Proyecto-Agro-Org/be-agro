@@ -86,14 +86,14 @@ async function main() {
     assertLoopbackBrokerUrl(L.brokerUrl);
     const publish = async (user: 'lab-device-a' | 'lab-device-b' | 'lab-attacker', o: { topic: string; payload: Buffer | string; qos?: 0 | 1 | 2; retain?: boolean; clientId?: string; password?: string }): Promise<PubResult> => {
       const client = mqttFactory(L.brokerUrl, { protocolVersion: 5, clientId: o.clientId ?? user, username: user, password: o.password ?? L.secrets[user], clean: true, reconnectPeriod: 0 }) as unknown as {
-        on(e: string, l: (...a: any[]) => void): void; publish(t: string, p: Buffer | string, opts: object, cb: (e: Error | null, packet?: { reasonCode?: number }) => void): void; end(force?: boolean): void };
+        on(e: string, l: (...a: any[]) => void): void; publish(t: string, p: Buffer | string, opts: object, cb: (e: Error | null, packet?: { reasonCode?: number }) => void): void; end(force?: boolean, opts?: object, cb?: () => void): void };
       const out: PubResult = { connected: false, connectError: null, publishError: null, reasonCode: null };
       const ok = await new Promise<boolean>(res => { client.on('connect', () => res(true)); client.on('error', (e: Error) => { out.connectError = L.scrub(e.message); res(false); }); setTimeout(() => res(false), 8000); });
       if (ok) {
         out.connected = true;
         await new Promise<void>(res => client.publish(o.topic, o.payload, { qos: o.qos ?? 1, retain: o.retain ?? false }, (e, packet) => { out.publishError = e ? L.scrub(e.message) : null; out.reasonCode = (e as { code?: number } | null)?.code ?? packet?.reasonCode ?? null; res(); }));
       }
-      client.end(true); return out;
+      await new Promise<void>(res => { const t = setTimeout(res, 2000); client.end(false, {}, () => { clearTimeout(t); res(); }); }); return out; // graceful: flushes a QoS0 PUBLISH before closing
     };
     const startConsumer = async (conn: Connection, extra: object = {}) => { const c = await startLabConsumer({ conn, brokerUrl: L.brokerUrl, password: L.secrets['lab-consumer'], metricsSink: metrics, ...extra }); consumers.add(c); return c; };
     const stopConsumer = async (c: LabConsumer) => { consumers.delete(c); await c.stop(); };
