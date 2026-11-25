@@ -30,7 +30,10 @@ type Status = 'PASS' | 'FAIL' | 'NO_VERIFICABLE';
 const results: { id: string; name: string; status: Status; evidence?: unknown; note?: string }[] = [];
 class NotVerifiable extends Error {}
 let stage = 'bootstrap';
+// BE13_11F_ONLY=D04,D05 runs just those scenarios (development aid).
+const only = process.env.BE13_11F_ONLY ? new Set(process.env.BE13_11F_ONLY.split(',')) : null;
 async function scenario(id: string, name: string, work: () => Promise<unknown>) {
+  if (only && !only.has(id)) return;
   stage = id;
   try { const evidence = await work(); results.push({ id, name, status: 'PASS', evidence }); console.log('PASS ' + id + ' ' + name + (evidence ? ' ' + JSON.stringify(evidence).slice(0, 420) : '')); }
   catch (error) {
@@ -51,7 +54,7 @@ export function account(sent: readonly string[], acked: ReadonlySet<string>, rec
   const ackedIds = [...acked];
   const lost = ackedIds.filter(id => !received.has(id));
   const duplicates = [...received.values()].reduce((n, c) => n + Math.max(0, c - 1), 0);
-  return { sent: sent.length, acked: acked.size, receivedUnique: received.size, lostAfterPuback: lost.length, lostSample: lost.slice(0, 3), duplicates, unackedButReceived: [...received.keys()].filter(id => !acked.has(id)).length };
+  return { sent: sent.length, acked: acked.size, receivedUnique: received.size, lostAfterPuback: lost.length, lostSample: lost.slice(0, 3), duplicates, unackedButReceived: [...received.keys()].filter(id => !acked.has(id)).length, unackedSample: [...received.keys()].filter(id => !acked.has(id)).slice(0, 3) };
 }
 
 type MqttClient = { on(e: string, l: (...a: any[]) => void): void; publish(t: string, p: Buffer, o: object, cb: (e: Error | null) => void): void; subscribe(t: string, o: object, cb: (e: Error | null, g?: { qos: number }[]) => void): void; end(force?: boolean, o?: object, cb?: () => void): void }; // eslint-disable-line @typescript-eslint/no-explicit-any
