@@ -119,7 +119,11 @@ async function main() {
         for (let i = 0; i < 120 && !this.stopped; i += 1) { try { this.current = await startConsumer(this.o); this.restarts += 1; this.downMs.push(Date.now() - downAt); break; } catch { await sleep(1000); } }
         this.busy = false;
       }
-      async restartNow() { const old = this.current!; await stopConsumer(old); await sleep(300); this.current = await startConsumer(this.o); this.restarts += 1; }
+      async restartNow() {
+        const old = this.current!; await stopConsumer(old); await sleep(300); let lastError: unknown;
+        for (let i = 0; i < 10; i += 1) { try { this.current = await startConsumer(this.o); this.restarts += 1; return; } catch (e) { lastError = e; await sleep(500); } }   // EMQX may still be tearing down the previous connection of the same clientId
+        throw lastError;
+      }
       async stop() { this.stopped = true; if (this.timer) clearInterval(this.timer); if (this.current) await stopConsumer(this.current); }
       get received() { return this.dead + (this.current?.adapter.stats().received ?? 0); }
     }
