@@ -173,7 +173,7 @@ async function main() {
       return { out, probe: { cpuPct: r1(((c1.user + c1.system) / 1000) / wall * 100), eventLoopDelayMs: { p50: r1(eld.percentile(50) / 1e6), p99: r1(eld.percentile(99) / 1e6), max: r1(eld.max / 1e6) }, rssMB: Math.round(process.memoryUsage().rss / 1048576), rssDeltaMB: Math.round((process.memoryUsage().rss - m0.rss) / 1048576), heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1048576) } }; };
 
     // load runner: N publishers (distinct mapped principals), a set of events each, optional duplicate share
-    async function load(tag: string, pubs: number, total: number, o: { dupRatio?: number; pad?: number; window?: number; qos?: 0 | 1 | 2; timeoutMs?: number; during?: (progress: () => number) => Promise<void> } = {}) {
+    async function load(tag: string, pubs: number, total: number, o: { dupRatio?: number; pad?: number; window?: number; qos?: 0 | 1 | 2; timeoutMs?: number; allowLoss?: boolean; during?: (progress: () => number) => Promise<void> } = {}) {
       const users = loadUsers.slice(0, pubs), per = Math.ceil(total * (1 - (o.dupRatio ?? 0)) / pubs), qos = o.qos ?? 1;
       const all = users.map(u => ({ u, events: mkEvents(tag, u, per, o.pad ?? 0) })); const ids = all.flatMap(a => a.events.map(e => e.eventId));
       const sent0 = performance.now(); let progressed = 0;
@@ -184,11 +184,24 @@ async function main() {
         if (o.dupRatio) { const dups = a.events.slice(0, Math.floor(a.events.length * o.dupRatio / (1 - o.dupRatio))); const d = await publishEvents(a.u, topicOf(a.u), dups.length ? dups : a.events.slice(0, 1), { qos }); dupErrors = d.errors; }
         return first.errors + dupErrors; }));
       await duringP;
-      await waitFor(tag + '-processed', () => processedAll(ids), o.timeoutMs ?? 90000);
+      if (o.allowLoss) {   // a scenario that may legitimately lose broker-side queued messages: wait until nothing more arrives for 15 s
+        let last = -1, since = Date.now(); const end = Date.now() + (o.timeoutMs ?? 90000);
+        while (!processedAll(ids) && Date.now() < end) { const n = ids.filter(id => timings.get(id)?.processed !== undefined).length; if (n !== last) { last = n; since = Date.now(); } else if (Date.now() - since > 15000) break; await sleep(250); }
+      } else await waitFor(tag + '-processed', () => processedAll(ids), o.timeoutMs ?? 90000);
       const ended = performance.now(); void progressed;
       return { ids, started: sent0, ended, errors: outs.reduce((a, b) => a + b, 0) };
     }
-    const verifyTag = async (tag: string, ids: string[]) => { assert.equal(await mCountTag(tag), ids.length, 'one measurement per unique event'); await noDuplicateMeasurements(); };
+    // Accounting: every unique event must end as exactly one measurement OR as an open quarantine entry (never missing, never twice).
+    const accounting = new Map<string, { unique: number; measurements: number; quarantinedAfterAck: number; missing: number }>();
+    const verifyTag = async (tag: string, ids: string[]) => {
+      const re = { $regex: '^e11e-' + tag + '-' };
+      const m = new Set(await measurements.distinct('eventId', { eventId: re }, majority) as string[]), q = new Set(await quarantineRows.distinct('eventId', { eventId: re }) as string[]);
+      const missing = ids.filter(id => !m.has(id) && !q.has(id)); const quarantined = ids.filter(id => !m.has(id) && q.has(id));
+      accounting.set(tag, { unique: ids.length, measurements: ids.filter(id => m.has(id)).length, quarantinedAfterAck: quarantined.length, missing: missing.length });
+      assert.equal(missing.length, 0, 'no event is lost: ' + JSON.stringify(accounting.get(tag)));
+      assert.equal(await mCountTag(tag), ids.length - quarantined.length, 'exactly one measurement per materialized event');
+      await noDuplicateMeasurements();
+    };
 
     let main: LabConsumer | null = await startConsumer();
     const quickTag = (id: string) => id.toLowerCase();
@@ -246,15 +259,15 @@ async function main() {
     main = await startConsumer();
 
     // ---------------------------------------------------------------- failures under load (T08-T11)
-    const underLoad = async (tag: string, inject: (progress: () => number, sup: Supervisor) => Promise<void>, o: { pubs?: number; total?: number } = {}) => {
+    const underLoad = async (tag: string, inject: (progress: () => number, sup: Supervisor) => Promise<void>, o: { pubs?: number; total?: number; allowLoss?: boolean } = {}) => {
       await stopConsumer(main!); main = null;
       const sup = await new Supervisor().start(); const total = o.total ?? 240;
       let result;
-      try { result = await load(tag, o.pubs ?? 4, total, { window: 8, timeoutMs: 180000, during: progress => inject(progress, sup) }); }
+      try { result = await load(tag, o.pubs ?? 4, total, { window: 8, timeoutMs: 180000, ...(o.allowLoss ? { allowLoss: true } : {}), during: progress => inject(progress, sup) }); }
       finally { /* keep the supervisor until verified */ }
       await sleep(1500);
       const rep = report(result.ids, result.started, result.ended, { publisherErrors: result.errors, consumerRestarts: sup.restarts, reconnectMs: dist(sup.downMs) });
-      const lost = result.ids.filter(id => timings.get(id)?.processed === undefined).length;
+      const lost = result.ids.filter(id => timings.get(id)?.persisted === undefined).length;   // events that never got a durable receipt at all
       const inboxRecords = await inboxRows.countDocuments({ rawPayloadSha256: { $exists: true } });
       await noDuplicateMeasurements();
       await sup.stop(); main = await startConsumer();
@@ -264,22 +277,23 @@ async function main() {
       const x = await underLoad('t08', async progress => { await waitFor('t08-30pct', () => progress() >= 60, 120000); const p = await primaryIndex(), sec = [0, 1, 2].filter(i => i !== p);
         for (const s of sec) chaos(request, 'pause', s); try { await sleep(8000); } finally { for (const s of sec) chaos(request, 'unpause', s); } await waitHealthy(); });
       assert.equal(x.lost, 0, 'no event lost'); await verifyTag('t08', x.result.ids);
-      return { label: 'LOCAL_LAB_EVIDENCE', lost: x.lost, ...x.rep, note: 'withheld ACKs were redelivered after healing; ambiguous writes may leave orphan inbox records (N4) resolved by reconciliation' };
+      return { label: 'LOCAL_LAB_EVIDENCE', lost: x.lost, accounting: accounting.get('t08'), ...x.rep, note: 'withheld ACKs were redelivered after healing; ambiguous writes may leave orphan inbox records (N4) resolved by reconciliation' };
     });
     await scenario('T09', 'Mongo PRIMARY FAILOVER under load', async () => {
       const x = await underLoad('t09', async progress => { await waitFor('t09-30pct', () => progress() >= 60, 120000); const old = await primaryIndex(); chaos(request, 'stop', old); try { await sleep(15000); } finally { chaos(request, 'start', old); } await waitHealthy(); });
       assert.equal(x.lost, 0); await verifyTag('t09', x.result.ids);
-      return { label: 'LOCAL_LAB_EVIDENCE', lost: x.lost, ...x.rep };
+      return { label: 'LOCAL_LAB_EVIDENCE', lost: x.lost, accounting: accounting.get('t09'), ...x.rep, note: 'events ACKed before the failover whose post-ACK processing hit the election end as an open QUARANTINE entry (retryable via replay), never as a loss' };
     });
     await scenario('T10', 'EMQX BROKER RESTART under load (publishers retry; the broker session is NOT durable)', async () => {
-      const x = await underLoad('t10', async progress => { await waitFor('t10-30pct', () => progress() >= 50, 120000); await L.restart(); await sleep(1000); }, { total: 200 });
+      const x = await underLoad('t10', async progress => { await waitFor('t10-30pct', () => progress() >= 50, 120000); await L.restart(); await sleep(1000); }, { total: 200, allowLoss: true });
       // The publisher retries what the broker never acknowledged. Messages ACKed to the publisher but still queued in the broker session can be lost by a restart.
-      return { label: 'LOCAL_LAB_EVIDENCE', lostAfterBrokerRestart: x.lost, uniqueEvents: x.result.ids.length, ...x.rep, finding: x.lost > 0 ? 'BROKER_RESTART_LOSES_QUEUED_QOS1_WITHOUT_DURABLE_SESSIONS' : 'no loss observed in this run' };
+      const lostBeforeReceipt = x.result.ids.filter(id => timings.get(id)?.persisted === undefined).length;
+      return { label: 'LOCAL_LAB_EVIDENCE', lostAfterBrokerRestart: lostBeforeReceipt, uniqueEvents: x.result.ids.length, ...x.rep, finding: lostBeforeReceipt > 0 ? 'BROKER_RESTART_LOSES_QUEUED_QOS1_WITHOUT_DURABLE_SESSIONS' : 'no loss observed in this run' };
     });
     await scenario('T11', 'consumer RESTART under load (persistent session): zero loss', async () => {
       const x = await underLoad('t11', async (progress, sup) => { await waitFor('t11-30pct', () => progress() >= 40, 120000); for (let i = 0; i < 3; i += 1) { await sleep(1200); await sup.restartNow(); } });
       assert.equal(x.lost, 0); await verifyTag('t11', x.result.ids);
-      return { label: 'LOCAL_LAB_EVIDENCE', lost: x.lost, ...x.rep };
+      return { label: 'LOCAL_LAB_EVIDENCE', lost: x.lost, accounting: accounting.get('t11'), ...x.rep };
     });
 
     // ---------------------------------------------------------------- T12: sessions
