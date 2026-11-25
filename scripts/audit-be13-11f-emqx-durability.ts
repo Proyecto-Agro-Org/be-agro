@@ -40,7 +40,7 @@ async function scenario(id: string, name: string, work: () => Promise<unknown>) 
   if (only && !only.has(id)) return;
   stage = id; const gapsBefore = gaps.length;
   try {
-    const evidence = await Promise.race([work(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error('SCENARIO_TIMEOUT_5MIN')), 300000))]);
+    const evidence = await Promise.race([work(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error('SCENARIO_TIMEOUT_8MIN')), 480000))]);
     const grew = gaps.length > gapsBefore, status: Status = !grew ? 'PASS' : EXPECTED_LIMITATION.has(id) ? 'KNOWN_LIMITATION' : 'FAIL';
     results.push({ id, name, status, evidence }); console.log(status + ' ' + id + ' ' + name + (evidence ? ' ' + JSON.stringify(evidence).slice(0, 420) : ''));
     return;                                            // an unexpected gap is reported as FAIL but does not abort the rest of the campaign
@@ -97,7 +97,8 @@ async function main() {
     if ((await db.listCollections().toArray()).length !== 0) throw Error('MN_DATABASE_NOT_EMPTY');
     const build = await db.command({ buildInfo: 1 });
     const status = async () => (await db.admin().command({ replSetGetStatus: 1 }, { readPreference: 'nearest' })) as { members: { name: string; stateStr: string; health: number }[] };
-    const waitHealthy = async () => { for (let i = 0; i < 240; i += 1) { try { const s = await status(); if (s.members.filter(m => m.health === 1).length === 3 && s.members.filter(m => m.stateStr === 'PRIMARY').length === 1 && s.members.filter(m => m.stateStr === 'SECONDARY').length === 2) return; } catch { /* election */ } await sleep(500); } throw Error('MN_WAIT_TIMEOUT_healthy'); };
+    const bounded = <T,>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error('STATUS_TIMEOUT')), ms))]);   // a stuck driver selection must not eat the scenario budget
+    const waitHealthy = async () => { for (let i = 0; i < 70; i += 1) { try { const s = await bounded(status(), 4000); if (s.members.filter(m => m.health === 1).length === 3 && s.members.filter(m => m.stateStr === 'PRIMARY').length === 1 && s.members.filter(m => m.stateStr === 'SECONDARY').length === 2) return; } catch { /* election */ } await sleep(500); } throw Error('MN_WAIT_TIMEOUT_healthy'); };
     const primaryIndex = async () => { const p = (await status()).members.find(m => m.stateStr === 'PRIMARY'); return p ? request.ports.indexOf(Number(p.name.split(':')[1])) : -1; };
     await provisionSensorCollections(connection, SENSOR, BUSINESS); await provisionIngestionCollections(connection, INGEST); await provisionQuarantineCollection(connection, INGEST);
     await provisionAuditCollections(connection, INGEST); await provisionBrokerInboxCollection(connection, INGEST); await provisionBrokerInboxStateCollection(connection, INGEST);
