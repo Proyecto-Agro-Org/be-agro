@@ -209,9 +209,10 @@ async function main() {
         const { out } = await offlineQueue('d07', 200, 'recreateSame'); noLoss(out); assert.equal(out.sessionPresent, true); return out;
       });
       await scenario('D19', 'durable: authenticator, ACL and rule are RESTORED from the volume after recreate (no reconfiguration)', async () => {
-        const ok = await pubOpen('lab-device-a'); assert.ok(ok, 'the lab-device-a credential still authenticates after the recreate');
+        console.log('D19 step: connecting publisher'); const ok = await pubOpen('lab-device-a'); assert.ok(ok, 'the lab-device-a credential still authenticates after the recreate'); console.log('D19 step: publisher connected');
         const rx = await consumerOpen(); const sent = ids('d19', 5); const p = await publish(sent, { window: 1 }); await settle(rx, 5); assert.equal(rx.received.size, 5, 'the broker rule still republishes');
-        const denied = await new Promise<number | null>(res => ok!.publish(LAB_VERIFIED_TOPIC, Buffer.from('{}'), { qos: 1 }, e => res((e as { code?: number } | null)?.code ?? null)));
+        const denied = await new Promise<number | null>(res => { const t = setTimeout(() => res(-1), 8000); ok!.publish(LAB_VERIFIED_TOPIC, Buffer.from('{}'), { qos: 1 }, e => { clearTimeout(t); res((e as { code?: number } | null)?.code ?? null); }); });
+        console.log('D19 step: denied-publish result ' + denied);
         const bad = await pubOpen('lab-device-a', 'lab-device-a', 'labpw-' + '0'.repeat(32));
         await rx.close(false); ok!.end(true);
         assert.equal(denied, 135, 'the ACL still denies publishing to the verified topic'); assert.equal(bad, null, 'a wrong password is still refused');
