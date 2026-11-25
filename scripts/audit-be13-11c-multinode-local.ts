@@ -261,25 +261,44 @@ async function main() {
       assert.equal((await stateOf(ids.H!) as unknown as { status: string }).status, 'claimed');
       assert.equal(await s2.complete({ realm: 'test', claim: h2!, outcome: 'blocked' }), true);
     });
+    let c11: Record<string, unknown> = {};
+    // Failure diagnostics captured BEFORE cleanup (no payload, no secrets): replica-set view, state documents, measurement count.
+    const c11Diagnostics = async () => {
+      const members = (await status().catch(() => ({ members: [] as { name: string; stateStr: string; health: number }[] }))).members.map(m => ({ name: m.name.split(':')[1], state: m.stateStr, health: m.health }));
+      const states = await stateRows.find({ _id: { $in: [ids.G as never] } }).toArray().catch(() => []);
+      return { members, stateG: states.map(d => ({ status: d.status, version: d.version, outcome: d.outcome ?? null })), measurementsG: await mCount('e11b-11c-G').catch(() => -1) };
+    };
     await check('C11 failover after claim: claim (majority) → primary stopped → a reconciler on the NEW primary takes over after the lease → one measurement', async () => {
       await waitHealthy();
       const s1 = createMongoBrokerInboxReconciliationStore({ connection: conns[1]!, prefix: INGEST, realm: 'test' });
       const dead = await s1.claim({ realm: 'test', inboxId: ids.G!, claimLeaseMs: POLICY.claimLeaseMs });
       assert.ok(dead);
       const old = await primaryIndex();
+      const stoppedAt = Date.now();
       chaos(request, 'stop', old);
+      const driverErrors: { name: string; code: number | null; labels: string[] }[] = [];
+      let electedAfterMs = -1, newPrimary = -1;
       try {
-        await sleep(POLICY.claimLeaseMs + 1500);
+        // Probe a surviving connection until a NEW primary accepts a majority write path (read of the claim state with majority).
+        const probe = createMongoBrokerInboxReconciliationStore({ connection: conns[4]!, prefix: INGEST, realm: 'test' });
+        for (let i = 0; i < 120 && electedAfterMs < 0; i += 1) {
+          try { await probe.getState({ realm: 'test', inboxId: ids.G! }); const p = await primaryIndex(); if (p >= 0 && p !== old) { newPrimary = p; electedAfterMs = Date.now() - stoppedAt; } }
+          catch (error) { const e = error as { name?: string; code?: number; errorLabels?: string[]; errorLabelSet?: Set<string> }; driverErrors.push({ name: String(e.name), code: typeof e.code === 'number' ? e.code : null, labels: [...(e.errorLabelSet ?? e.errorLabels ?? [])] }); }
+          if (electedAfterMs < 0) await sleep(250);
+        }
+        assert.ok(electedAfterMs >= 0, 'a new primary was elected');
+        const remaining = POLICY.claimLeaseMs + 1500 - (Date.now() - stoppedAt);
+        if (remaining > 0) await sleep(remaining); // the dead holder's lease (database clock) must have expired
         let out = 'unavailable';
         for (let i = 0; i < 60 && out === 'unavailable'; i += 1) { out = await reconcilerOn(conns[4]!).reconciler.reconcileOne(ids.G!); if (out === 'unavailable') await sleep(1000); }
-        console.log('C11 diagnostic reconcile result: ' + out);
         assert.equal(out, 'recovered-and-processed');
         let stale: boolean | undefined;
         for (let i = 0; i < 30 && stale === undefined; i += 1) { try { stale = await createMongoBrokerInboxReconciliationStore({ connection: conns[5]!, prefix: INGEST, realm: 'test' }).complete({ realm: 'test', claim: dead!, outcome: 'recovered-and-processed' }); } catch { await sleep(1000); } }
         assert.equal(stale, false);
-        return { stoppedPrimary: old, newPrimary: await primaryIndex() };
-      } finally { chaos(request, 'start', old); await waitHealthy(); }
-      // eslint-disable-next-line no-unreachable
+        c11 = { initialPrimary: old, newPrimary, electionMs: electedAfterMs, driverErrors, reconcileResult: out };
+        return c11;
+      } catch (error) { console.log('C11_DIAGNOSTICS ' + JSON.stringify({ initialPrimary: old, electedAfterMs, driverErrors, ...(await c11Diagnostics()) })); throw error; }
+      finally { chaos(request, 'start', old); await waitHealthy(); }
     });
     await check('C11b exactly one measurement for G after the failover', async () => { assert.equal(await mCount('e11b-11c-G'), 1); });
     await check('C15 audit is safe: reconciliation actions present; no payload, topic, client id, event id or inbox payload', async () => {
@@ -315,11 +334,16 @@ async function main() {
       for (const n of names) assert.equal((await stateOf(ids[n]!) as unknown as { status: string }).status, 'completed');
       assert.equal(await mCount('e11b-11c-E'), 0); // the tampered record was never processed
     });
+    const stateG = await stateOf(ids.G!) as unknown as { status: string; version: number; outcome: string } | null;
+    const nonFinal = await stateRows.countDocuments({ status: { $ne: 'completed' } });
+    const c11Record = { ...c11, finalStateG: stateG && { status: stateG.status, version: stateG.version, outcome: stateG.outcome }, measurementsG: await mCount('e11b-11c-G'),
+      claimsNotCompleted: nonFinal, rawRecordsG: (await idOf('e11b-11c-G')).length, replicaSetHealthy: (await status()).members.filter(m => m.health === 1).length === 3 };
+    console.log('C11_STABILITY ' + JSON.stringify(c11Record));
     results.push({ name: 'C19 cleanup', status: 'passed', detail: 'confirmed by the launcher (cleanupConfirmed)' });
     stage = 'evidence';
     const dir = join(process.cwd(), '.local-evidence'); mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'be13-11c-multinode.json'), JSON.stringify({ gitSha: sha, mongoVersion: build.version, run: request.runId, connections: conns.length, results,
-      inboxCount: await inboxRows.countDocuments({}), stateCount: await stateRows.countDocuments({}), measurementCount: await measurements.countDocuments({}) }, null, 2));
+      inboxCount: await inboxRows.countDocuments({}), stateCount: await stateRows.countDocuments({}), measurementCount: await measurements.countDocuments({}), c11 }, null, 2));
   } finally {
     const first = conns[0];
     if (first?.readyState === 1) { try { verifyOwnedMultiNode(request); await first.db!.dropDatabase(); } catch { /* launcher confirms cleanup */ } }
