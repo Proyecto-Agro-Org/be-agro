@@ -37,6 +37,13 @@ async function check(id: string, name: string, work: () => Promise<unknown>) {
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 async function waitFor(what: string, cond: () => Promise<boolean>, ms = 20000) { const end = Date.now() + ms; while (Date.now() < end) { if (await cond()) return; await sleep(200); } throw new Error('TIMEOUT_' + what); }
 
+// A hard kill: on POSIX the child reports SIGKILL; on Windows TerminateProcess reports no signal and a non-zero exit code. Either way the child
+// must NOT have reached its own failure handler (which prints LAB_CONSUMER_FAILED) and must not have exited cleanly.
+const assertKilled = (x: { code: number | null; signal: string | null }, output: string) => {
+  assert.ok(x.signal === 'SIGKILL' || (x.code !== null && x.code !== 0), 'child died hard');
+  assert.equal(output.includes('LAB_CONSUMER_FAILED'), false, 'child died by its kill hook, not by an error');
+};
+
 type PubResult = { connected: boolean; connectError: string | null; publishError: string | null; reasonCode: number | null };
 
 async function main() {
@@ -239,7 +246,7 @@ async function main() {
     await check('E18', 'consumer process KILLED before the inbox write: no record, no ACK → broker redelivers to the next consumer → one measurement', async () => {
       const ids = ev('e18'), p = await spawnChild('before-persist');
       await publish('lab-device-a', { topic: TOPIC_A, payload: body('lab-device-a', ids), qos: 1 });
-      const x = await p.exited; assert.equal(x.signal, 'SIGKILL');
+      assertKilled(await p.exited, p.output());
       assert.deepEqual([await iCount(ids), await mCount(ids)], [0, 0]);
       main = await startConsumer(conns[2]!);
       await waitFor('e18-redelivered', async () => (await mCount(ids)) === 1); await main.idle();
@@ -249,7 +256,7 @@ async function main() {
     await check('E19', 'consumer KILLED after the durable receipt but BEFORE the ACK: broker redelivers, two inbox records, one measurement', async () => {
       const ids = ev('e19'), p = await spawnChild('after-persist');
       await publish('lab-device-a', { topic: TOPIC_A, payload: body('lab-device-a', ids), qos: 1 });
-      assert.equal((await p.exited).signal, 'SIGKILL');
+      assertKilled(await p.exited, p.output());
       assert.equal(await iCount(ids), 1);                                       // durable, receipted by the dead owner
       assert.equal(await mCount(ids), 0);
       main = await startConsumer(conns[2]!);
@@ -262,7 +269,7 @@ async function main() {
     await check('E20', 'consumer KILLED after the ACK and BEFORE the measurement: broker will NOT redeliver; record durable and receipted; no measurement', async () => {
       const p = await spawnChild('after-ack');
       await publish('lab-device-a', { topic: TOPIC_A, payload: body('lab-device-a', ids20), qos: 1 });
-      const x = await p.exited; assert.equal(x.signal, 'SIGKILL');
+      assertKilled(await p.exited, p.output());
       assert.equal(await iCount(ids20), 1); assert.equal(await mCount(ids20), 0);
       id20 = String((await inboxOf(ids20))[0]!._id);
       assert.equal(((await stateRows.findOne({ _id: id20 as never }, majority)) as unknown as { status: string }).status, 'receipted');
