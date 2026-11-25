@@ -41,7 +41,9 @@ test('MN launcher: closed chaos actions, loopback publishing, ownership labels a
   assert.match(launcher, /'be13-08'\{'dist\/scripts\/audit-be13-08-multinode-local\.js'\}'be13-09'\{'dist\/scripts\/audit-be13-09-multinode-local\.js'\}'be13-10b'\{'dist\/scripts\/audit-be13-10b-multinode-local\.js'\}'be13-11a'\{'dist\/scripts\/audit-be13-11a-multinode-local\.js'\}'be13-11b'\{'dist\/scripts\/audit-be13-11b-multinode-local\.js'\}'be13-11c'\{'dist\/scripts\/audit-be13-11c-multinode-local\.js'\}'be13-11d'\{'dist\/scripts\/audit-be13-11d-emqx-local\.js'\}'be13-11e'\{'dist\/scripts\/audit-be13-11e-emqx-bench\.js'\}'be13-11f'\{'dist\/scripts\/audit-be13-11f-emqx-durability\.js'\}default\{'dist\/scripts\/audit-be13-07-multinode-local\.js'\}/);
   assert.match(launcher, /& node \$runner/);
   assert.doesNotMatch(launcher, /& node ["']?\$Suite/);
-  assert.doesNotMatch(launcher, /--privileged|-v |--volume|mongodb\+srv/);
+  // BE13-11F: the ONLY allowed use of the volume flag is DELETING the container's own anonymous volumes at cleanup (`docker rm --force --volumes <id>`); mounting volumes stays forbidden.
+  assert.equal(launcher.split('docker rm --force --volumes $id').length - 1, 1);
+  assert.doesNotMatch(launcher.replace('docker rm --force --volumes $id', 'docker rm --force $id'), /--privileged|-v |--volume|mongodb\+srv/);
   const guard = readFileSync(new URL('../scripts/be13-07/guard.ts', import.meta.url), 'utf8');
   assert.match(guard, /action: 'stop' \| 'start' \| 'pause' \| 'unpause'/);
 });
