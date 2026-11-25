@@ -57,6 +57,11 @@ export function account(sent: readonly string[], acked: ReadonlySet<string>, rec
   return { sent: sent.length, acked: acked.size, receivedUnique: received.size, lostAfterPuback: lost.length, lostSample: lost.slice(0, 3), duplicates, unackedButReceived: [...received.keys()].filter(id => !acked.has(id)).length, unackedSample: [...received.keys()].filter(id => !acked.has(id)).slice(0, 3) };
 }
 
+// A durability gap = a message the broker CONFIRMED (PUBACK) that was not recovered. Survival scenarios record gaps instead of aborting, so the
+// campaign can state exactly where the broker keeps its promise and where it does not.
+const gaps: { id: string; lostAfterPuback: number; acked: number }[] = [];
+function noLoss(acc: { lostAfterPuback: number; acked: number }) { if (acc.lostAfterPuback > 0) gaps.push({ id: stage, lostAfterPuback: acc.lostAfterPuback, acked: acc.acked }); }
+
 type MqttClient = { on(e: string, l: (...a: any[]) => void): void; publish(t: string, p: Buffer, o: object, cb: (e: Error | null) => void): void; subscribe(t: string, o: object, cb: (e: Error | null, g?: { qos: number }[]) => void): void; end(force?: boolean, o?: object, cb?: () => void): void }; // eslint-disable-line @typescript-eslint/no-explicit-any
 const consumerId = () => 'lab-consumer-durable';                    // a STABLE client id: a durable session can only be reclaimed with the same id
 
@@ -130,6 +135,8 @@ async function main() {
       return { received, order, bytes, client: c, sessionPresent, close: async (graceful = true) => { await new Promise<void>(res => { c.end(!graceful, {}, () => res()); setTimeout(res, 1500); }); rawClients.delete(c); } };
     }
     const settle = async (rx: Rx, expect: number, quietMs = 3500, maxMs = 30000) => { const end = Date.now() + maxMs; let last = -1, since = Date.now(); while (Date.now() < end) { if (rx.received.size >= expect) break; if (rx.received.size !== last) { last = rx.received.size; since = Date.now(); } else if (Date.now() - since > quietMs) break; await sleep(150); } };
+    // wait until the measurement count reaches `target` OR stops growing for 20 s (a durability gap means it may never reach it)
+    const settleCount = async (tag: string, target: number) => { let last = -1, since = Date.now(); const end = Date.now() + 150000; while (Date.now() < end) { const m = await mCountTag(tag); if (m >= target) return; if (m !== last) { last = m; since = Date.now(); } else if (Date.now() - since > 20000) return; await sleep(500); } };
     const ids = (tag: string, n: number) => Array.from({ length: n }, (_, i) => `e11f-${tag}-${i}`);
     const withLab = async <T>(options: EmqxLabOptions, fn: () => Promise<T>) => { lab = await startEmqxLab(request.basePort, request.runId, [], options); try { return await fn(); } finally { for (const c of [...rawClients]) { try { c.end(true); } catch { /* */ } } rawClients.clear(); for (const c of [...live]) { await c.stop().catch(() => {}); live.delete(c); } lab.stop(); lab = null; } };
     const disrupt = async (how: 'restart' | 'stopStart' | 'kill' | 'recreateSame' | 'recreateNew') => { const l = L(); if (how === 'restart') return l.restart(); if (how === 'stopStart') return l.stopStart(); if (how === 'kill') return l.kill(); return l.recreate({ keepVolume: how === 'recreateSame' }); };
@@ -175,14 +182,14 @@ async function main() {
       storage['empty'] = L().volumeBytes();
       await scenario('D03', 'durable: PUBACKed messages for an OFFLINE session survive `docker restart`', async () => {
         const { out } = await offlineQueue('d03', 200, 'restart');
-        assert.equal(out.lostAfterPuback, 0, JSON.stringify(out)); assert.equal(out.sessionPresent, true); assert.equal(out.receivedUnique, out.acked);
+        noLoss(out); assert.equal(out.sessionPresent, true);
         return out;
       });
       await scenario('D04', 'durable: messages delivered-but-UNACKED (slow consumer) and still queued survive a broker restart', async () => {
         const c = await consumerOpen({ hold: true }); const sent = ids('d04', 200); const p = await publish(sent, { window: 8 }); await sleep(600);
         const heldBefore = c.received.size; await c.close(false); await L().restart(); await sleep(1500);
         const rx = await consumerOpen(); await settle(rx, p.acked.size); const acc = account(sent, p.acked, rx.received);
-        assert.equal(acc.lostAfterPuback, 0, JSON.stringify(acc)); assert.ok(heldBefore > 0 && heldBefore < p.acked.size, 'a real backlog existed (some delivered, some queued)');
+        noLoss(acc); assert.ok(heldBefore > 0 && heldBefore < p.acked.size, 'a real backlog existed (some delivered, some queued)');
         await rx.close(false); return { ...acc, deliveredButUnackedBeforeRestart: heldBefore, redeliveredDuplicates: acc.duplicates };
       });
       await scenario('D05', 'durable: restart WITH the consumer online and consuming', async () => {
@@ -193,12 +200,12 @@ async function main() {
         const rx2 = await consumerOpen(); await settle(rx2, p.acked.size, 4000, 45000);
         const merged = new Map<string, number>(rx.received); for (const [k, v] of rx2.received) merged.set(k, (merged.get(k) ?? 0) + v);
         const acc = account(sent, p.acked, merged); await rx2.close(false);
-        assert.equal(acc.lostAfterPuback, 0, JSON.stringify(acc));
+        noLoss(acc);
         return { ...acc, publisherFailedDuringRestart: p.failed, note: 'events sent but not PUBACKed during the restart are the PUBLISHER\'s to retry; they are not counted as broker loss' };
       });
-      await scenario('D06', 'durable: graceful stop → start (same container, same volume)', async () => { const { out } = await offlineQueue('d06', 200, 'stopStart'); assert.equal(out.lostAfterPuback, 0, JSON.stringify(out)); return out; });
+      await scenario('D06', 'durable: graceful stop → start (same container, same volume)', async () => { const { out } = await offlineQueue('d06', 200, 'stopStart'); noLoss(out); return out; });
       await scenario('D07', 'durable: container RECREATED with the SAME volume (new container, same data)', async () => {
-        const { out } = await offlineQueue('d07', 200, 'recreateSame'); assert.equal(out.lostAfterPuback, 0, JSON.stringify(out)); assert.equal(out.sessionPresent, true); return out;
+        const { out } = await offlineQueue('d07', 200, 'recreateSame'); noLoss(out); assert.equal(out.sessionPresent, true); return out;
       });
       await scenario('D19', 'durable: authenticator, ACL and rule are RESTORED from the volume after recreate (no reconfiguration)', async () => {
         const ok = await pubOpen('lab-device-a'); assert.ok(ok, 'the lab-device-a credential still authenticates after the recreate');
@@ -211,8 +218,8 @@ async function main() {
       });
       await scenario('D09', 'durable-tuned: HARD KILL (docker kill, SIGKILL) right after the last PUBACK', async () => {
         const rows: object[] = [];
-        for (let i = 0; i < 3; i += 1) { const { out } = await offlineQueue('d09r' + i, 200, 'kill', { immediate: true }); rows.push(out); assert.equal(out.lostAfterPuback, 0, 'run ' + i + ': ' + JSON.stringify(out)); }
-        return { runs: rows, note: 'no loss observed with a 1 ms write buffer; the window is NOT zero (see D27)' };
+        for (let i = 0; i < 3; i += 1) { const { out } = await offlineQueue('d09r' + i, 200, 'kill', { immediate: true }); rows.push(out); noLoss(out); }
+        return { runs: rows, runsWithLossAfterPuback: (rows as { lostAfterPuback: number }[]).filter(r => r.lostAfterPuback > 0).length, note: 'the window is NOT zero by construction (see D27)' };
       });
       await scenario('D09b', 'durable-tuned: broker KILLED while the publisher is mid-batch (exact PUBACK accounting)', async () => {
         const first = await consumerOpen(); await first.close(true); await sleep(300);
@@ -223,7 +230,7 @@ async function main() {
         void kill; if (killed) await killed; await sleep(1500);
         const rx = await consumerOpen(); await settle(rx, p.acked.size, 4000, 45000); const acc = account(sent, p.acked, rx.received); await rx.close(false);
         assert.ok(acc.acked < acc.sent, 'the kill interrupted the batch: some events were SENT but never PUBACKed (publisher must retry them)');
-        assert.equal(acc.lostAfterPuback, 0, 'PUBACKed => recovered: ' + JSON.stringify(acc));
+        noLoss(acc);
         return { ...acc, sentButNeverAcked: acc.sent - acc.acked };
       });
       await scenario('D20', 'durable: payload bytes are EXACT after a hard kill and recovery (binary payload, topic and QoS preserved)', async () => {
@@ -248,21 +255,21 @@ async function main() {
         const mk = async () => { const c = await startLabConsumer({ conn: conns[1]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
         const c1 = await mk(); await c1.stop(); live.delete(c1); await sleep(300);                      // session created, consumer offline
         const sent = ids('d11', 150), p = await publish(sent, { window: 8 }); await L().kill(); await sleep(1500);
-        const c2 = await mk(); await waitFor('d11-measured', async () => (await mCountTag('d11')) >= p.acked.size, 90000); await c2.idle(); await sleep(1500);
+        const c2 = await mk(); await settleCount('d11', p.acked.size); await c2.idle(); await sleep(1500);
         const m = await mCountTag('d11'), inbox = await inboxRows.countDocuments({}), dup = await measurements.aggregate([{ $group: { _id: { e: '$eventId', f: '$field' }, n: { $sum: 1 } } }, { $match: { n: { $gt: 1 } } }]).toArray();
         await c2.stop(); live.delete(c2);
-        assert.equal(m, p.acked.size, 'one measurement per PUBACKed event'); assert.equal(dup.length, 0, 'no second measurement');
-        return { acked: p.acked.size, measurements: m, inboxRecords: inbox, duplicateMeasurements: dup.length };
+        noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m), acked: p.acked.size }); assert.ok(m <= p.acked.size, 'never more measurements than events'); assert.equal(dup.length, 0, 'no second measurement');
+        return { acked: p.acked.size, measurements: m, inboxRecords: inbox, duplicateMeasurements: dup.length, lostAfterPuback: Math.max(0, p.acked.size - m) };
       });
       await scenario('D12', 'durable: broker restart + consumer restart together (persistent session): no loss', async () => {
         const mk = async () => { const c = await startLabConsumer({ conn: conns[1]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
         const c1 = await mk(); const sent = ids('d12', 200);
         const p = await publish(sent, { window: 8, onFirstAcks: { count: 80, run: () => { void c1.stop(); void L().restart(); } } });
         await sleep(2500); live.delete(c1); await waitFor('broker-back', async () => { try { return (await L().api('GET', '/status')).status === 200; } catch { return false; } }, 90000).catch(() => {});
-        const c2 = await mk(); await waitFor('d12-measured', async () => (await mCountTag('d12')) >= p.acked.size, 120000); await c2.idle(); await sleep(1500);
+        const c2 = await mk(); await settleCount('d12', p.acked.size); await c2.idle(); await sleep(1500);
         const m = await mCountTag('d12'); await c2.stop(); live.delete(c2);
-        assert.equal(m, p.acked.size, 'every PUBACKed event became exactly one measurement');
-        return { acked: p.acked.size, measurements: m, publisherFailedDuringRestart: p.failed };
+        noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m), acked: p.acked.size }); assert.ok(m <= p.acked.size);
+        return { acked: p.acked.size, measurements: m, lostAfterPuback: Math.max(0, p.acked.size - m), publisherFailedDuringRestart: p.failed };
       });
       await scenario('D13', 'durable: broker restart + MONGO without majority: the consumer cannot persist, does not ACK, the broker keeps the messages; after healing everything is processed', async () => {
         const first = await consumerOpen(); await first.close(true); await sleep(300);
@@ -273,8 +280,8 @@ async function main() {
         let during = 0;
         try { const c = await mk().catch(() => null); await sleep(9000); during = await mCountTag('d13'); if (c) { await c.stop().catch(() => {}); live.delete(c); } } finally { for (const s of sec) chaos(request, 'unpause', s); }
         await waitHealthy(); assert.equal(during, 0, 'nothing was processed without a Mongo majority');
-        const c = await mk(); await waitFor('d13-measured', async () => (await mCountTag('d13')) >= p.acked.size, 120000); await c.idle(); const m = await mCountTag('d13'); await c.stop(); live.delete(c);
-        assert.equal(m, p.acked.size); return { acked: p.acked.size, processedWhileMongoDown: during, measurementsAfterHealing: m };
+        const c = await mk(); await settleCount('d13', p.acked.size); await c.idle(); const m = await mCountTag('d13'); await c.stop(); live.delete(c);
+        noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m), acked: p.acked.size }); return { acked: p.acked.size, processedWhileMongoDown: during, measurementsAfterHealing: m, lostAfterPuback: Math.max(0, p.acked.size - m) };
       });
       await scenario('D14', 'durable: broker recovered, THEN a Mongo primary failover: exactly one measurement per event', async () => {
         const first = await consumerOpen(); await first.close(true); await sleep(300);
@@ -289,8 +296,8 @@ async function main() {
         for (let i = 0; i < 6 && (await mCountTag('d14')) < p.acked.size; i += 1) { await sleep(2000); await c2.reconciler.reconcileBrokerInbox({ mode: 'reconcile', limit: 100 }); }
         const m = await mCountTag('d14'), q = await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d14-' } });
         await c2.stop(); live.delete(c2);
-        assert.equal(m + q, p.acked.size, 'nothing lost'); const dup = await measurements.aggregate([{ $group: { _id: { e: '$eventId', f: '$field' }, n: { $sum: 1 } } }, { $match: { n: { $gt: 1 } } }]).toArray(); assert.equal(dup.length, 0);
-        return { acked: p.acked.size, measurements: m, quarantined: q, stoppedMongoPrimary: old };
+        noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m - q), acked: p.acked.size }); const dup = await measurements.aggregate([{ $group: { _id: { e: '$eventId', f: '$field' }, n: { $sum: 1 } } }, { $match: { n: { $gt: 1 } } }]).toArray(); assert.equal(dup.length, 0);
+        return { acked: p.acked.size, measurements: m, quarantined: q, lostAfterPuback: Math.max(0, p.acked.size - m - q), stoppedMongoPrimary: old };
       });
       await scenario('D15', 'misconfiguration: clean start after the queue was built DISCARDS the session (loss is expected and the lab guard refuses this config)', async () => {
         const first = await consumerOpen(); await first.close(true); await sleep(300);
@@ -311,7 +318,7 @@ async function main() {
         const other = await consumerOpen({ clientId: 'lab-consumer-intruder' }); await settle(other, p.acked.size, 2500);
         const same = await consumerOpen({ clientId: 'lab-consumer-owner' }); await settle(same, p.acked.size);
         const accOther = account(sent, p.acked, other.received), accSame = account(sent, p.acked, same.received); await other.close(false); await same.close(false);
-        assert.equal(accOther.receivedUnique, 0, 'a new client id receives nothing from the old session'); assert.equal(accSame.lostAfterPuback, 0, JSON.stringify(accSame));
+        assert.equal(accOther.receivedUnique, 0, 'a new client id receives nothing from the old session'); noLoss(accSame);
         return { differentClientIdReceived: accOther.receivedUnique, sameClientIdRecovered: accSame.receivedUnique, acked: p.acked.size, sameClientSessionPresent: same.sessionPresent };
       });
       await scenario('D26', 'session expiry (LAB_ONLY_SESSION_EXPIRY): recoverable before the expiry, gone after it (not a bug)', async () => {
@@ -321,7 +328,7 @@ async function main() {
         await sleep(7000);                                                                                    // longer than the 4 s expiry
         const late = ids('d26b', 20), pl = await publish(late, { window: 4 });
         const r2 = await consumerOpen({ clientId: 'lab-consumer-exp', expiry: 4 }); await settle(r2, pl.acked.size, 2500); const after = account(late, pl.acked, r2.received); await r2.close(false);
-        assert.equal(before.lostAfterPuback, 0, JSON.stringify(before)); assert.ok(after.lostAfterPuback > 0 && r2.sessionPresent === false, 'the expired session is gone: ' + JSON.stringify(after));
+        noLoss(before); assert.ok(after.lostAfterPuback > 0 && r2.sessionPresent === false, 'the expired session is gone: ' + JSON.stringify(after));
         return { sessionExpiryIntervalSeconds: 4, recoveredBeforeExpiry: before.receivedUnique, recoveredAfterExpiry: after.receivedUnique, sessionPresentAfterExpiry: r2.sessionPresent };
       });
       storage['afterQueue'] = L().volumeBytes();
@@ -363,11 +370,12 @@ async function main() {
     });
 
     stage = 'evidence';
-    const f2 = results.filter(r => r.id === 'D03' || r.id === 'D06' || r.id === 'D07' || r.id === 'D09' || r.id === 'D09b').every(r => r.status === 'PASS');
     const windowDemonstrated = results.find(r => r.id === 'D27')?.status === 'PASS';
+    const f2 = gaps.length === 0;
     const dir = join(process.cwd(), '.local-evidence'); mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'be13-11f-durability.json'), JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', gitSha: sha, mongoVersion: build.version, emqxImage: EMQX_IMAGE, run: request.runId, elapsedS: r1((Date.now() - t0) / 1000),
-      fE2: { gracefulAndRecreate: f2 ? 'RECOVERED' : 'NOT_PROVEN', hardCrashWindowDemonstrated: windowDemonstrated, classification: windowDemonstrated ? 'OPEN (mitigated: residual hard-crash window = flush_interval; PUBACK precedes the durable write)' : 'UNDETERMINED' },
+      fE2: { survivalScenariosWithoutAnyLossAfterPuback: f2, gaps, hardCrashWindowDemonstrated: windowDemonstrated,
+        classification: (f2 && !windowDemonstrated) ? 'CLOSED_LOCAL_CANDIDATE' : 'OPEN (a PUBACKed message was not recovered in at least one scenario' + (windowDemonstrated ? '; PUBACK precedes the durable write' : '') + ')' },
       perf, storage, results }, null, 2));
   } finally {
     for (const c of [...rawClients]) { try { c.end(true); } catch { /* */ } }
