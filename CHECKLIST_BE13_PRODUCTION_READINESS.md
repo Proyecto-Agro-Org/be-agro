@@ -48,3 +48,13 @@ Estado actualizado al cierre de BE13-10A (rama local, base `dev` `98dd2d8`). Dec
 - [ ] Registros `receipted` sin dueño (43) y tolerancia de relojes N1 (44).
 - [ ] Adapter EMQX real revisado (parte del TCB); no existe todavía.
 - `productionReady` permanece `false`.
+
+## BE13-11D — EMQX local y persist-before-ack
+
+- [x] Adapter MQTT/EMQX de laboratorio con ACK diferido verificado contra un broker real (loopback, TEST_ONLY).
+- [x] Recuperación de `receipted` sin dueño (CLOSED_LOCAL) con política BLOCKED por defecto.
+- [ ] Autenticación productiva, ACL y regla del broker revisadas (45, 46).
+- [ ] Política de sesión, reconexión y mensajes veneno (42, 48, 49).
+- [ ] Edad y ejecutor de la recuperación (37, 38, 47) y fuente de `receivedAt` (36, 44, 50).
+- [ ] Revisión de la dependencia `mqtt` (52) y pruebas de carga (51).
+- `productionReady` permanece `false`.
