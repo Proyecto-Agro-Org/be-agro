@@ -282,3 +282,35 @@ test('R26 unavailable store: nothing final is recorded and the failure is explic
   assert.equal(await s.reconciler.reconcileOne(id), 'recovered-and-processed');
   assert.equal(s.persistence.measurements.size, 1);
 });
+
+// ---- N1 clock skew: the EXACT rule is BE13-02 `persistedAt < receivedAt` => invalid-timestamp. No tolerance is chosen here.
+const skew = async (start, env = {}) => {
+  const s = await reconciliationSetup({ durableInbox: createInMemoryBrokerInbox('test', { start }) });
+  const r = await s.boundary.deliver(delivery({ env }));
+  return { s, status: r.results?.[0]?.result?.status, reason: r.results?.[0]?.result?.reasonCode };
+};
+test('R27 N1: database clock BEHIND the adapter (persistedAt < receivedAt) → invalid-timestamp; extreme skew behaves the same', async () => {
+  for (const start of [RECEIVED - 2, RECEIVED - 10_000, RECEIVED - 30 * 24 * 3600 * 1000]) {
+    const { s, status, reason } = await skew(start);
+    assert.deepEqual([status, reason, s.persistence.measurements.size], ['quarantined', 'invalid-timestamp', 0]);
+  }
+});
+test('R28 N1: equality (persistedAt == receivedAt) is accepted; the rule is strictly "less than"', async () => {
+  const { s, status } = await skew(RECEIVED - 1);   // first write is start + 1 === RECEIVED
+  assert.deepEqual([status, s.persistence.measurements.size], ['accepted', 1]);
+});
+test('R29 N1: database clock AHEAD of the adapter (large or small) is accepted: no upper bound exists in this rule', async () => {
+  for (const start of [RECEIVED + 1, RECEIVED + 3_600_000, RECEIVED + 30 * 24 * 3600 * 1000]) assert.equal((await skew(start)).status, 'accepted');
+});
+test('R30 N1: the device timestamp is independent: it never causes or prevents invalid-timestamp', async () => {
+  for (const deviceTimestamp of [1, 4102444800000, RECEIVED - 5]) {
+    assert.equal((await skew(RECEIVED + 3_600_000, { deviceTimestamp })).status, 'accepted');
+    assert.equal((await skew(RECEIVED - 10_000, { deviceTimestamp })).reason, 'invalid-timestamp');
+  }
+});
+test('R31 N1: the quarantined record keeps the inbox record intact and recoverable once the clocks agree (no tolerance applied)', async () => {
+  const { s } = await skew(RECEIVED - 10_000);
+  const [id] = s.inbox.rows.keys();
+  assert.equal(s.inbox.rows.get(id).rawPersistedAt < RECEIVED, true);
+  assert.equal(s.persistence.measurements.size, 0);
+});
