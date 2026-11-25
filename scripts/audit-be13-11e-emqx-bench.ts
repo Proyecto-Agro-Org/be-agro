@@ -28,7 +28,8 @@ import { INGEST, BUSINESS, SENSOR, LOAD_PUBLISHERS, loadName, startLabConsumer, 
 type Status = 'PASS' | 'FAIL' | 'NO_VERIFICABLE';
 const results: { id: string; name: string; status: Status; metrics?: unknown; note?: string }[] = [];
 const profile = process.env.BE13_11E_PROFILE === 'quick' ? 'quick' : 'full';
-const only = profile === 'quick' ? new Set(['T01', 'T05', 'T19', 'T20']) : null;
+// BE13_11E_ONLY=T16,T17 runs just those scenarios (development aid); the quick profile is the mutation-run subset.
+const only = process.env.BE13_11E_ONLY ? new Set(process.env.BE13_11E_ONLY.split(',')) : profile === 'quick' ? new Set(['T01', 'T05', 'T19', 'T20']) : null;
 class NotVerifiable extends Error {}
 let stage = 'bootstrap';
 async function scenario(id: string, name: string, work: () => Promise<unknown>) {
@@ -379,7 +380,7 @@ async function main() {
       const pub2 = await openPub(a); await publishOnce(pub2!, topicOf(a), Buffer.from('{"version":1,'), 1); pub2!.end(true);
       await sleep(9000); const loopDeliveries = sup.received, restarts = sup.restarts; await sup.stop();
       await discardSession('lab-consumer-1'); main = await startConsumer();      // drains the poison message with ack-and-drop (a fresh clean-start session)
-      assert.ok(loopDeliveries >= 3, 'withhold policy loops on a poison message');
+      assert.ok(loopDeliveries >= 3, 'withhold policy loops on a poison message: ' + JSON.stringify({ loopDeliveries, restarts }));
       return { label: 'LOCAL_LAB_EVIDENCE', ackAndDrop: { sent: 50, received: rx, inbox: 0, redelivered: 0 }, withholdPolicy: { deliveriesOfASinglePoisonMessageIn9s: loopDeliveries, consumerRestarts: restarts },
         finding: 'POISON_LOOP_UNDER_WITHHOLD', rejectedBy: 'boundary payload parser (before verifier and inbox); broker redelivers only if the ACK is withheld' };
     });
