@@ -273,8 +273,8 @@ async function main() {
       await stopConsumer(main!); const c = await startConsumer({ processDelayMs: 150 }); main = c;
       const tag = 't28', { out, probe } = await withProbe(() => load(tag, 2, profile === 'quick' ? 60 : 100)); await verifyTag(tag, out.ids);
       const t = out.ids.map(id => timings.get(id)!), first = Math.min(...t.map(x => x.received)), lastPersisted = Math.max(...t.map(x => x.persisted!)), lastProcessed = Math.max(...t.map(x => x.processed!));
-      const persistedPerS = r1(out.ids.length / ((lastPersisted - first) / 1000)), processedPerS = r1(out.ids.length / ((lastProcessed - first) / 1000));
-      return { label: 'LOCAL_LAB_EVIDENCE', injectedProcessingMs: 150, persistedPerS, processedPerS, ...report(out.ids, out.started, out.ended), probe,
+      const receptionPerS = r1(out.ids.length / ((lastPersisted - first) / 1000)), processingPerS = r1(out.ids.length / ((lastProcessed - first) / 1000));
+      return { label: 'LOCAL_LAB_EVIDENCE', injectedProcessingMs: 150, receptionPerS, processingPerS, ...report(out.ids, out.started, out.ended), probe,
         conclusion: 'reception (persist + ACK) keeps its own rate while the processing of earlier events is still running: post-ACK processing overlaps instead of blocking' };
     });
     if (main) { await stopConsumer(main); main = await startConsumer(); }
