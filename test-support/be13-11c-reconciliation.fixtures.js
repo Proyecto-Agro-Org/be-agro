@@ -15,7 +15,7 @@ export function createInMemoryReconciliationStore(inbox, realm = 'test') {
     async markReceipted({ realm: r, inboxId }) {
       same(r); if (store.failing) throw new Error('store down');
       if (!rawIn(r, inboxId)) throw new Error('RECONCILIATION_RAW_NOT_FOUND');
-      if (!states.has(inboxId)) states.set(inboxId, { status: 'receipted', version: 1 });
+      if (!states.has(inboxId)) states.set(inboxId, { status: 'receipted', version: 1, receiptedAt: inbox.now() });
     },
     async completeFromReceipt({ realm: r, inboxId }) {
       same(r); const s = states.get(inboxId);
@@ -27,18 +27,26 @@ export function createInMemoryReconciliationStore(inbox, realm = 'test') {
       return [...inbox.rows.values()].filter(x => x.realm === realm && x.rawPersistedAt <= inbox.now() - minAgeMs && !states.has(x.inboxId))
         .sort((a, b) => a.rawPersistedAt - b.rawPersistedAt).slice(0, limit).map(x => ({ inboxId: x.inboxId, rawPersistedAt: x.rawPersistedAt }));
     },
+    async listReceiptedCandidates({ realm: r, minAgeMs, limit }) {
+      same(r);
+      return [...states.entries()].filter(([id, s]) => s.status === 'receipted' && rawIn(r, id) && s.receiptedAt + minAgeMs <= inbox.now())
+        .sort((a, b) => a[1].receiptedAt - b[1].receiptedAt).slice(0, limit).map(([id, s]) => ({ inboxId: id, rawPersistedAt: s.receiptedAt }));
+    },
     async count({ realm: r, limit }) {
       same(r); const c = { absent: 0, receipted: 0, claimed: 0, completed: 0 };
       for (const x of [...inbox.rows.values()].filter(x => x.realm === realm).slice(0, limit)) c[states.get(x.inboxId)?.status ?? 'absent'] += 1;
       return c;
     },
-    async claim({ realm: r, inboxId, claimLeaseMs }) {
+    async claim({ realm: r, inboxId, claimLeaseMs, receiptedMinAgeMs }) {
       same(r); if (store.failing) throw new Error('store down');
       if (!rawIn(r, inboxId)) return null;
       await Promise.resolve(); // yield: concurrent claimers interleave; the check-and-set below is atomic (single JS turn)
       const s = states.get(inboxId), token = (++seq).toString(16).padStart(32, '0');
       if (!s) { states.set(inboxId, { status: 'claimed', version: 1, token, claimedAt: inbox.now() }); return { inboxId, token, version: 1 }; }
       if (s.status === 'claimed' && s.claimedAt + claimLeaseMs <= inbox.now()) { Object.assign(s, { version: s.version + 1, token, claimedAt: inbox.now() }); return { inboxId, token, version: s.version }; }
+      if (receiptedMinAgeMs !== undefined && s.status === 'receipted' && s.receiptedAt !== undefined && s.receiptedAt + receiptedMinAgeMs <= inbox.now()) {
+        Object.assign(s, { status: 'claimed', version: s.version + 1, token, claimedAt: inbox.now() }); return { inboxId, token, version: s.version };
+      }
       return null;
     },
     async complete({ realm: r, claim, outcome }) {
@@ -53,12 +61,13 @@ export function createInMemoryReconciliationStore(inbox, realm = 'test') {
 }
 
 // Boundary + inbox + reconciliation store + reconciler (TEST_ONLY policy unless overridden).
-export async function reconciliationSetup({ policy = TEST_ONLY_POLICY, ...rest } = {}) {
+export const TEST_ONLY_RECEIPTED_POLICY = Object.freeze({ mode: 'TEST_ONLY', minAgeMs: 1000 });
+export async function reconciliationSetup({ policy = TEST_ONLY_POLICY, receiptedPolicy, ...rest } = {}) {
   const inbox = createInMemoryBrokerInbox('test');
   const store = createInMemoryReconciliationStore(inbox);
   const s = await boundarySetup({ durableInbox: inbox, ...rest, extra: { ...(rest.extra ?? {}), reconciliationStore: store } });
   const reconciler = createBrokerInboxReconciler({ realm: 'test', admission: s.admission, reconciliationStore: store, reconciliationPolicy: policy,
-    audit: s.deps.audit, metrics: s.deps.metrics, alerts: s.deps.alerts });
+    ...(receiptedPolicy === undefined ? {} : { receiptedRecoveryPolicy: receiptedPolicy }), audit: s.deps.audit, metrics: s.deps.metrics, alerts: s.deps.alerts });
   // N4 helper: persist a delivery whose acknowledgement is lost -> record stored, no receipt, no marker, no processing.
   const orphan = async (d = delivery()) => {
     inbox.loseAck = true;

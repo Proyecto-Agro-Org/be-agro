@@ -33,8 +33,11 @@ export function createMongoBrokerInboxReconciliationStore(options: { connection:
   async function markReceipted(request: { realm: TrustGateRealm; inboxId: string }) {
     sameRealm(request.realm); const id = inboxId.parse(request.inboxId);
     if (!(await rawExists(id))) throw new Error('RECONCILIATION_RAW_NOT_FOUND');
-    // Insert-only: an existing state (claimed/completed) is never touched.
-    await state.updateOne({ _id: id as never, realm }, { $setOnInsert: { status: 'receipted', version: new mongo.Int32(1) } }, { upsert: true, writeConcern, maxTimeMS: 5000 } as never);
+    // Insert-only: an existing state (claimed/completed) is never touched (the upsert collides on _id). receiptedAt is the DATABASE clock.
+    try {
+      await state.updateOne({ _id: id as never, realm, status: { $exists: false } }, [{ $set: { realm: lit(realm), status: lit('receipted'), version: lit(new mongo.Int32(1)),
+        receiptedAt: '$$NOW' } }], { upsert: true, writeConcern, maxTimeMS: 5000 } as never);
+    } catch (error) { if ((error as { code?: number }).code !== 11000) throw error; }
   }
 
   async function completeFromReceipt(request: { realm: TrustGateRealm; inboxId: string }) {
@@ -57,6 +60,13 @@ export function createMongoBrokerInboxReconciliationStore(options: { connection:
     return Object.freeze(rows.map(r => Object.freeze({ inboxId: inboxId.parse(r._id), rawPersistedAt: (r.rawPersistedAt as Date).getTime() })));
   }
 
+  async function listReceiptedCandidates(request: { realm: TrustGateRealm; minAgeMs: number; limit: number }) {
+    sameRealm(request.realm); const minAge = ms.parse(request.minAgeMs), limit = bound.parse(request.limit);
+    const rows = await state.find({ realm, status: 'receipted', $expr: { $lte: ['$receiptedAt', { $subtract: ['$$NOW', minAge] }] } },
+      { projection: { _id: 1, receiptedAt: 1 }, sort: { receiptedAt: 1 }, limit, readConcern, maxTimeMS: 10_000 } as never).toArray();
+    return Object.freeze(rows.map(r => Object.freeze({ inboxId: inboxId.parse(r._id), rawPersistedAt: (r.receiptedAt as Date).getTime() })));
+  }
+
   async function count(request: { realm: TrustGateRealm; limit: number }): Promise<InboxStateCounts> {
     sameRealm(request.realm); const limit = bound.parse(request.limit);
     const rows = await raw.aggregate([
@@ -69,8 +79,9 @@ export function createMongoBrokerInboxReconciliationStore(options: { connection:
     return Object.freeze(c) as unknown as InboxStateCounts;
   }
 
-  async function claim(request: { realm: TrustGateRealm; inboxId: string; claimLeaseMs: number }): Promise<InboxClaim | null> {
+  async function claim(request: { realm: TrustGateRealm; inboxId: string; claimLeaseMs: number; receiptedMinAgeMs?: number }): Promise<InboxClaim | null> {
     sameRealm(request.realm); const id = inboxId.parse(request.inboxId), lease = ms.parse(request.claimLeaseMs);
+    const receiptedAge = request.receiptedMinAgeMs === undefined ? null : ms.parse(request.receiptedMinAgeMs);
     if (!(await rawExists(id))) return null; // a state document only ever exists for a real raw record of THIS realm
     const token = randomBytes(16).toString('hex');
     try {
@@ -86,7 +97,13 @@ export function createMongoBrokerInboxReconciliationStore(options: { connection:
       [{ $set: { version: { $add: ['$version', 1] }, token: lit(token), claimedAt: '$$NOW' } }], { returnDocument: 'after', writeConcern, maxTimeMS: 5000 } as never);
     // The driver answers the updated document itself (or null when the CAS filter matched nothing).
     const version = t !== null && typeof (t as { version?: unknown }).version === 'number' ? (t as unknown as { version: number }).version : null;
-    return version === null ? null : Object.freeze({ inboxId: id, token, version });
+    if (version !== null) return Object.freeze({ inboxId: id, token, version });
+    if (receiptedAge === null) return null;
+    // BE13-11D receipted recovery: ONLY a `receipted` state older than the policy age (database clock) whose holder never completed it.
+    const r = await state.findOneAndUpdate({ _id: id as never, realm, status: 'receipted', receiptedAt: { $exists: true }, $expr: { $lte: [{ $add: ['$receiptedAt', receiptedAge] }, '$$NOW'] } },
+      [{ $set: { status: lit('claimed'), version: { $add: ['$version', 1] }, token: lit(token), claimedAt: '$$NOW' } }], { returnDocument: 'after', writeConcern, maxTimeMS: 5000 } as never);
+    const rv = r !== null && typeof (r as { version?: unknown }).version === 'number' ? (r as unknown as { version: number }).version : null;
+    return rv === null ? null : Object.freeze({ inboxId: id, token, version: rv });
   }
 
   async function complete(request: { realm: TrustGateRealm; claim: InboxClaim; outcome: string }) {
@@ -106,5 +123,5 @@ export function createMongoBrokerInboxReconciliationStore(options: { connection:
     return Object.freeze({ status: d.status, version: d.version, outcome: typeof d.outcome === 'string' ? d.outcome : null });
   }
 
-  return Object.freeze({ markReceipted, completeFromReceipt, listCandidates, count, claim, complete, getState }) as unknown as BrokerInboxReconciliationStore;
+  return Object.freeze({ markReceipted, completeFromReceipt, listCandidates, listReceiptedCandidates, count, claim, complete, getState }) as unknown as BrokerInboxReconciliationStore;
 }

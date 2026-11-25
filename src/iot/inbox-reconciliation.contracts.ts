@@ -20,6 +20,12 @@ export type InboxReconciliationPolicy =
   | { readonly mode: 'BLOCKED'; readonly reason: 'reconciliation-policy-not-decided' }
   | { readonly mode: 'TEST_ONLY' | 'APPROVED'; readonly minAgeMs: number; readonly claimLeaseMs: number; readonly maxBatch: number };
 
+// BE13-11D: a `receipted` record whose consumer died (receipt issued/ACK sent, no completion) must not stay owned by a dead
+// process forever. It becomes recoverable only when THIS policy says so; the productive default is BLOCKED (no age chosen).
+export type ReceiptedDeliveryRecoveryPolicy =
+  | { readonly mode: 'BLOCKED'; readonly reason: 'receipted-recovery-policy-not-decided' }
+  | { readonly mode: 'TEST_ONLY' | 'APPROVED'; readonly minAgeMs: number };
+
 export interface InboxCandidate {
   readonly inboxId: string;
   readonly rawPersistedAt: number;                       // technical instant (server-assigned); no payload, no topic, no client id
@@ -33,12 +39,16 @@ export interface BrokerInboxReconciliationStore {
   markReceipted(request: { readonly realm: TrustGateRealm; readonly inboxId: string }): Promise<void>;
   // receipted -> completed(admission-processed), only if still receipted at version 1 (no token: the caller held the receipt).
   completeFromReceipt(request: { readonly realm: TrustGateRealm; readonly inboxId: string }): Promise<boolean>;
+  // BE13-11D: bounded scan of `receipted` states older than minAgeMs (database clock) whose receipt holder never completed them.
+  listReceiptedCandidates(request: { readonly realm: TrustGateRealm; readonly minAgeMs: number; readonly limit: number }): Promise<readonly InboxCandidate[]>;
   // Bounded, read-only scan of raw records without a state document, older than minAgeMs (database clock).
   listCandidates(request: { readonly realm: TrustGateRealm; readonly minAgeMs: number; readonly limit: number }): Promise<readonly InboxCandidate[]>;
   // Bounded counts by state (inspect-only).
   count(request: { readonly realm: TrustGateRealm; readonly limit: number }): Promise<InboxStateCounts>;
   // CAS claim: succeeds for an absent state, or takes over a claim whose lease (database clock) has expired. At most ONE winner.
-  claim(request: { readonly realm: TrustGateRealm; readonly inboxId: string; readonly claimLeaseMs: number }): Promise<InboxClaim | null>;
+  claim(request: { readonly realm: TrustGateRealm; readonly inboxId: string; readonly claimLeaseMs: number;
+    // BE13-11D: when present, a `receipted` state older than this (database clock) may be taken over. Absent => receipted is never claimable.
+    readonly receiptedMinAgeMs?: number }): Promise<InboxClaim | null>;
   // Fenced completion: only the holder of the current (token, version) can complete. Returns false for a stale holder.
   complete(request: { readonly realm: TrustGateRealm; readonly claim: InboxClaim; readonly outcome: ReconciliationOutcome }): Promise<boolean>;
   getState(request: { readonly realm: TrustGateRealm; readonly inboxId: string }): Promise<{ readonly status: InboxStateStatus; readonly version: number; readonly outcome: string | null } | null>;

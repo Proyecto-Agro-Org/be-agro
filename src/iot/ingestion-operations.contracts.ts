@@ -99,7 +99,9 @@ export type MetricName =
   | 'broker_delivery_total' | 'provenance_result_total' | 'mqtt_boundary_rejected_total'
   | 'broker_inbox_persist_total' | 'broker_inbox_recovery_total' | 'broker_inbox_integrity_failure_total'
   // BE13-11C
-  | 'broker_inbox_reconciliation_total' | 'broker_inbox_orphan_candidate_total';
+  | 'broker_inbox_reconciliation_total' | 'broker_inbox_orphan_candidate_total'
+  // BE13-11D (lab adapter)
+  | 'broker_adapter_connection_total' | 'broker_adapter_delivery_total';
 // Only low-cardinality labels; values are mapped onto closed vocabularies before emission.
 export interface MetricLabels {
   readonly stage?: IngestionStage | 'operations' | 'boundary';
