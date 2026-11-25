@@ -455,7 +455,7 @@ async function main() {
       return { label: 'LOCAL_LAB_EVIDENCE', microbenchmark: rows, auditLatencyDuringTheRun: dist(auditTimings), note: 'every append to one realm stream increments one sequence: measured, not redesigned' };
     });
     await scenario('T22', 'near-limit payload (~3.9 KB of a 4 KB TEST_ONLY limit) vs small payload', async () => {
-      const small = await load('t22s', 2, 100), big = await load('t22b', 2, 100, { pad: 15 });
+      const small = await load('t22s', 2, 100), big = await load('t22b', 2, 100, { pad: 14 });
       await verifyTag('t22s', small.ids); await verifyTag('t22b', big.ids);
       const doc = await inboxRows.aggregate([{ $match: { rawPayloadBytes: { $gt: 3000 } } }, { $limit: 1 }, { $project: { b: '$rawPayloadBytes', s: { $bsonSize: '$$ROOT' } } }]).toArray();
       return { label: 'LOCAL_LAB_EVIDENCE', small: report(small.ids, small.started, small.ended), nearLimit: report(big.ids, big.started, big.ended), nearLimitRawBytes: doc[0]?.b, nearLimitInboxDocBytes: doc[0]?.s };
