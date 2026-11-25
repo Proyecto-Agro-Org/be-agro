@@ -381,6 +381,7 @@ async function main() {
     // ---------------------------------------------------------------- recovery batches (T19, T20)
     await scenario('T19', 'receipted recovery BATCH: consumer process frozen after ACK and killed; recovery of K records by 3 parallel executors', async () => {
       const K = profile === 'quick' ? 8 : 30; await stopConsumer(main!); main = null; await discardSession('lab-consumer-batch');
+      await discardSession('lab-consumer-1');           // an offline persistent session would ALSO queue these messages (fan-out across clientIds, finding F-D7) and process them itself
       const child = spawn(process.execPath, ['dist/scripts/be13-11d/lab-consumer-process.js'], { env: { ...process.env, LAB_CRASH: 'freeze-processing', LAB_BROKER_URL: L.brokerUrl, LAB_CONSUMER_PASSWORD: L.secrets['lab-consumer'], LAB_CLIENT_ID: 'lab-consumer-batch' }, stdio: ['ignore', 'pipe', 'pipe'] });
       children.add(child); let out = ''; child.stdout!.on('data', d => { out += L.scrub(String(d)); }); await waitFor('child-ready', () => out.includes('LAB_CONSUMER_READY'), 30000);
       const tag = 't19', events = mkEvents(tag, 'lab-device-a', K); const ids = events.map(e => e.eventId);
@@ -393,7 +394,7 @@ async function main() {
       const sweeps = await Promise.all([1, 2, 3].map(() => main!.reconciler.reconcileBrokerInbox({ mode: 'reconcile', limit: 100 }))) as unknown as { results: { result: string }[] }[];
       const dur = (performance.now() - t1) / 1000, tally: Record<string, number> = {};
       for (const s of sweeps) for (const r of s.results) tally[r.result] = (tally[r.result] ?? 0) + 1;
-      assert.equal(tally['recovered-and-processed'], K, 'each record recovered exactly once across 3 executors (claim/CAS)');
+      assert.equal(tally['recovered-and-processed'], K, 'each record recovered exactly once across 3 executors (claim/CAS): ' + JSON.stringify(tally));
       assert.equal(await mCountTag(tag), K); await noDuplicateMeasurements();
       const states = await stateRows.find({ status: 'completed', outcome: 'recovered-and-processed' }, majority).toArray(); assert.ok(states.every(s => s.version === 3));
       return { label: 'LOCAL_LAB_EVIDENCE', records: K, recoveryDurationS: r1(dur), recoveredPerS: r1(K / dur), executors: 3, resultTally: tally, measurements: await mCountTag(tag) };
