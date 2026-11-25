@@ -73,6 +73,12 @@ export function account(sent: readonly string[], acked: ReadonlySet<string>, rec
 function noLoss(acc: { lostAfterPuback: number; acked: number }) { if (acc.lostAfterPuback > 0) gaps.push({ id: stage, lostAfterPuback: acc.lostAfterPuback, acked: acc.acked }); }
 
 type MqttClient = { on(e: string, l: (...a: any[]) => void): void; publish(t: string, p: Buffer, o: object, cb: (e: Error | null) => void): void; subscribe(t: string, o: object, cb: (e: Error | null, g?: { qos: number }[]) => void): void; end(force?: boolean, o?: object, cb?: () => void): void }; // eslint-disable-line @typescript-eslint/no-explicit-any
+// The broker's HTTP API can answer before its MQTT listener is back after a restart: a refused CONNECT is retried (bounded), any other error is not.
+async function startConsumerRetrying(o: Parameters<typeof startLabConsumer>[0]): Promise<LabConsumer> {
+  let last: unknown;
+  for (let i = 0; i < 12; i += 1) { try { return await startLabConsumer(o); } catch (e) { last = e; if (!/ECONNREFUSED|CLOSED_BEFORE_READY|ETIMEDOUT/.test(String((e as Error).message))) throw e; await new Promise(r => setTimeout(r, 1500)); } }
+  throw last;
+}
 const consumerId = () => 'lab-consumer-durable';                    // a STABLE client id: a durable session can only be reclaimed with the same id
 
 async function main() {
@@ -277,7 +283,7 @@ async function main() {
         return { ...out, orderInversions: inversions, note: 'no global ordering is promised; this is the observed order for one publisher on one topic' };
       });
       await scenario('D11', 'durable: broker killed mid-flight + END-TO-END durable inbox: duplicates tolerated, EXACTLY ONE measurement per event', async () => {
-        const mk = async () => { const c = await startLabConsumer({ conn: conns[1]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
+        const mk = async () => { const c = await startConsumerRetrying({ conn: conns[1]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
         const c1 = await mk(); await c1.stop(); live.delete(c1); await sleep(300);                      // session created, consumer offline
         const sent = ids('d11', 150), p = await publish(sent, { window: 8 }); await L().kill(); await sleep(1500);
         const c2 = await mk(); await settleCount('d11', p.acked.size); await c2.idle(); await sleep(1500);
@@ -287,7 +293,7 @@ async function main() {
         return { acked: p.acked.size, measurements: m, inboxRecords: inbox, duplicateMeasurements: dup.length, lostAfterPuback: Math.max(0, p.acked.size - m) };
       });
       await scenario('D12', 'durable: broker restart + consumer restart together (persistent session): no loss', async () => {
-        const mk = async () => { const c = await startLabConsumer({ conn: conns[1]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
+        const mk = async () => { const c = await startConsumerRetrying({ conn: conns[1]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
         const c1 = await mk(); const sent = ids('d12', 200);
         const p = await publish(sent, { window: 8, onFirstAcks: { count: 80, run: () => { void c1.stop(); void L().restart(); } } });
         await sleep(2500); live.delete(c1); await waitFor('broker-back', async () => { try { return (await L().api('GET', '/status')).status === 200; } catch { return false; } }, 90000).catch(() => {});
@@ -300,7 +306,7 @@ async function main() {
         const first = await consumerOpen(); await first.close(true); await sleep(300);
         const sent = ids('d13', 60), p = await publish(sent, { window: 8 }); await L().restart(); await sleep(1500);
         await waitHealthy(); const pr = await primaryIndex(), sec = [0, 1, 2].filter(i => i !== pr);
-        const mk = async () => { const c = await startLabConsumer({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
+        const mk = async () => { const c = await startConsumerRetrying({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
         for (const s of sec) chaos(request, 'pause', s);
         let during = 0, unreadable = false;
         try { const c = await mk().catch(() => null); await sleep(9000); during = await mCountTag('d13').catch(() => { unreadable = true; return 0; }); if (c) { await c.stop().catch(() => {}); live.delete(c); } } finally { for (const s of sec) chaos(request, 'unpause', s); }
@@ -329,7 +335,7 @@ async function main() {
       await scenario('D14', 'durable: broker recovered, THEN a Mongo primary failover: exactly one measurement per event', async () => {
         const first = await consumerOpen(); await first.close(true); await sleep(300);
         const sent = ids('d14', 80), p = await publish(sent, { window: 8 }); await L().kill(); await sleep(1500); await waitHealthy();
-        const mk = async () => { const c = await startLabConsumer({ conn: conns[3]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
+        const mk = async () => { const c = await startConsumerRetrying({ conn: conns[3]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
         const c = await mk(); const old = await primaryIndex(); chaos(request, 'stop', old);
         try { await sleep(12000); } finally { chaos(request, 'start', old); } await waitHealthy();
         await c.stop().catch(() => {}); live.delete(c); const c2 = await mk();
