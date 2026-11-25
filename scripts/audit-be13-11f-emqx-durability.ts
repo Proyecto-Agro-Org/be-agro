@@ -303,7 +303,7 @@ async function main() {
         const mk = async () => { const c = await startLabConsumer({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
         for (const s of sec) chaos(request, 'pause', s);
         let during = 0, unreadable = false;
-        try { const c = await mk().catch(() => null); await sleep(9000); during = await mCountTag('d13').catch(() => { unreadable = true; return 0; });  // a majority read cannot even be answered without a majority if (c) { await c.stop().catch(() => {}); live.delete(c); } } finally { for (const s of sec) chaos(request, 'unpause', s); }
+        try { const c = await mk().catch(() => null); await sleep(9000); during = await mCountTag('d13').catch(() => { unreadable = true; return 0; }); if (c) { await c.stop().catch(() => {}); live.delete(c); } } finally { for (const s of sec) chaos(request, 'unpause', s); }
         await waitHealthy(); assert.equal(during, 0, 'nothing was processed without a Mongo majority');
         const c = await mk();
         await waitFor('d13-accounted', async () => (await mCountTag('d13')) + (await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13-' } })) >= p.acked.size, 60000).catch(() => {});
