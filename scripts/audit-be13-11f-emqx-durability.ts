@@ -35,7 +35,7 @@ const only = process.env.BE13_11F_ONLY ? new Set(process.env.BE13_11F_ONLY.split
 async function scenario(id: string, name: string, work: () => Promise<unknown>) {
   if (only && !only.has(id)) return;
   stage = id;
-  try { const evidence = await work(); results.push({ id, name, status: 'PASS', evidence }); console.log('PASS ' + id + ' ' + name + (evidence ? ' ' + JSON.stringify(evidence).slice(0, 420) : '')); }
+  try { const evidence = await Promise.race([work(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error('SCENARIO_TIMEOUT_5MIN')), 300000))]); results.push({ id, name, status: 'PASS', evidence }); console.log('PASS ' + id + ' ' + name + (evidence ? ' ' + JSON.stringify(evidence).slice(0, 420) : '')); }
   catch (error) {
     if (error instanceof NotVerifiable) { results.push({ id, name, status: 'NO_VERIFICABLE', note: error.message }); console.log('NO_VERIFICABLE ' + id + ' ' + name + ' :: ' + error.message); return; }
     const msg = error instanceof Error ? error.message.slice(0, 400) : 'error';
@@ -109,7 +109,8 @@ async function main() {
         const i = next++; if (i >= ids.length) return; const id = ids[i]!;
         if (!client || (client as MqttClient & { isClosed: () => boolean }).isClosed()) { failed += 1; return; }
         const s = performance.now();
-        try { await new Promise<void>((res, rej) => client!.publish(o.topic ?? 'agro/lab/in/a', (o.payloadOf ?? eventBody)(id, i), { qos: 1 }, e => e ? rej(e) : res()));
+        // A PUBACK that never arrives (broker died mid-batch) must not hang the campaign: after 8 s the publish counts as NOT acknowledged.
+        try { await new Promise<void>((res, rej) => { const t = setTimeout(() => rej(new Error('PUBACK_TIMEOUT')), 8000); client!.publish(o.topic ?? 'agro/lab/in/a', (o.payloadOf ?? eventBody)(id, i), { qos: 1 }, e => { clearTimeout(t); if (e) rej(e); else res(); }); });
           acked.add(id); lat.push(performance.now() - s);
           if (o.onFirstAcks && !fired && acked.size >= o.onFirstAcks.count) { fired = true; o.onFirstAcks.run(); } }
         catch { failed += 1; return; }                       // a failed publish is NOT acknowledged: the publisher still owns it

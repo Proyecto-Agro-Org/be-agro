@@ -69,7 +69,8 @@ export async function startEmqxLab(basePort: number, runId: string, loadUsers: r
       '-e', 'EMQX_DASHBOARD__DEFAULT_USERNAME=' + dashUser, '-e', 'EMQX_DASHBOARD__DEFAULT_PASSWORD=' + dashPassword, '-e', 'EMQX_AUTHORIZATION__NO_MATCH=deny',
       ...durableArgs, EMQX_IMAGE);
   };
-  const removeContainer = () => { try { docker('rm', '-f', containerName); } catch { /* already gone */ } };
+  // -v also removes the ANONYMOUS volumes the EMQX image declares (/opt/emqx/data, /opt/emqx/log); without it every run leaks two volumes.
+  const removeContainer = () => { try { docker('rm', '-f', '-v', containerName); } catch { /* already gone */ } };
   const removeVolumes = () => { try { const v = docker('volume', 'ls', '-q', '--filter', 'label=agro.emqx.lab=' + runId).split(/\r?\n/).filter(Boolean); if (v.length) docker('volume', 'rm', '-f', ...v); } catch { /* none */ } };
   const stop = () => { removeContainer(); removeVolumes(); };
   const login = async (attempts: number) => {
