@@ -135,7 +135,8 @@ test('A16 no broker connection, network, credentials, timers-as-workers or env r
     assert.equal(/process\.env|mqtt:\/\/|mqtts:\/\/|wss?:\/\/|from 'mqtt'|emqx|net\.connect|tls\.connect|setInterval|subscribe\(|password\s*[:=]/i.test(src.replace(/\/\/.*$/gm, '')), false, file);
   }
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.equal(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).some(d => /mqtt|emqx/i.test(d)), false);
+  // BE13-11D authorized exactly ONE MQTT client library (lab adapter only); the boundary code above stays free of any broker client.
+  assert.deepEqual(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter(d => /mqtt|emqx/i.test(d)), ['mqtt']);
   const app = readFileSync(new URL('../src/app.ts', import.meta.url), 'utf8');
   for (const t of ['mqtt', 'broker', 'boundary', 'emqx']) assert.equal(app.toLowerCase().includes(t), false, t);
 });
