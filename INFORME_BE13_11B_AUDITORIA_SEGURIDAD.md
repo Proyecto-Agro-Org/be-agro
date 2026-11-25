@@ -54,3 +54,5 @@ Resultado:
 - `app.ts` sin cambios.
 - HTTP 13/13.
 - `productionReady` es el literal `false`.
+
+> **Actualización BE13-11C:** N4 cerrado por reconciliación manual con claim CAS y fencing (ver `INFORME_BE13_11C_AUDITORIA_SEGURIDAD.md`).
