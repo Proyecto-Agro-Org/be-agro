@@ -378,7 +378,8 @@ async function main() {
       // hazard: with the `withhold` lab policy a permanent rejection is NEVER acknowledged, so the broker redelivers it forever
       await stopConsumer(main!); main = null; const sup = await new Supervisor({ poisonPolicy: 'withhold' }).start();
       const pub2 = await openPub(a); await publishOnce(pub2!, topicOf(a), Buffer.from('{"version":1,'), 1); pub2!.end(true);
-      await sleep(9000); const loopDeliveries = sup.received, restarts = sup.restarts; await sup.stop();
+      const rxCount = () => metrics.filter(m => m.name === 'broker_adapter_delivery_total' && (m.labels as { outcome?: string }).outcome === 'received').length, r0 = rxCount();
+      await sleep(9000); const loopDeliveries = rxCount() - r0, restarts = sup.restarts; await sup.stop();
       await discardSession('lab-consumer-1'); main = await startConsumer();      // drains the poison message with ack-and-drop (a fresh clean-start session)
       assert.ok(loopDeliveries >= 3, 'withhold policy loops on a poison message: ' + JSON.stringify({ loopDeliveries, restarts }));
       return { label: 'LOCAL_LAB_EVIDENCE', ackAndDrop: { sent: 50, received: rx, inbox: 0, redelivered: 0 }, withholdPolicy: { deliveriesOfASinglePoisonMessageIn9s: loopDeliveries, consumerRestarts: restarts },

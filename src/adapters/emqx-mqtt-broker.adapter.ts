@@ -163,7 +163,9 @@ export function createEmqxMqttBrokerAdapter(options: EmqxMqttBrokerAdapterOption
     await new Promise<void>((resolve, reject) => {
       c.on('connect', () => { void metric('broker_adapter_connection_total', 'connected'); c.subscribe(options.subscribeTopic ?? topic, { qos: 2 }, error => error ? reject(error) : resolve()); });
       c.on('error', (error: Error) => reject(error));
-      c.on('close', () => { isClosed = true; void metric('broker_adapter_connection_total', 'disconnected'); });
+      // BE13-11E (F-E3): a resumed session can redeliver a withheld message BEFORE the subscription completes; the adapter then drops the
+      // connection, and `start()` would wait forever. A close before readiness rejects, so the caller (supervisor) never hangs.
+      c.on('close', () => { isClosed = true; void metric('broker_adapter_connection_total', 'disconnected'); reject(new Error('LAB_ADAPTER_CLOSED_BEFORE_READY')); });
     });
   }
 

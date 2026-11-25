@@ -77,3 +77,12 @@ test('S06 a rejected post-ACK load (inbox read unavailable) leaves the record RE
   assert.equal(await s.reconciler.reconcileOne(r.receipt.inboxId), 'recovered-and-processed');
   assert.equal(s.persistence.measurements.size, 1);
 });
+
+test('S07 F-E3: if the connection closes before the subscription completes, start() REJECTS instead of hanging forever', async () => {
+  const f = { created: [] };
+  const factory = (url, options) => { const c = new EventEmitter(); c.options = options; c.subscribe = () => {}; /* the subscription never completes */ c.end = (fo, o, cb) => { (typeof cb === 'function' ? cb : o)?.(); };
+    f.created.push(c); setImmediate(() => { c.emit('connect', {}); setImmediate(() => c.emit('close')); }); return c; };
+  const a = createEmqxMqttBrokerAdapter({ brokerUrl: 'mqtt://127.0.0.1:28003', clientId: 'lab-consumer-x', username: 'lab-consumer', password: PW, mqttFactory: factory });
+  await assert.rejects(a.start(async () => decideBrokerAck(1, { status: 'persisted' })), /CLOSED_BEFORE_READY/);
+  assert.equal(a.closed(), true);
+});
