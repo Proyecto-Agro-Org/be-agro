@@ -193,11 +193,15 @@ async function main() {
     }
     // Accounting: every unique event must end as exactly one measurement OR as an open quarantine entry (never missing, never twice).
     const accounting = new Map<string, { unique: number; measurements: number; quarantinedAfterAck: number; missing: number }>();
-    const verifyTag = async (tag: string, ids: string[]) => {
+    const accountFor = async (tag: string, ids: string[]) => {
       const re = { $regex: '^e11e-' + tag + '-' };
       const m = new Set(await measurements.distinct('eventId', { eventId: re }, majority) as string[]), q = new Set(await quarantineRows.distinct('eventId', { eventId: re }) as string[]);
       const missing = ids.filter(id => !m.has(id) && !q.has(id)); const quarantined = ids.filter(id => !m.has(id) && q.has(id));
       accounting.set(tag, { unique: ids.length, measurements: ids.filter(id => m.has(id)).length, quarantinedAfterAck: quarantined.length, missing: missing.length });
+      return { missing, quarantined };
+    };
+    const verifyTag = async (tag: string, ids: string[]) => {
+      const { missing, quarantined } = await accountFor(tag, ids);
       assert.equal(missing.length, 0, 'no event is lost: ' + JSON.stringify(accounting.get(tag)));
       assert.equal(await mCountTag(tag), ids.length - quarantined.length, 'exactly one measurement per materialized event');
       await noDuplicateMeasurements();
@@ -263,10 +267,14 @@ async function main() {
       await stopConsumer(main!); main = null;
       const sup = await new Supervisor().start(); const total = o.total ?? 240;
       let result;
-      try { result = await load(tag, o.pubs ?? 4, total, { window: 8, timeoutMs: 180000, ...(o.allowLoss ? { allowLoss: true } : {}), during: progress => inject(progress, sup) }); }
+      try { result = await load(tag, o.pubs ?? 4, total, { window: 8, timeoutMs: 180000, allowLoss: true, during: progress => inject(progress, sup) }); }
       finally { /* keep the supervisor until verified */ }
       await sleep(1500);
-      const rep = report(result.ids, result.started, result.ended, { publisherErrors: result.errors, consumerRestarts: sup.restarts, reconnectMs: dist(sup.downMs) });
+      // Events ACKed with a durable receipt whose post-ACK processing hit the failure stay RECEIPTED: the receipted recovery (TEST_ONLY policy) resolves them.
+      const incompleteAfterAck = result.ids.filter(id => timings.get(id)?.persisted !== undefined && timings.get(id)?.processed === undefined).length; let sweeps = 0, recovered = 0;
+      for (let i = 0; i < 8; i += 1) { if ((await accountFor(tag, result.ids)).missing.length === 0) break; await sleep(2000); sweeps += 1;
+        const rep0 = await sup.current!.reconciler.reconcileBrokerInbox({ mode: 'reconcile', limit: 200 }) as unknown as { results?: { result: string }[] }; recovered += (rep0.results ?? []).filter(r => r.result === 'recovered-and-processed').length; }
+      const rep = report(result.ids, result.started, result.ended, { publisherErrors: result.errors, consumerRestarts: sup.restarts, reconnectMs: dist(sup.downMs), postAckIncompleteBeforeRecovery: incompleteAfterAck, recoverySweeps: sweeps, recoveredByReceiptedRecovery: recovered });
       const lost = result.ids.filter(id => timings.get(id)?.persisted === undefined).length;   // events that never got a durable receipt at all
       const inboxRecords = await inboxRows.countDocuments({ rawPayloadSha256: { $exists: true } });
       await noDuplicateMeasurements();

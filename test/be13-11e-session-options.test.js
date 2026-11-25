@@ -41,3 +41,39 @@ test('S04 the options cannot weaken the guards: a non-loopback broker or a non-l
   assert.throws(() => make(f, { password: 'real-looking-password-123', receiveMaximum: 5 }), /NOT_TEST_ONLY/);
   assert.equal(f.created.length, 0);
 });
+
+// ---- BE13-11E finding F-E1: post-ACK processing must never mark a record `completed` when nothing was materialized.
+import { reconciliationSetup, TEST_ONLY_RECEIPTED_POLICY } from '../test-support/be13-11c-reconciliation.fixtures.js';
+import { delivery } from '../test-support/be13-11a-broker.fixtures.js';
+import { createInMemoryPersistence, createInMemoryQuarantine } from '../test-support/be13-composition.fixtures.js';
+
+test('S05 F-E1: a result that is `uncertain` (neither measurement nor quarantine could be recorded) leaves the record RECEIPTED, so recovery retries it', async () => {
+  const down = new Error('dependency down'); let failing = false;
+  const inner = createInMemoryPersistence(), innerQuarantine = await createInMemoryQuarantine();
+  const persistence = { ...inner, async persistAtomically(...args) { if (failing) throw down; return inner.persistAtomically(...args); } };
+  const quarantine = { ...innerQuarantine, async record(...args) { if (failing) throw down; return innerQuarantine.record(...args); } };
+  const s = await reconciliationSetup({ receiptedPolicy: TEST_ONLY_RECEIPTED_POLICY, persistence, extra: { quarantine } });
+  const r = await s.admission.admit(delivery(), { mode: 'persist-only' });
+  assert.equal(r.status, 'persisted');
+  failing = true;                                                          // the measurement cannot be written AND neither can the quarantine entry
+  const out = await s.admission.processPersistedBrokerDelivery({ inboxId: r.receipt.inboxId });
+  assert.equal(out.results[0].result.status, 'uncertain');
+  assert.equal((await s.store.getState({ realm: 'test', inboxId: r.receipt.inboxId })).status, 'receipted', 'NOT completed: nothing was materialized');
+  failing = false;                                                         // dependencies recover
+  s.inbox.advance(TEST_ONLY_RECEIPTED_POLICY.minAgeMs + 500);
+  assert.equal(await s.reconciler.reconcileOne(r.receipt.inboxId), 'recovered-and-processed');
+  assert.equal(inner.measurements.size, 1);
+});
+
+test('S06 a rejected post-ACK load (inbox read unavailable) leaves the record RECEIPTED and recoverable', async () => {
+  const s = await reconciliationSetup({ receiptedPolicy: TEST_ONLY_RECEIPTED_POLICY });
+  const r = await s.admission.admit(delivery(), { mode: 'persist-only' });
+  s.inbox.failing = true;
+  const out = await s.admission.processPersistedBrokerDelivery({ inboxId: r.receipt.inboxId });
+  assert.equal(out.reasonCode, 'broker-inbox-unavailable');
+  s.inbox.failing = false;
+  assert.equal((await s.store.getState({ realm: 'test', inboxId: r.receipt.inboxId })).status, 'receipted');
+  s.inbox.advance(TEST_ONLY_RECEIPTED_POLICY.minAgeMs + 500);
+  assert.equal(await s.reconciler.reconcileOne(r.receipt.inboxId), 'recovered-and-processed');
+  assert.equal(s.persistence.measurements.size, 1);
+});

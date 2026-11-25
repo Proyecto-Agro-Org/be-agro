@@ -133,7 +133,11 @@ export async function startLabConsumer(options: { conn: Connection; brokerUrl: s
   const stamp = (d: AdapterObservedDelivery, stage: 'persisted' | 'acked' | 'processed') => { const t = timings?.get(ids.get(d) ?? ''); if (t && t[stage] === undefined) t[stage] = performance.now(); };
   const hooks = options.hooks ?? {};
   const processFromRecord = (inboxId: string, delivery?: AdapterObservedDelivery) => {
-    const p = (async () => { await hooks.beforeProcess?.(); await admission.processPersistedBrokerDelivery({ inboxId }); if (delivery) stamp(delivery, 'processed'); log.push({ at: 'processed', detail: 'ok' }); })()
+    const p = (async () => { await hooks.beforeProcess?.();
+      const res = await admission.processPersistedBrokerDelivery({ inboxId });
+      // BE13-11E: a rejection (inbox unavailable, integrity...) or an `uncertain` result is NOT a processed event: the receipted record waits for recovery.
+      if (res.status !== 'ingested' || res.results.some(x => x.result.status === 'uncertain')) { log.push({ at: 'process-incomplete', detail: res.status === 'rejected' ? res.reasonCode : 'uncertain' }); return; }
+      if (delivery) stamp(delivery, 'processed'); log.push({ at: 'processed', detail: 'ok' }); })()
       .catch(() => { log.push({ at: 'process-failed', detail: 'error' }); });
     pending.add(p); void p.finally(() => pending.delete(p));
   };
