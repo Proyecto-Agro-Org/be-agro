@@ -290,9 +290,14 @@ export function createDurableBrokerAdmissionService(deps: DurableBrokerAdmission
   const inbox = deps?.durableInbox;
   if (typeof inbox?.persistVerifiedDelivery !== 'function' || typeof inbox?.getById !== 'function' || typeof inbox?.ping !== 'function')
     throw new TypeError('Missing durable admission dependency: durableInbox');
+  const rstore = deps.reconciliationStore;
+  if (rstore !== undefined && (typeof rstore.markReceipted !== 'function' || typeof rstore.completeFromReceipt !== 'function')) throw new TypeError('Invalid dependency: reconciliationStore');
   const core = createBoundaryCore(deps);
   const realm = core.realm, metrics = core.metrics, alerts = core.alerts;
   const readiness = describeDurableAdmissionReadiness(deps);
+  // BE13-11C markers (best-effort: a lost marker only makes the record a CANDIDATE; reconciliation is idempotent downstream).
+  const markReceipted = async (inboxId: string) => { if (rstore) { try { await runBounded(() => rstore.markReceipted(freeze({ realm, inboxId })), INBOX_OPERATION_BOUND_MS); } catch { /* candidate */ } } };
+  const markCompleted = async (inboxId: string) => { if (rstore) { try { await runBounded(() => rstore.completeFromReceipt(freeze({ realm, inboxId })), INBOX_OPERATION_BOUND_MS); } catch { /* candidate */ } } };
 
   async function inboxRejection(reasonCode: 'broker-inbox-unavailable' | 'broker-inbox-not-found' | 'broker-inbox-integrity-failed', phase: 'persist' | 'recovery',
     payloadFingerprint: string | null, eventId: string | null): Promise<Rejected> {
@@ -364,6 +369,7 @@ export function createDurableBrokerAdmissionService(deps: DurableBrokerAdmission
     const result = await core.ingestFields(admissionOf(loaded), fields, declared.eventId, record.rawPayloadSha256, freeze({ sourceId: record.sourceId,
       principalReference: record.principalReference, contextFingerprint: record.contextFingerprint, verifierRevision: record.verifierRevision,
       mappingRevision: record.mappingRevision }), receipt);
+    await markCompleted(record.inboxId);
     await core.auditBestEffort('inbox-processed', 'processed', declared.eventId);
     await emitMetric(metrics, 'broker_inbox_recovery_total', { stage: 'boundary', outcome: 'processed' });
     return result;
@@ -391,6 +397,7 @@ export function createDurableBrokerAdmissionService(deps: DurableBrokerAdmission
       receipt = freeze({ ...r.data });
     } catch { return inboxRejection('broker-inbox-unavailable', 'persist', v.payloadFingerprint, v.declared.eventId); }
     // Not confirmed → never reaches the pipeline (above). Confirmed → audit/metrics are best-effort and cannot undo it.
+    await markReceipted(receipt.inboxId);
     await core.auditBestEffort('inbox-persisted', 'persisted', v.declared.eventId);
     await emitMetric(metrics, 'broker_inbox_persist_total', { stage: 'boundary', outcome: 'persisted' });
     if (mode === 'persist-only') return freeze({ status: 'persisted' as const, receipt });

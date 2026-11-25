@@ -63,3 +63,5 @@ Decisión: `ADR_BE13_11B_PERSIST_BEFORE_INGEST.md`. Contratos: `CONTRATO_BE13_11
 | CERRADO | H1 |
 | PENDIENTE (decisión humana) | Retención del inbox, privacidad del payload, revocación, programación de la recuperación, worker, backlog máximo, dimensionamiento, reloj |
 | BLOCKED | EMQX, Atlas, hardware |
+
+> **Actualización BE13-11C:** N4 quedó **CERRADO** para la topología local probada (ver `INFORME_BE13_11C_INBOX_RECONCILIATION.md`). La reconciliación es manual, bloqueada por política por defecto, sin worker.

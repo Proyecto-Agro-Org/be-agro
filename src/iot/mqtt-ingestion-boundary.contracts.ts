@@ -121,6 +121,7 @@ export interface MqttBoundaryReadiness {
   readonly operations: OperationsReadiness;
   readonly limitations: readonly string[];
 }
+import type { BrokerInboxReconciliationStore } from './inbox-reconciliation.contracts.js';
 // ---------------------------------------------------------------- BE13-11B durable broker inbox
 // Only VERIFIED deliveries reach it (built by the boundary after verification + identity mapping). It stores the EXACT
 // bytes; the store generates inboxId and assigns rawPersistedAt server-side ($$NOW) in the durable write.
@@ -168,7 +169,11 @@ export type DurableAdmissionResult =
   | Extract<BoundaryResult, { status: 'rejected' }>
   | { readonly status: 'persisted'; readonly receipt: PersistedBrokerDeliveryReceipt }
   | Extract<BoundaryResult, { status: 'ingested' }>;
-export interface DurableBrokerAdmissionDependencies extends MqttIngestionBoundaryDependencies { readonly durableInbox: DurableBrokerInbox }
+// BE13-11C: the optional reconciliation store records receipt/completion markers (separate collection; the raw record is untouched).
+export interface DurableBrokerAdmissionDependencies extends MqttIngestionBoundaryDependencies {
+  readonly durableInbox: DurableBrokerInbox;
+  readonly reconciliationStore?: BrokerInboxReconciliationStore;
+}
 export interface DurableBrokerAdmissionService {
   readonly realm: TrustGateRealm;
   // verify → persist (majority + j) → receipt → (optionally) process FROM the persisted record.

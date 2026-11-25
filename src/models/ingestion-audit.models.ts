@@ -18,7 +18,9 @@ const actions = ['quarantine-created', 'quarantine-recurred', 'classification-ch
   // BE13-11A — broker boundary
   'broker-provenance-verified', 'broker-provenance-rejected', 'broker-verifier-unavailable', 'broker-delivery-malformed', 'technical-identity-mismatch',
   // BE13-11B — durable inbox
-  'inbox-persisted', 'inbox-recovery-started', 'inbox-recovery-rejected', 'inbox-integrity-failed', 'inbox-processed'];
+  'inbox-persisted', 'inbox-recovery-started', 'inbox-recovery-rejected', 'inbox-integrity-failed', 'inbox-processed',
+  // BE13-11C — inbox reconciliation
+  'inbox-reconciliation-candidate', 'inbox-reconciliation-claimed', 'inbox-reconciliation-completed', 'inbox-reconciliation-stale', 'inbox-reconciliation-integrity-failed'];
 const safeRef = { bsonType: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9:_./-]+$' };
 
 // additionalProperties:false rejects rawPayload, stack, messages, secrets, tokens, URIs.
@@ -60,6 +62,8 @@ export const auditIndexes = [
 export const upgradeAuditValidatorBe1311a = (connection: Connection, prefix: string) => upgradeAuditValidatorBe1310b(connection, prefix);
 // BE13-11B: same additive upgrade (durable inbox actions).
 export const upgradeAuditValidatorBe1311b = upgradeAuditValidatorBe1311a;
+// BE13-11C: same additive upgrade (inbox reconciliation actions).
+export const upgradeAuditValidatorBe1311c = upgradeAuditValidatorBe1311a;
 export async function upgradeAuditValidatorBe1310b(connection: Connection, prefix: string) {
   const n = auditCollections(prefix), db = connection.db;
   if (!db || (await db.listCollections({ name: n.audit }).toArray()).length !== 1) throw new TypeError('Existing audit namespace required');

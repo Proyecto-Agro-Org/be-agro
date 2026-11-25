@@ -39,3 +39,12 @@ Estado actualizado al cierre de BE13-10A (rama local, base `dev` `98dd2d8`). Dec
 3. Bootstrap revisado que inyecte solo implementaciones aprobadas (readiness sin `BLOCKED`).
 4. Política de reintentos (R1), backend de monitoreo, umbrales y enrutamiento de alertas, IdP de operadores, retención del audit.
 5. Campaña equivalente a BE13-06/07 contra la topología objetivo, con credenciales gestionadas fuera del repo.
+
+## BE13-11C — Reconciliación del inbox y contrato del adapter
+
+- [x] N4 (escritura ambigua del inbox) resuelto con reconciliación manual, claim CAS y fencing (local).
+- [ ] Política de reconciliación productiva (intervalo, antigüedad, lease): decisiones 37–39. Hoy BLOCKED.
+- [ ] Semántica de ACK y QoS mínimo (40, 41) y política de mensajes veneno (42).
+- [ ] Registros `receipted` sin dueño (43) y tolerancia de relojes N1 (44).
+- [ ] Adapter EMQX real revisado (parte del TCB); no existe todavía.
+- `productionReady` permanece `false`.

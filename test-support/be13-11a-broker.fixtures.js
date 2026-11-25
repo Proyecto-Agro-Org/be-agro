@@ -12,7 +12,8 @@ import { brokerContextFingerprint, brokerProvenanceFingerprint, payloadSha256 } 
 export function createInMemoryBrokerInbox(realm = 'test', { start = RECEIVED + 3_600_000 } = {}) {
   const rows = new Map(); let seq = 0; let serverClock = start;
   const inbox = {
-    rows, failing: false, answer: null,
+    rows, failing: false, answer: null, loseAck: false,
+    now: () => serverClock, advance(ms) { serverClock += ms; },
     async persistVerifiedDelivery(r) {
       if (inbox.failing) throw new Error('inbox down');
       if (inbox.answer) return typeof inbox.answer === 'function' ? inbox.answer(r) : inbox.answer;
@@ -28,6 +29,7 @@ export function createInMemoryBrokerInbox(realm = 'test', { start = RECEIVED + 3
       serverClock += 1;
       const { rawPayload: _drop, ...rest } = r;
       rows.set(inboxId, { ...rest, inboxId, realm, rawPayload: bytes, rawPayloadBytes: bytes.byteLength, rawPersistedAt: serverClock, provenanceFingerprint });
+      if (inbox.loseAck) throw new Error('acknowledgement lost'); // BE13-11C: the record IS stored, the caller never learns it (N4)
       return { inboxId, realm, rawPersistedAt: serverClock, rawPayloadSha256: sha, rawPayloadBytes: bytes.byteLength, provenanceFingerprint };
     },
     async getById({ realm: r, inboxId }) {
