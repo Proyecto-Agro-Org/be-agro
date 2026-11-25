@@ -60,7 +60,7 @@ try{
   foreach($key in $keys){[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')};$cleanup=$true
   foreach($id in @($nodeIds+@($holderId))){if(-not $id){continue}
     $owned=docker inspect $id|ConvertFrom-Json
-    if($LASTEXITCODE -eq 0 -and $owned.Id -eq $id -and $owned.Config.Labels.'agro.mn.run' -eq $runId){docker rm --force $id|Out-Null;if($LASTEXITCODE -ne 0){$cleanup=$false}}else{$cleanup=$false}}
+    if($LASTEXITCODE -eq 0 -and $owned.Id -eq $id -and $owned.Config.Labels.'agro.mn.run' -eq $runId){docker rm --force --volumes $id|Out-Null;if($LASTEXITCODE -ne 0){$cleanup=$false}}else{$cleanup=$false}}
   if($networkCreated){$network=docker network inspect $resource|ConvertFrom-Json;if($LASTEXITCODE -eq 0 -and $network.Labels.'agro.mn.run' -eq $runId -and @($network.Containers.PSObject.Properties).Count -eq 0){docker network rm $resource|Out-Null;if($LASTEXITCODE -ne 0){$cleanup=$false}}else{$cleanup=$false}}
   $left=@(docker ps -a --filter "label=agro.mn.run=$runId" -q);if($left.Count -gt 0){$cleanup=$false}
   if(-not $cleanup){throw 'Owned resource cleanup unconfirmed'}
