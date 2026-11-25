@@ -29,7 +29,7 @@ type Status = 'PASS' | 'FAIL' | 'NO_VERIFICABLE';
 const results: { id: string; name: string; status: Status; metrics?: unknown; note?: string }[] = [];
 const profile = process.env.BE13_11E_PROFILE === 'quick' ? 'quick' : 'full';
 // BE13_11E_ONLY=T16,T17 runs just those scenarios (development aid); the quick profile is the mutation-run subset.
-const only = process.env.BE13_11E_ONLY ? new Set(process.env.BE13_11E_ONLY.split(',')) : profile === 'quick' ? new Set(['T01', 'T05', 'T19', 'T20']) : null;
+const only = process.env.BE13_11E_ONLY ? new Set(process.env.BE13_11E_ONLY.split(',')) : profile === 'quick' ? new Set(['T01', 'T05', 'T19', 'T20', 'T28']) : null;
 class NotVerifiable extends Error {}
 let stage = 'bootstrap';
 async function scenario(id: string, name: string, work: () => Promise<unknown>) {
@@ -100,10 +100,10 @@ async function main() {
     // ---------------------------------------------------------------- consumers (lab supervisor: NOT a production worker)
     let connRR = 1;
     const nextConn = () => conns[1 + ((connRR++) % 3)]!;
-    const startConsumer = async (o: { clientId?: string; handlerDelayMs?: number; inboxDelayMs?: number; clean?: boolean; subscribeTopic?: string; receiveMaximum?: number; poisonPolicy?: 'ack-and-drop' | 'withhold' } = {}) => {
+    const startConsumer = async (o: { clientId?: string; processDelayMs?: number; handlerDelayMs?: number; inboxDelayMs?: number; clean?: boolean; subscribeTopic?: string; receiveMaximum?: number; poisonPolicy?: 'ack-and-drop' | 'withhold' } = {}) => {
       const extras: LabDepsExtras = { auditTimings, ...(o.inboxDelayMs ? { inboxDelayMs: o.inboxDelayMs } : {}) };
       const c = await startLabConsumer({ conn: nextConn(), brokerUrl: L.brokerUrl, password: L.secrets['lab-consumer']!, metricsSink: metrics, timings, extras,
-        ...(o.clientId ? { clientId: o.clientId } : {}), ...(o.handlerDelayMs ? { handlerDelayMs: o.handlerDelayMs } : {}), ...(o.clean !== undefined ? { clean: o.clean } : {}),
+        ...(o.clientId ? { clientId: o.clientId } : {}), ...(o.processDelayMs ? { hooks: { beforeProcess: () => sleep(o.processDelayMs!) } } : {}), ...(o.handlerDelayMs ? { handlerDelayMs: o.handlerDelayMs } : {}), ...(o.clean !== undefined ? { clean: o.clean } : {}),
         ...(o.subscribeTopic ? { subscribeTopic: o.subscribeTopic } : {}), ...(o.receiveMaximum ? { receiveMaximum: o.receiveMaximum } : {}), ...(o.poisonPolicy ? { poisonPolicy: o.poisonPolicy } : {}) });
       live.add(c); return c;
     };
@@ -267,6 +267,17 @@ async function main() {
     });
     if (main) { await stopConsumer(main); }
     main = await startConsumer();
+
+    // ---------------------------------------------------------------- T28: does a SLOW post-ACK processing block the next reception?
+    await scenario('T28', 'slow post-ACK processing (processor separation lab): 150 ms of processing per event must not block reception', async () => {
+      await stopConsumer(main!); const c = await startConsumer({ processDelayMs: 150 }); main = c;
+      const tag = 't28', { out, probe } = await withProbe(() => load(tag, 2, profile === 'quick' ? 60 : 100)); await verifyTag(tag, out.ids);
+      const t = out.ids.map(id => timings.get(id)!), first = Math.min(...t.map(x => x.received)), lastPersisted = Math.max(...t.map(x => x.persisted!)), lastProcessed = Math.max(...t.map(x => x.processed!));
+      const persistedPerS = r1(out.ids.length / ((lastPersisted - first) / 1000)), processedPerS = r1(out.ids.length / ((lastProcessed - first) / 1000));
+      return { label: 'LOCAL_LAB_EVIDENCE', injectedProcessingMs: 150, persistedPerS, processedPerS, ...report(out.ids, out.started, out.ended), probe,
+        conclusion: 'reception (persist + ACK) keeps its own rate while the processing of earlier events is still running: post-ACK processing overlaps instead of blocking' };
+    });
+    if (main) { await stopConsumer(main); main = await startConsumer(); }
 
     // ---------------------------------------------------------------- failures under load (T08-T11)
     const underLoad = async (tag: string, inject: (progress: () => number, sup: Supervisor) => Promise<void>, o: { pubs?: number; total?: number; allowLoss?: boolean } = {}) => {
