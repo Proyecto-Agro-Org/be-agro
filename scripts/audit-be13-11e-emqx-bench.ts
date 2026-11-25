@@ -231,10 +231,11 @@ async function main() {
       return { label: 'LOCAL_LAB_EVIDENCE', ...report(out.ids, out.started, out.ended), probe };
     });
     await scenario('T05', 'duplicate-heavy load: 50% new events / 50% redeliveries', async () => {
-      const tag = 't05', before = await inboxRows.countDocuments({});
+      const tag = 't05', before = await inboxRows.countDocuments({}), q0 = await quarantineCount();
       const { out, probe } = await withProbe(() => load(tag, 5, TOTAL, { dupRatio: 0.5 }));
       await sleep(1500); await main!.idle();
       await verifyTag(tag, out.ids);
+      assert.equal(await quarantineCount(), q0, 'duplicates are reported as duplicates (idempotency), never as quarantine/conflict');
       const inboxWrites = (await inboxRows.countDocuments({})) - before;
       assert.ok(inboxWrites > out.ids.length, 'duplicates were persisted as separate inbox records (the inbox is insert-only)');
       return { label: 'LOCAL_LAB_EVIDENCE', uniqueEvents: out.ids.length, messagesPublished: inboxWrites, inboxWrites, measurements: await mCountTag(tag), ...report(out.ids, out.started, out.ended), probe };
