@@ -210,7 +210,12 @@ async function main() {
       });
       await scenario('D19', 'durable: authenticator, ACL and rule are RESTORED from the volume after recreate (no reconfiguration)', async () => {
         console.log('D19 step: connecting publisher'); const ok = await pubOpen('lab-device-a'); assert.ok(ok, 'the lab-device-a credential still authenticates after the recreate'); console.log('D19 step: publisher connected');
-        const rx = await consumerOpen(); const sent = ids('d19', 5); const p = await publish(sent, { window: 1 }); await settle(rx, 5); assert.equal(rx.received.size, 5, 'the broker rule still republishes');
+        const rx = await consumerOpen(); const sent = ids('d19', 5); const p = await publish(sent, { window: 1 }); await settle(rx, 5);
+        // what exactly survived a recreate with the same volume? (read-only diagnostics through the management API)
+        const persisted = { rules: (await L().api('GET', '/rules')).body.slice(0, 160), authn: (await L().api('GET', '/authentication')).body.slice(0, 140), authzSources: (await L().api('GET', '/authorization/sources')).body.slice(0, 160),
+          consumerAclRules: (await L().api('GET', '/authorization/sources/built_in_database/rules/users/lab-consumer')).body.slice(0, 160) };
+        console.log('D19 persisted-after-recreate: ' + JSON.stringify(persisted));
+        assert.equal(rx.received.size, 5, 'the broker rule still republishes');
         const denied = await new Promise<number | null>(res => { const t = setTimeout(() => res(-1), 8000); ok!.publish(LAB_VERIFIED_TOPIC, Buffer.from('{}'), { qos: 1 }, e => { clearTimeout(t); res((e as { code?: number } | null)?.code ?? null); }); });
         console.log('D19 step: denied-publish result ' + denied);
         const bad = await pubOpen('lab-device-a', 'lab-device-a', 'labpw-' + '0'.repeat(32));
