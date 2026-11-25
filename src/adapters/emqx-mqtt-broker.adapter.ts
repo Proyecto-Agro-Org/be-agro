@@ -93,6 +93,10 @@ export interface EmqxMqttBrokerAdapterOptions {
   readonly sessionExpirySeconds?: number;                  // TEST_ONLY session setting
   readonly poisonPolicy?: PoisonLabPolicy;                 // TEST_ONLY lab behaviour for permanent rejections (production policy is undecided)
   readonly verifiedTopic?: string;
+  // BE13-11E TEST_ONLY lab profiles (defaults keep the BE13-11D behaviour):
+  readonly subscribeTopic?: string;                        // e.g. a `$share/<group>/agro/lab/verified` filter; deliveries still carry the broker-authored envelope
+  readonly clean?: boolean;                                // false (default) = persistent session; true = clean start (queued QoS1 is NOT kept)
+  readonly receiveMaximum?: number;                        // MQTT5 CONNECT property: how many unacknowledged QoS1/2 the broker may have in flight to this client
   readonly testHooks?: { readonly afterAck?: (delivery: AdapterObservedDelivery) => void; readonly beforeHandler?: (delivery: AdapterObservedDelivery) => void };
 }
 export interface EmqxMqttBrokerAdapter {
@@ -100,6 +104,7 @@ export interface EmqxMqttBrokerAdapter {
   stop(): Promise<void>;
   readonly stats: () => Readonly<Record<'received' | 'acked' | 'withheld' | 'dropped' | 'malformed' | 'qos0', number>>;
   readonly connectionReference: () => string | null;
+  readonly closed: () => boolean;                          // true once the connection closed (the lab supervisor restarts a NEW adapter)
   readonly lastBrokerReceivedAt: () => number | null;
 }
 
@@ -111,7 +116,7 @@ export function createEmqxMqttBrokerAdapter(options: EmqxMqttBrokerAdapterOption
   const clock = options.clock ?? (() => Date.now());
   const poison: PoisonLabPolicy = options.poisonPolicy ?? 'withhold';
   const counters = { received: 0, acked: 0, withheld: 0, dropped: 0, malformed: 0, qos0: 0 };
-  let client: MqttLikeClient | null = null, connectionRef: string | null = null, lastBroker: number | null = null;
+  let client: MqttLikeClient | null = null, connectionRef: string | null = null, lastBroker: number | null = null, isClosed = false;
 
   const metric = (name: 'broker_adapter_connection_total' | 'broker_adapter_delivery_total', outcome: string) => options.metrics ? emitMetric(options.metrics, name, { stage: 'boundary', outcome }) : Promise.resolve();
 
@@ -140,8 +145,8 @@ export function createEmqxMqttBrokerAdapter(options: EmqxMqttBrokerAdapterOption
     };
     const poisonDecision = (qos: 0 | 1 | 2): AckDecision => Object.freeze({ decision: 'poison-policy-undecided' as const, qos });
     const clientOptions: Record<string, unknown> = {
-      protocolVersion: 5, clientId: options.clientId, username: options.username, password: options.password, clean: false, reconnectPeriod: 0,
-      properties: { sessionExpiryInterval: options.sessionExpirySeconds ?? 600 }, customHandleAcks: handleAck,
+      protocolVersion: 5, clientId: options.clientId, username: options.username, password: options.password, clean: options.clean ?? false, reconnectPeriod: 0,
+      properties: { sessionExpiryInterval: options.sessionExpirySeconds ?? 600, ...(options.receiveMaximum === undefined ? {} : { receiveMaximum: options.receiveMaximum }) }, customHandleAcks: handleAck,
     };
     const c = options.mqttFactory(url.toString(), clientOptions);
     client = c;
@@ -156,9 +161,11 @@ export function createEmqxMqttBrokerAdapter(options: EmqxMqttBrokerAdapterOption
       })();
     });
     await new Promise<void>((resolve, reject) => {
-      c.on('connect', () => { void metric('broker_adapter_connection_total', 'connected'); c.subscribe(topic, { qos: 2 }, error => error ? reject(error) : resolve()); });
+      c.on('connect', () => { void metric('broker_adapter_connection_total', 'connected'); c.subscribe(options.subscribeTopic ?? topic, { qos: 2 }, error => error ? reject(error) : resolve()); });
       c.on('error', (error: Error) => reject(error));
-      c.on('close', () => { void metric('broker_adapter_connection_total', 'disconnected'); });
+      // BE13-11E (F-E3): a resumed session can redeliver a withheld message BEFORE the subscription completes; the adapter then drops the
+      // connection, and `start()` would wait forever. A close before readiness rejects, so the caller (supervisor) never hangs.
+      c.on('close', () => { isClosed = true; void metric('broker_adapter_connection_total', 'disconnected'); reject(new Error('LAB_ADAPTER_CLOSED_BEFORE_READY')); });
     });
   }
 
@@ -166,7 +173,7 @@ export function createEmqxMqttBrokerAdapter(options: EmqxMqttBrokerAdapterOption
     const c = client; client = null;
     if (c) await new Promise<void>(resolve => { c.end(true, {}, () => resolve()); });
   }
-  return Object.freeze({ start, stop, stats: () => Object.freeze({ ...counters }), connectionReference: () => connectionRef, lastBrokerReceivedAt: () => lastBroker });
+  return Object.freeze({ start, stop, stats: () => Object.freeze({ ...counters }), connectionReference: () => connectionRef, closed: () => isClosed, lastBrokerReceivedAt: () => lastBroker });
 }
 
 // ---- readiness: laboratory only. productionReady is ALWAYS false -------------------------------------------------------------

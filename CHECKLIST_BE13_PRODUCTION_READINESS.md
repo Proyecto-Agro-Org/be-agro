@@ -58,3 +58,12 @@ Estado actualizado al cierre de BE13-10A (rama local, base `dev` `98dd2d8`). Dec
 - [ ] Edad y ejecutor de la recuperación (37, 38, 47) y fuente de `receivedAt` (36, 44, 50).
 - [ ] Revisión de la dependencia `mqtt` (52) y pruebas de carga (51).
 - `productionReady` permanece `false`.
+
+## BE13-11E — Throughput, sesiones y resiliencia del consumer
+
+- [x] Throughput, serialización de ACK, concurrencia, sesiones y fallos medidos en laboratorio (`LOCAL_LAB_EVIDENCE`).
+- [x] F-E1 y F-E3 corregidos (resultado `uncertain` irrecuperable; `start()` colgable).
+- [ ] Durabilidad de sesiones del broker ante reinicio (59, F-E2 abierto).
+- [ ] Requisitos de throughput, latencia y orden (53, 54, 56) y modelo de concurrencia (55, 57, 58).
+- [ ] Escalado de auditoría e inbox (60, 61) y política de mensajes veneno (62).
+- `productionReady` permanece `false`.

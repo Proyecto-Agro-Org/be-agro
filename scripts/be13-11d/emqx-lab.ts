@@ -16,7 +16,7 @@ export interface EmqxLab {
   readonly containerName: string;
   readonly mqttPort: number;
   readonly brokerUrl: string;
-  readonly secrets: Readonly<Record<LabUser, string>>;
+  readonly secrets: Readonly<Record<string, string>>;
   api(method: string, path: string, body?: unknown): Promise<{ status: number; body: string }>;
   restart(): Promise<void>;
   logs(): string;
@@ -24,10 +24,10 @@ export interface EmqxLab {
   stop(): void;
 }
 
-export async function startEmqxLab(basePort: number, runId: string): Promise<EmqxLab> {
+export async function startEmqxLab(basePort: number, runId: string, loadUsers: readonly string[] = []): Promise<EmqxLab> {
   const mqttPort = basePort + 20, apiPort = basePort + 21;
   const containerName = 'agro-emqx-lab-' + runId.slice(0, 12);
-  const secrets = Object.fromEntries(LAB_USERS.map(u => [u, 'labpw-' + randomBytes(16).toString('hex')])) as Record<LabUser, string>;
+  const secrets = Object.fromEntries([...LAB_USERS, ...loadUsers].map(u => [u, 'labpw-' + randomBytes(16).toString('hex')])) as Record<string, string>;
   const dashUser = 'dash-' + randomBytes(5).toString('hex'), dashPassword = 'labpw-' + randomBytes(16).toString('hex');
   const all = [...Object.values(secrets), dashPassword];
   const scrub = (text: string) => all.reduce((t, s) => t.split(s).join('***'), text);
@@ -50,7 +50,7 @@ export async function startEmqxLab(basePort: number, runId: string): Promise<Emq
     if (!token) throw new Error('EMQX_LAB_NOT_READY');
     const must = async (what: string, r: Promise<{ status: number; body: string }>, ok: number[]) => { const x = await r; if (!ok.includes(x.status)) throw new Error('EMQX_LAB_CONFIG_FAILED_' + what + '_' + x.status); };
     await must('authn', api('POST', '/authentication', { mechanism: 'password_based', backend: 'built_in_database', user_id_type: 'username', password_hash_algorithm: { name: 'sha256', salt_position: 'suffix' } }), [200, 201]);
-    for (const u of LAB_USERS) await must('user', api('POST', '/authentication/password_based:built_in_database/users', { user_id: u, password: secrets[u] }), [201]);
+    for (const u of [...LAB_USERS, ...loadUsers]) await must('user', api('POST', '/authentication/password_based:built_in_database/users', { user_id: u, password: secrets[u]! }), [201]);
     await must('authz-source', api('POST', '/authorization/sources', { type: 'built_in_database', enable: true }), [204]);
     await must('authz-file-off', api('DELETE', '/authorization/sources/file'), [204]);          // the default file source would allow everything from loopback
     const pub = (topic: string) => ({ action: 'publish', permission: 'allow', topic, qos: [0, 1, 2], retain: 'all' });
@@ -58,8 +58,10 @@ export async function startEmqxLab(basePort: number, runId: string): Promise<Emq
       { username: 'lab-device-a', rules: [pub('agro/lab/in/a'), pub('agro/lab/in/production/a')] },
       { username: 'lab-device-b', rules: [pub('agro/lab/in/b')] },
       { username: 'lab-attacker', rules: [pub('agro/lab/in/#')] },
-      { username: 'lab-consumer', rules: [{ action: 'subscribe', permission: 'allow', topic: LAB_VERIFIED_TOPIC, qos: [0, 1, 2] }] },
+      { username: 'lab-consumer', rules: [{ action: 'subscribe', permission: 'allow', topic: LAB_VERIFIED_TOPIC, qos: [0, 1, 2] }, { action: 'subscribe', permission: 'allow', topic: '$share/lab/' + LAB_VERIFIED_TOPIC, qos: [0, 1, 2] }] },
     ]), [204]);
+    // BE13-11E: each synthetic load publisher may publish ONLY to its own routing topic (the topic is routing, never identity).
+    for (let i = 0; i < loadUsers.length; i += 50) await must('acl-load', api('POST', '/authorization/sources/built_in_database/rules/users', loadUsers.slice(i, i + 50).map(u => ({ username: u, rules: [pub('agro/lab/in/load/' + u)] }))), [204]);
     // The broker authors the publisher facts: nobody can publish to the verified topic (ACL), so only this rule can write to it.
     await must('rule', api('POST', '/rules', { id: 'lab_verify', sql: 'SELECT clientid, username, qos, topic, flags.retain AS retain, publish_received_at, base64_encode(payload) AS payload_b64 FROM "agro/lab/in/#"',
       actions: [{ function: 'republish', args: { topic: LAB_VERIFIED_TOPIC, qos: '${qos}', retain: false, payload: '${.}' } }] }), [201]);

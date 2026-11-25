@@ -14,6 +14,7 @@ async function main() {
   const hooks: LabConsumerHooks = {};
   if (crash === 'before-persist') hooks.beforePersist = die;
   if (crash === 'after-persist') hooks.afterPersist = die;                            // record durable + receipted, ACK never sent
+  if (crash === 'freeze-processing') hooks.beforeProcess = () => new Promise<void>(() => { /* BE13-11E: acked + receipted forever; the parent kills this process */ });
   if (crash === 'after-ack') hooks.beforeProcess = async () => { await sleep(500); die(); };   // PUBACK flushed, measurement never written
   const conn = await connectMultiNode(request);
   const sink: { name: string; labels: object }[] = [];

@@ -369,7 +369,10 @@ export function createDurableBrokerAdmissionService(deps: DurableBrokerAdmission
     const result = await core.ingestFields(admissionOf(loaded), fields, declared.eventId, record.rawPayloadSha256, freeze({ sourceId: record.sourceId,
       principalReference: record.principalReference, contextFingerprint: record.contextFingerprint, verifierRevision: record.verifierRevision,
       mappingRevision: record.mappingRevision }), receipt);
-    await markCompleted(record.inboxId);
+    // BE13-11E (F-E1): only mark the receipt `completed` when every field ended as a measurement, a duplicate or an OPEN quarantine entry.
+    // An `uncertain` result means NOTHING was recorded (measurement and quarantine both unavailable): the record must stay `receipted`
+    // so the receipted recovery can retry it. Marking it completed would make the event unrecoverable.
+    if (result.results.every(r => r.result.status !== 'uncertain')) await markCompleted(record.inboxId);
     await core.auditBestEffort('inbox-processed', 'processed', declared.eventId);
     await emitMetric(metrics, 'broker_inbox_recovery_total', { stage: 'boundary', outcome: 'processed' });
     return result;
