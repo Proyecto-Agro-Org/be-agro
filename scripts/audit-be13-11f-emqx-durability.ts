@@ -313,7 +313,10 @@ async function main() {
         const mk = async () => { const c = await startConsumerRetrying({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
         const termBefore = ((await status()) as { term?: number }).term; mark('mongo secondaries paused'); for (const s of sec) chaos(request, 'pause', s);
         let during = 0, unreadable = false;
-        try { const c = await mk().catch(() => null); await sleep(4000); during = await mCountTag('d13').catch(() => { unreadable = true; return 0; }); if (c) { await c.stop().catch(() => {}); live.delete(c); } } finally { for (const s of sec) chaos(request, 'unpause', s); mark('unpaused'); }
+        let started: Promise<LabConsumer | null> | null = null;
+        // the pause lasts EXACTLY 4000 ms: the consumer is started in the background and every read is bounded (a blocked driver call must not stretch the outage)
+        try { started = mk().catch(() => null); await sleep(4000); during = await bounded(mCountTag('d13'), 3000).catch(() => { unreadable = true; return 0; }); } finally { for (const s of sec) chaos(request, 'unpause', s); mark('unpaused'); }
+        { const c = await started; if (c) { await c.stop().catch(() => {}); live.delete(c); } }
         await waitHealthy(); const termAfter0 = ((await status()) as { term?: number }).term; void termAfter0; const termAfter = ((await status()) as { term?: number }).term; assert.equal(during, 0, 'nothing was processed without a Mongo majority');
         // A consumer that withholds an ACK drops its connection (the adapter never reconnects by itself): a supervisor restarts it, as in 11E.
         const withheld0 = metrics.filter(x => x.name === 'broker_adapter_delivery_total' && (x.labels as { outcome?: string }).outcome === 'withheld').length; let attempts = 0;
@@ -343,7 +346,10 @@ async function main() {
         const mk = async () => { const c = await startConsumerRetrying({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
         const termBefore = ((await status()) as { term?: number }).term; mark('mongo secondaries paused'); for (const s of sec) chaos(request, 'pause', s);
         let during = 0, unreadable = false;
-        try { const c = await mk().catch(() => null); await sleep(14000); during = await mCountTag('d13b').catch(() => { unreadable = true; return 0; }); if (c) { await c.stop().catch(() => {}); live.delete(c); } } finally { for (const s of sec) chaos(request, 'unpause', s); mark('unpaused'); }
+        let started: Promise<LabConsumer | null> | null = null;
+        // the pause lasts EXACTLY 14000 ms: the consumer is started in the background and every read is bounded (a blocked driver call must not stretch the outage)
+        try { started = mk().catch(() => null); await sleep(14000); during = await bounded(mCountTag('d13b'), 3000).catch(() => { unreadable = true; return 0; }); } finally { for (const s of sec) chaos(request, 'unpause', s); mark('unpaused'); }
+        { const c = await started; if (c) { await c.stop().catch(() => {}); live.delete(c); } }
         await waitHealthy(); const termAfter = ((await status()) as { term?: number }).term; assert.equal(during, 0, 'nothing was processed without a Mongo majority');
         // A consumer that withholds an ACK drops its connection (the adapter never reconnects by itself): a supervisor restarts it, as in 11E.
         const withheld0 = metrics.filter(x => x.name === 'broker_adapter_delivery_total' && (x.labels as { outcome?: string }).outcome === 'withheld').length; let attempts = 0;
