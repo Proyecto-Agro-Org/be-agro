@@ -20,6 +20,7 @@ import { brokerInboxStateCollection, provisionBrokerInboxStateCollection } from 
 import { loadMqttJsFactory } from '../src/adapters/emqx-mqtt-connect.js';
 import { assertLoopbackBrokerUrl, describeEmqxLocalLabReadiness } from '../src/adapters/emqx-mqtt-broker.adapter.js';
 import { startEmqxLab, labContainersRemaining, EMQX_IMAGE, type EmqxLab } from './be13-11d/emqx-lab.js';
+import { createMongoBrokerInboxReconciliationStore } from '../src/repositories/mongo-broker-inbox-reconciliation.store.js';
 import { SENSOR, BUSINESS, INGEST, startLabConsumer, type LabConsumer, type MetricSink } from './be13-11d/lab-consumer.js';
 
 type Status = 'PASS' | 'FAIL' | 'NO_VERIFICABLE';
@@ -91,8 +92,8 @@ async function main() {
     lab = await startEmqxLab(request.basePort, request.runId);
     const L = lab;
     assertLoopbackBrokerUrl(L.brokerUrl);
-    const publish = async (user: 'lab-device-a' | 'lab-device-b' | 'lab-attacker', o: { topic: string; payload: Buffer | string; qos?: 0 | 1 | 2; retain?: boolean; clientId?: string; password?: string }): Promise<PubResult> => {
-      const client = mqttFactory(L.brokerUrl, { protocolVersion: 5, clientId: o.clientId ?? user, username: user, password: o.password ?? L.secrets[user], clean: true, reconnectPeriod: 0 }) as unknown as {
+    const publish = async (user: string, o: { topic: string; payload: Buffer | string; qos?: 0 | 1 | 2; retain?: boolean; clientId?: string; password?: string }): Promise<PubResult> => {
+      const client = mqttFactory(L.brokerUrl, { protocolVersion: 5, clientId: o.clientId ?? user, username: user, password: o.password ?? L.secrets[user as 'lab-device-a'] ?? 'labpw-' + '1'.repeat(32), clean: true, reconnectPeriod: 0 }) as unknown as {
         on(e: string, l: (...a: any[]) => void): void; publish(t: string, p: Buffer | string, opts: object, cb: (e: Error | null, packet?: { reasonCode?: number }) => void): void; end(force?: boolean, opts?: object, cb?: () => void): void };
       const out: PubResult = { connected: false, connectError: null, publishError: null, reasonCode: null };
       const ok = await new Promise<boolean>(res => { client.on('connect', () => res(true)); client.on('error', (e: Error) => { out.connectError = L.scrub(e.message); res(false); }); setTimeout(() => res(false), 8000); });
@@ -130,10 +131,17 @@ async function main() {
       assert.deepEqual([r.connected, /Bad User Name or Password/.test(r.connectError ?? '')], [false, true]);
       await sleep(800);
       assert.deepEqual([main.adapter.stats().received, await iCount(ids), await mCount(ids)], [before, 0, 0]);
+      // credential stuffing fixture: 6 more attempts (wrong passwords for real users, unknown users): all refused by the broker
+      const attempts = [['lab-device-a', 'labpw-' + '2'.repeat(32)], ['lab-device-b', 'labpw-' + '3'.repeat(32)], ['lab-attacker', 'labpw-' + '4'.repeat(32)], ['lab-consumer', 'labpw-' + '5'.repeat(32)],
+        ['lab-ghost', 'labpw-' + '6'.repeat(32)], ['', 'labpw-' + '7'.repeat(32)]] as const;
+      for (const [u, pw] of attempts) { const x = await publish(u || 'lab-nameless', { topic: TOPIC_A, payload: body('lab-device-a', ev('e02s')), password: pw }); assert.equal(x.connected, false, u); }
+      await sleep(500);
+      assert.equal(main.adapter.stats().received, before);
+      return { stuffingAttempts: attempts.length + 1, allRefusedByBroker: true };
     });
     await check('E03/E26/E27', 'authenticated but UNMAPPED principal (attacker): no inbox, no quarantine, no measurement', async () => {
       const q0 = await quarantineCount(), i0 = await inboxRows.countDocuments({}), ids = ev('e03'); track.attackerEvents.push(ids);
-      const r = await publish('lab-attacker', { topic: TOPIC_A, payload: body('lab-device-a', ids), qos: 1 });
+      const r = await publish('lab-attacker', { topic: TOPIC_A, payload: body('lab-device-a', ids), qos: 1, clientId: 'lab-device-a' });   // strongest form: the unmapped principal also claims A's client id
       assert.equal(r.connected, true);
       await waitFor('e03-seen', async () => main.log.some(l => l.at === 'persist' && l.detail === 'broker-principal-unknown'));
       assert.deepEqual([await iCount(ids), await mCount(ids), await inboxRows.countDocuments({}), await quarantineCount()], [0, 0, i0, q0]);
@@ -223,6 +231,21 @@ async function main() {
         assert.equal(await inboxRows.countDocuments({}), i0);
       });
     }
+    await check('E15b', 'malformed UTF-8 bytes and nested dangerous keys are rejected before the verifier/inbox', async () => {
+      const i0 = await inboxRows.countDocuments({});
+      for (const [payload, reason] of [[Buffer.from([0x7b, 0xff, 0xfe, 0x7d]), 'payload-invalid-utf8'], [Buffer.from('{"version":1,"payload":{"a":{"constructor":{"prototype":{}}}}}'), 'payload-dangerous-key']] as const) {
+        const seen0 = main.log.filter(l => l.detail === reason).length;
+        await publish('lab-device-a', { topic: TOPIC_A, payload, qos: 1 });
+        await waitFor('e15b-' + reason, async () => main.log.filter(l => l.detail === reason).length > seen0);
+      }
+      assert.equal(await inboxRows.countDocuments({}), i0);
+    });
+    await check('E37', 'session/identity reuse: B credentials with the client id of A and A body → rejected; the principal always comes from the CURRENT broker authentication', async () => {
+      const ids = ev('e37'), i0 = await inboxRows.countDocuments({}), seen0 = main.log.filter(l => l.detail === 'technical-identity-mismatch').length;
+      await publish('lab-device-b', { topic: TOPIC_B, payload: body('lab-device-a', ids), clientId: 'lab-device-a', qos: 1 });
+      await waitFor('e37-seen', async () => main.log.filter(l => l.detail === 'technical-identity-mismatch').length > seen0);
+      assert.deepEqual([await iCount(ids), await mCount(ids), await inboxRows.countDocuments({})], [0, 0, i0]);
+    });
     await check('E31', 'QoS2 smoke (coverage, not a requirement): deferred PUBREC after the durable receipt', async () => {
       const ids = ev('e31'); track.aEvents.push(ids);
       const r = await publish('lab-device-a', { topic: TOPIC_A, payload: body('lab-device-a', ids), qos: 2 });
@@ -276,6 +299,13 @@ async function main() {
       main = await startConsumer(conns[2]!);
       await sleep(3500);                                                       // a redelivery would show up here
       assert.deepEqual([await iCount(ids20), await mCount(ids20)], [1, 0]);
+    });
+    await check('E21c', 'cross-realm receipted recovery: a store bound to realm preview can neither list nor claim the dead owner\'s test record', async () => {
+      const preview = createMongoBrokerInboxReconciliationStore({ connection: conns[5]!, prefix: INGEST, realm: 'preview' });
+      await sleep(1700);
+      assert.deepEqual(await preview.listReceiptedCandidates({ realm: 'preview', minAgeMs: 0, limit: 50 }), []);
+      assert.equal(await preview.claim({ realm: 'preview', inboxId: id20, claimLeaseMs: 1000, receiptedMinAgeMs: 0 }), null);
+      assert.equal(((await stateRows.findOne({ _id: id20 as never }, majority)) as unknown as { status: string }).status, 'receipted');
     });
     await check('E21/E22', 'receipted recovery (TEST_ONLY policy): the dead owner\'s record is recovered ONCE; a second recovery is duplicate-safe', async () => {
       const rec = main.reconciler;
