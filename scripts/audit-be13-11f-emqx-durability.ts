@@ -315,8 +315,8 @@ async function main() {
         const withheld0 = metrics.filter(x => x.name === 'broker_adapter_delivery_total' && (x.labels as { outcome?: string }).outcome === 'withheld').length; let attempts = 0;
         const accounted = async () => (await mCountTag('d13')) + (await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13-' } }));
         const mStart = metrics.length; let c = await mk();
-        for (; attempts < 8 && (await accounted()) < p.acked.size; attempts += 1) {
-          await waitFor('d13-accounted', async () => (await accounted()) >= p.acked.size, 20000).catch(() => {});
+        for (; attempts < 4 && (await accounted()) < p.acked.size; attempts += 1) {
+          await waitFor('d13-accounted', async () => (await accounted()) >= p.acked.size, 15000).catch(() => {});
           if ((await accounted()) >= p.acked.size) break;
           await c.stop().catch(() => {}); live.delete(c); await sleep(1500); c = await mk();
         }
