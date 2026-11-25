@@ -283,7 +283,7 @@ async function main() {
         const c2 = await mk(); await settleCount('d11', p.acked.size); await c2.idle(); await sleep(1500);
         const m = await mCountTag('d11'), inbox = await inboxRows.countDocuments({}), dup = await measurements.aggregate([{ $group: { _id: { e: '$eventId', f: '$field' }, n: { $sum: 1 } } }, { $match: { n: { $gt: 1 } } }]).toArray();
         await c2.stop(); live.delete(c2);
-        noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m), acked: p.acked.size }); assert.ok(m <= p.acked.size, 'never more measurements than events'); assert.equal(dup.length, 0, 'no second measurement');
+        noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m), acked: p.acked.size }); assert.ok(m <= sent.length, 'never more measurements than events SENT (an event whose PUBACK was lost may still have been stored)'); assert.equal(dup.length, 0, 'no second measurement');
         return { acked: p.acked.size, measurements: m, inboxRecords: inbox, duplicateMeasurements: dup.length, lostAfterPuback: Math.max(0, p.acked.size - m) };
       });
       await scenario('D12', 'durable: broker restart + consumer restart together (persistent session): no loss', async () => {
@@ -293,7 +293,7 @@ async function main() {
         await sleep(2500); live.delete(c1); await waitFor('broker-back', async () => { try { return (await L().api('GET', '/status')).status === 200; } catch { return false; } }, 90000).catch(() => {});
         const c2 = await mk(); await settleCount('d12', p.acked.size); await c2.idle(); await sleep(1500);
         const m = await mCountTag('d12'); await c2.stop(); live.delete(c2);
-        noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m), acked: p.acked.size }); assert.ok(m <= p.acked.size);
+        noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m), acked: p.acked.size }); assert.ok(m <= sent.length);
         return { acked: p.acked.size, measurements: m, lostAfterPuback: Math.max(0, p.acked.size - m), publisherFailedDuringRestart: p.failed };
       });
       await scenario('D13', 'durable: broker restart + MONGO without majority: the consumer cannot persist, does not ACK, the broker keeps the messages; after healing everything is processed', async () => {
