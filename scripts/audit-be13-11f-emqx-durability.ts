@@ -214,6 +214,8 @@ async function main() {
         // what exactly survived a recreate with the same volume? (read-only diagnostics through the management API)
         const persisted = { rules: (await L().api('GET', '/rules')).body.slice(0, 160), authn: (await L().api('GET', '/authentication')).body.slice(0, 140), authzSources: (await L().api('GET', '/authorization/sources')).body.slice(0, 160),
           consumerAclRules: (await L().api('GET', '/authorization/sources/built_in_database/rules/users/lab-consumer')).body.slice(0, 160) };
+        const ruleMetrics = (await L().api('GET', '/rules/lab_verify/metrics')).body.slice(0, 260);
+        console.log('D19 publisherAcked=' + p.acked.size + ' publisherFailed=' + p.failed + ' consumerReceived=' + rx.received.size + ' sessionPresent=' + rx.sessionPresent + ' ruleMetrics=' + ruleMetrics);
         console.log('D19 persisted-after-recreate: ' + JSON.stringify(persisted));
         assert.equal(rx.received.size, 5, 'the broker rule still republishes');
         const denied = await new Promise<number | null>(res => { const t = setTimeout(() => res(-1), 8000); ok!.publish(LAB_VERIFIED_TOPIC, Buffer.from('{}'), { qos: 1 }, e => { clearTimeout(t); res((e as { code?: number } | null)?.code ?? null); }); });
