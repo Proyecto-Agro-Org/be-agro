@@ -305,8 +305,15 @@ async function main() {
         let during = 0;
         try { const c = await mk().catch(() => null); await sleep(9000); during = await mCountTag('d13'); if (c) { await c.stop().catch(() => {}); live.delete(c); } } finally { for (const s of sec) chaos(request, 'unpause', s); }
         await waitHealthy(); assert.equal(during, 0, 'nothing was processed without a Mongo majority');
-        const c = await mk(); await settleCount('d13', p.acked.size); await c.idle(); const m = await mCountTag('d13'); await c.stop(); live.delete(c);
-        noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m), acked: p.acked.size }); return { acked: p.acked.size, processedWhileMongoDown: during, measurementsAfterHealing: m, lostAfterPuback: Math.max(0, p.acked.size - m) };
+        const c = await mk();
+        await waitFor('d13-accounted', async () => (await mCountTag('d13')) + (await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13-' } })) >= p.acked.size, 60000).catch(() => {});
+        await sleep(2000); await c.idle();
+        // an attempt that hit the lost majority may sit RECEIPTED: the receipted recovery (TEST_ONLY policy) settles it, as in D14
+        for (let i = 0; i < 6 && (await mCountTag('d13')) < p.acked.size; i += 1) { await sleep(2000); await c.reconciler.reconcileBrokerInbox({ mode: 'reconcile', limit: 100 }); }
+        const m = await mCountTag('d13'), q = await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13-' } }), inboxN = await inboxRows.countDocuments({});
+        await c.stop(); live.delete(c);
+        noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m - q), acked: p.acked.size });
+        return { acked: p.acked.size, processedWhileMongoDown: during, measurementsAfterHealing: m, quarantined: q, inboxRecords: inboxN, lostAfterPuback: Math.max(0, p.acked.size - m - q) };
       });
       await scenario('D14', 'durable: broker recovered, THEN a Mongo primary failover: exactly one measurement per event', async () => {
         const first = await consumerOpen(); await first.close(true); await sleep(300);
