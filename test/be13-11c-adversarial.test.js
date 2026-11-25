@@ -161,7 +161,10 @@ test('A16 structural: no worker, scheduler, polling, broker client, env, delete 
   const app = readFileSync(new URL('../src/app.ts', import.meta.url), 'utf8').toLowerCase();
   for (const t of ['inbox', 'broker', 'mqtt', 'reconcil']) assert.equal(app.includes(t), false, t);
   const pkg = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
-  assert.equal(/"(mqtt|mqtt\.js|emqx[^"]*)"/i.test(pkg), false);
+  // BE13-11D authorized exactly ONE MQTT client library (pinned); no EMQX SDK and no second client.
+  const deps = Object.keys({ ...JSON.parse(pkg).dependencies, ...JSON.parse(pkg).devDependencies });
+  assert.deepEqual(deps.filter(d => /mqtt|emqx|aedes|paho/i.test(d)), ['mqtt']);
+  assert.equal(JSON.parse(pkg).dependencies.mqtt, '5.16.1');
 });
 
 test('A17 the reconciler never invents authority: it cannot process a record outside the persisted bytes (no payload argument exists)', async () => {

@@ -3,7 +3,7 @@ import { isBlockingPlaceholder } from '../adapters/ingestion-production-placehol
 import { emitAlert, emitMetric } from '../iot/ingestion-observability.js';
 import type { AuditAction, IngestionAlertPort, IngestionAuditStore, IngestionMetricsPort } from '../iot/ingestion-operations.contracts.js';
 import {
-  MAX_RECONCILE_LIMIT, type BrokerInboxReconciler, type BrokerInboxReconciliationStore, type InboxClaim, type InboxReconciliationPolicy, type ReconcileBlocked,
+  MAX_RECONCILE_LIMIT, type ReceiptedDeliveryRecoveryPolicy, type BrokerInboxReconciler, type BrokerInboxReconciliationStore, type InboxClaim, type InboxReconciliationPolicy, type ReconcileBlocked,
   type ReconcileOptions, type ReconcileReport, type ReconciliationOutcome, type ReconciliationResultCode,
 } from '../iot/inbox-reconciliation.contracts.js';
 import type { DurableBrokerAdmissionService } from '../iot/mqtt-ingestion-boundary.contracts.js';
@@ -19,6 +19,7 @@ import { runBounded } from './authority-call.js';
 const inboxIdSchema = z.string().regex(/^ib_[0-9a-f]{32}$/);
 const policySchema = z.object({ mode: z.enum(['TEST_ONLY', 'APPROVED']), minAgeMs: z.number().int().min(0), claimLeaseMs: z.number().int().min(0),
   maxBatch: z.number().int().min(1).max(MAX_RECONCILE_LIMIT) }).strict();
+const receiptedPolicySchema = z.object({ mode: z.enum(['TEST_ONLY', 'APPROVED']), minAgeMs: z.number().int().min(0) }).strict();
 const optionsSchema = z.object({ mode: z.enum(['inspect-only', 'reconcile']), limit: z.number().int().min(1).max(MAX_RECONCILE_LIMIT) }).strict();
 // Store answers are validated like any other authority answer (a hostile or malformed answer is never trusted).
 const claimSchema = z.object({ inboxId: inboxIdSchema, token: z.string().regex(/^[0-9a-f]{32}$/), version: z.number().int().min(1) }).strict();
@@ -34,6 +35,7 @@ export interface BrokerInboxReconcilerDependencies {
   readonly admission: DurableBrokerAdmissionService;
   readonly reconciliationStore: BrokerInboxReconciliationStore;
   readonly reconciliationPolicy: unknown;
+  readonly receiptedRecoveryPolicy?: unknown;   // BE13-11D; absent or invalid => BLOCKED
   readonly audit: IngestionAuditStore;
   readonly metrics: IngestionMetricsPort;
   readonly alerts: IngestionAlertPort;
@@ -52,6 +54,10 @@ export function createBrokerInboxReconciler(deps: BrokerInboxReconcilerDependenc
   const parsed = !isBlockingPlaceholder(deps.reconciliationPolicy) ? policySchema.safeParse(deps.reconciliationPolicy) : null;
   const policy: InboxReconciliationPolicy = parsed?.success ? freeze({ ...parsed.data })
     : freeze({ mode: 'BLOCKED' as const, reason: 'reconciliation-policy-not-decided' as const });
+
+  const rParsed = !isBlockingPlaceholder(deps.receiptedRecoveryPolicy) ? receiptedPolicySchema.safeParse(deps.receiptedRecoveryPolicy) : null;
+  const receiptedPolicy: ReceiptedDeliveryRecoveryPolicy = rParsed?.success ? freeze({ ...rParsed.data })
+    : freeze({ mode: 'BLOCKED' as const, reason: 'receipted-recovery-policy-not-decided' as const });
 
   async function audited(action: AuditAction, outcome: string) {
     try {
@@ -77,7 +83,8 @@ export function createBrokerInboxReconciler(deps: BrokerInboxReconcilerDependenc
     if (!id.success) return result('blocked');
     let claim: InboxClaim | null;
     try {
-      const answer = await call(() => store.claim(freeze({ realm, inboxId: id.data, claimLeaseMs: policy.claimLeaseMs })), BOUND_MS);
+      const answer = await call(() => store.claim(freeze({ realm, inboxId: id.data, claimLeaseMs: policy.claimLeaseMs,
+        ...(receiptedPolicy.mode === 'BLOCKED' ? {} : { receiptedMinAgeMs: receiptedPolicy.minAgeMs }) })), BOUND_MS);
       const c = answer === null ? null : claimSchema.parse(answer);
       if (c !== null && c.inboxId !== id.data) throw new Error('claim answer for another record');
       claim = c === null ? null : freeze({ ...c });
@@ -127,6 +134,12 @@ export function createBrokerInboxReconciler(deps: BrokerInboxReconcilerDependenc
         const answer = await call(() => store.listCandidates(freeze({ realm, minAgeMs: policy.minAgeMs, limit })), BOUND_MS);
         if (!Array.isArray(answer) || answer.length > limit) throw new Error('invalid candidates answer');
         candidates = answer.map(c => candidateSchema.parse(c));
+      }
+      // BE13-11D: stale `receipted` states (consumer died after the receipt) join the sweep ONLY under their own policy.
+      if (policy.mode !== 'BLOCKED' && receiptedPolicy.mode !== 'BLOCKED' && candidates.length < limit) {
+        const stale = await call(() => store.listReceiptedCandidates(freeze({ realm, minAgeMs: receiptedPolicy.minAgeMs, limit: limit - candidates.length })), BOUND_MS);
+        if (!Array.isArray(stale) || stale.length > limit - candidates.length) throw new Error('invalid receipted candidates answer');
+        candidates = [...candidates, ...stale.map(c => candidateSchema.parse(c))];
       }
     } catch { return freeze({ status: 'blocked' as const, reason: 'unavailable' as const }); }
     for (const c of candidates) { await emitMetric(metrics, 'broker_inbox_orphan_candidate_total', { stage: 'boundary', outcome: 'candidate' }); await audited('inbox-reconciliation-candidate', 'candidate'); }

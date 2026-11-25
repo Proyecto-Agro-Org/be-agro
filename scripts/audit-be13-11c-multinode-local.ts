@@ -318,13 +318,14 @@ async function main() {
         { ...ok, outcome: 'free text' }, { ...ok, token: 'short' }, { ...ok, rawPayload: 'x' }, { ...ok, topic: 'synthetic/agro/x' }, { ...ok, realm: 'nope' }];
       for (const d of bad) { const doc = Object.fromEntries(Object.entries(d).filter(([, v]) => v !== undefined)); await assert.rejects(stateRows.insertOne(doc as never), (e: { code?: number }) => e.code === 121); }
     });
-    await check('C18 indexes/explain: candidate scan walks inbox_realm_persisted; state lookups use _id; no extra state index', async () => {
+    await check('C18 indexes/explain: candidate scan walks inbox_realm_persisted; state lookups use _id; exactly the two documented state indexes (BE13-11D adds the receipted one)', async () => {
       const plan = ((await inboxRows.aggregate([{ $match: { realm: 'test', $expr: { $lte: ['$rawPersistedAt', { $subtract: ['$$NOW', 1500] }] } } }, { $sort: { rawPersistedAt: 1 } }, { $limit: 5 }]).explain('queryPlanner')) as unknown);
       const text = JSON.stringify(plan);
       assert.ok(text.includes('inbox_realm_persisted'), 'candidate scan uses inbox_realm_persisted');
       assert.equal(/COLLSCAN/.test(text), false);
       const stateIdx = (await stateRows.indexes()).map(i => i.name);
-      assert.deepEqual(stateIdx, ['_id_']);
+      assert.deepEqual(stateIdx.sort(), ['_id_', 'state_realm_status_receipted']);   // BE13-11D adds exactly ONE index, for stale receipted recovery
+      assert.ok(JSON.stringify(await stateRows.find({ realm: 'test', status: 'receipted', receiptedAt: { $lte: new Date() } }).explain('queryPlanner')).includes('state_realm_status_receipted'));
       assert.ok(/IDHACK|EXPRESS|_id_/.test(JSON.stringify(await stateRows.find({ _id: ids.A as never, realm: 'test' }).explain('queryPlanner'))));
       return { stateIndexes: stateIdx };
     });
