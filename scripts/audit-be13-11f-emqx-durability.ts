@@ -116,7 +116,10 @@ async function main() {
       const ok = await new Promise<boolean>(res => { c.on('connect', () => res(true)); c.on('error', () => res(false)); setTimeout(() => res(false), 8000); });
       if (!ok) { c.end(true); return null; } rawClients.add(c); return c;
     };
-    const eventBody = (id: string, seq: number) => fx.bytesOf(fx.envelope({ eventId: id, clientid: 'lab-device-a', payload: { temperature: seq } }));
+    // The idempotency identity of a reading is its CONTENT (source, device, declared time, field, value), not only its eventId: two scenarios that
+    // publish the same value would be judged duplicates of each other (a harness collision, proven in D13). Every event of the campaign therefore carries a unique value.
+    const valueByEvent = new Map<string, number>(); let nextValue = 1;
+    const eventBody = (id: string, _seq: number) => { if (!valueByEvent.has(id)) valueByEvent.set(id, nextValue++); return fx.bytesOf(fx.envelope({ eventId: id, clientid: 'lab-device-a', payload: { temperature: valueByEvent.get(id)! } })); };
     // Publishes ids from ONE connection; the oracle only credits an id when its PUBACK callback fired without error.
     async function publish(ids: string[], o: { window?: number; payloadOf?: (id: string, seq: number) => Buffer; topic?: string; user?: string; stopAfterAcks?: number; onFirstAcks?: { count: number; run: () => void } } = {}) {
       const acked = new Set<string>(), lat: number[] = []; let client = await pubOpen(o.user ?? 'lab-device-a'); let next = 0, failed = 0, fired = false;
