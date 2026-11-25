@@ -121,19 +121,19 @@ async function main() {
       return { acked, lat, durationMs, failed };
     }
     // A raw (no pipeline) consumer: records every delivery, decoded from the broker-authored envelope. `hold` never ACKs (deliveries pile up in-flight).
-    type Rx = { received: Map<string, number>; order: string[]; bytes: Map<string, Buffer>; client: MqttClient; sessionPresent: boolean; close(graceful?: boolean): Promise<void> };
+    type Rx = { received: Map<string, number>; order: string[]; bytes: Map<string, Buffer>; client: MqttClient; sessionPresent: boolean; latencyMs(): { firstMs: number | null; lastMs: number | null }; close(graceful?: boolean): Promise<void> };
     async function consumerOpen(o: { clientId?: string; clean?: boolean; expiry?: number; hold?: boolean } = {}): Promise<Rx> {
-      const received = new Map<string, number>(), order: string[] = [], bytes = new Map<string, Buffer>();
-      const record = (msg: Buffer) => { try { const env = JSON.parse(msg.toString('utf8')) as { payload_b64: string }; const raw = Buffer.from(env.payload_b64, 'base64'); let id = '';
+      const received = new Map<string, number>(), order: string[] = [], bytes = new Map<string, Buffer>(); let connectedAt = 0, firstAt = 0, lastAt = 0;
+      const record = (msg: Buffer) => { const now = performance.now(); if (firstAt === 0) firstAt = now; lastAt = now; try { const env = JSON.parse(msg.toString('utf8')) as { payload_b64: string }; const raw = Buffer.from(env.payload_b64, 'base64'); let id = '';
         try { id = String((JSON.parse(raw.toString('utf8')) as { eventId?: string }).eventId ?? ''); } catch { id = 'raw:' + raw.toString('hex').slice(0, 16); }
         received.set(id, (received.get(id) ?? 0) + 1); if (received.get(id) === 1) { order.push(id); bytes.set(id, raw); } } catch { /* not an envelope */ } };
       const c = mqttFactory(L().brokerUrl, { protocolVersion: 5, clientId: o.clientId ?? consumerId(), username: 'lab-consumer', password: L().secrets['lab-consumer'], clean: o.clean ?? false, reconnectPeriod: 0,
         properties: { sessionExpiryInterval: o.expiry ?? 3600 },
         customHandleAcks: (_t: string, msg: Buffer, _p: unknown, cb: (e: Error | null, code?: number) => void) => { record(msg); if (!o.hold) cb(null, 0); } }) as unknown as MqttClient;
       rawClients.add(c);
-      const sessionPresent = await new Promise<boolean>((res, rej) => { c.on('connect', (p: { sessionPresent: boolean }) => res(p.sessionPresent)); c.on('error', rej); setTimeout(() => rej(new Error('consumer connect timeout')), 15000); });
+      const sessionPresent = await new Promise<boolean>((res, rej) => { c.on('connect', (p: { sessionPresent: boolean }) => { connectedAt = performance.now(); res(p.sessionPresent); }); c.on('error', rej); setTimeout(() => rej(new Error('consumer connect timeout')), 15000); });
       await new Promise<void>((res, rej) => c.subscribe(LAB_VERIFIED_TOPIC, { qos: 1 }, e => e ? rej(e) : res()));
-      return { received, order, bytes, client: c, sessionPresent, close: async (graceful = true) => { await new Promise<void>(res => { c.end(!graceful, {}, () => res()); setTimeout(res, 1500); }); rawClients.delete(c); } };
+      return { received, order, bytes, client: c, sessionPresent, latencyMs: () => ({ firstMs: firstAt ? r1(firstAt - connectedAt) : null, lastMs: lastAt ? r1(lastAt - connectedAt) : null }), close: async (graceful = true) => { await new Promise<void>(res => { c.end(!graceful, {}, () => res()); setTimeout(res, 1500); }); rawClients.delete(c); } };
     }
     const settle = async (rx: Rx, expect: number, quietMs = 3500, maxMs = 30000) => { const end = Date.now() + maxMs; let last = -1, since = Date.now(); while (Date.now() < end) { if (rx.received.size >= expect) break; if (rx.received.size !== last) { last = rx.received.size; since = Date.now(); } else if (Date.now() - since > quietMs) break; await sleep(150); } };
     // wait until the measurement count reaches `target` OR stops growing for 20 s (a durability gap means it may never reach it)
@@ -148,7 +148,7 @@ async function main() {
       if (!opts.immediate) await sleep(400);                                                         // (kept short: the write-buffer window is what the WIDE profile measures)
       await disrupt(how); await sleep(1500);
       const rx = await consumerOpen(opts.reconnect ?? {}); await settle(rx, p.acked.size); const acc = account(sent, p.acked, rx.received);
-      const out = { how, ...acc, sessionPresent: rx.sessionPresent, pubAckMs: { p50: pct(p.lat, .5), p95: pct(p.lat, .95) } }; await rx.close(false);
+      const out = { how, ...acc, sessionPresent: rx.sessionPresent, recoveryLatencyAfterReconnectMs: rx.latencyMs(), pubAckMs: { p50: pct(p.lat, .5), p95: pct(p.lat, .95) } }; await rx.close(false);
       return { out, rx, p, sent };
     }
     const perfProbe = async (label: string) => { const l = await publish(ids('perf' + label.replace(/\W/g, ''), 400), { window: 16 }); perf[label] = { acksPerS: r1(l.acked.size / (l.durationMs / 1000)), p50: pct(l.lat, .5), p95: pct(l.lat, .95), p99: pct(l.lat, .99) }; return perf[label]; };
@@ -209,13 +209,13 @@ async function main() {
         const { out } = await offlineQueue('d07', 200, 'recreateSame'); noLoss(out); assert.equal(out.sessionPresent, true); return out;
       });
       await scenario('D19', 'durable: authenticator, ACL and rule are RESTORED from the volume after recreate (no reconfiguration)', async () => {
-        console.log('D19 step: connecting publisher'); const ok = await pubOpen('lab-device-a'); assert.ok(ok, 'the lab-device-a credential still authenticates after the recreate'); console.log('D19 step: publisher connected');
+        console.log('D19 step: connecting publisher'); const ok = await pubOpen('lab-device-a', 'lab-device-a-acl-probe'); assert.ok(ok, 'the lab-device-a credential still authenticates after the recreate'); console.log('D19 step: publisher connected');
         const rx = await consumerOpen(); const sent = ids('d19', 5); const p = await publish(sent, { window: 1 }); await settle(rx, 5, 9000, 30000);
         // what exactly survived a recreate with the same volume? (read-only diagnostics through the management API)
         const persisted = { rules: (await L().api('GET', '/rules')).body.slice(0, 160), authn: (await L().api('GET', '/authentication')).body.slice(0, 140), authzSources: (await L().api('GET', '/authorization/sources')).body.slice(0, 160),
           consumerAclRules: (await L().api('GET', '/authorization/sources/built_in_database/rules/users/lab-consumer')).body.slice(0, 160) };
         const ruleMetrics = (await L().api('GET', '/rules/lab_verify/metrics')).body.slice(0, 260);
-        console.log('D19 publisherAcked=' + p.acked.size + ' publisherFailed=' + p.failed + ' consumerReceived=' + rx.received.size + ' sessionPresent=' + rx.sessionPresent + ' ruleMetrics=' + ruleMetrics);
+        console.log('D19 recoveryLatencyAfterResume=' + JSON.stringify(rx.latencyMs()) + ' publisherAcked=' + p.acked.size + ' publisherFailed=' + p.failed + ' consumerReceived=' + rx.received.size + ' sessionPresent=' + rx.sessionPresent + ' ruleMetrics=' + ruleMetrics);
         console.log('D19 persisted-after-recreate: ' + JSON.stringify(persisted));
         assert.equal(rx.received.size, 5, 'the broker rule still republishes');
         const denied = await new Promise<number | null>(res => { const t = setTimeout(() => res(-1), 8000); ok!.publish(LAB_VERIFIED_TOPIC, Buffer.from('{}'), { qos: 1 }, e => { clearTimeout(t); res((e as { code?: number } | null)?.code ?? null); }); });
@@ -223,7 +223,7 @@ async function main() {
         const bad = await pubOpen('lab-device-a', 'lab-device-a', 'labpw-' + '0'.repeat(32));
         await rx.close(false); ok!.end(true);
         assert.equal(denied, 135, 'the ACL still denies publishing to the verified topic'); assert.equal(bad, null, 'a wrong password is still refused');
-        return { authenticated: true, ruleRepublishes: true, aclDeniesVerifiedTopic: denied, wrongPasswordRefused: true, acked: p.acked.size };
+        return { authenticated: true, ruleRepublishes: true, firstNewMessageDelayAfterSessionResumeMs: rx.latencyMs(), aclDeniesVerifiedTopic: denied, wrongPasswordRefused: true, acked: p.acked.size };
       });
       await scenario('D09', 'durable-tuned: HARD KILL (docker kill, SIGKILL) right after the last PUBACK', async () => {
         const rows: object[] = [];
