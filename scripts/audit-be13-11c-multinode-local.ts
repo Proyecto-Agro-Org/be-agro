@@ -272,8 +272,11 @@ async function main() {
         await sleep(POLICY.claimLeaseMs + 1500);
         let out = 'unavailable';
         for (let i = 0; i < 60 && out === 'unavailable'; i += 1) { out = await reconcilerOn(conns[4]!).reconciler.reconcileOne(ids.G!); if (out === 'unavailable') await sleep(1000); }
+        console.log('C11 diagnostic reconcile result: ' + out);
         assert.equal(out, 'recovered-and-processed');
-        assert.equal(await createMongoBrokerInboxReconciliationStore({ connection: conns[5]!, prefix: INGEST, realm: 'test' }).complete({ realm: 'test', claim: dead!, outcome: 'recovered-and-processed' }), false);
+        let stale: boolean | undefined;
+        for (let i = 0; i < 30 && stale === undefined; i += 1) { try { stale = await createMongoBrokerInboxReconciliationStore({ connection: conns[5]!, prefix: INGEST, realm: 'test' }).complete({ realm: 'test', claim: dead!, outcome: 'recovered-and-processed' }); } catch { await sleep(1000); } }
+        assert.equal(stale, false);
         return { stoppedPrimary: old, newPrimary: await primaryIndex() };
       } finally { chaos(request, 'start', old); await waitHealthy(); }
       // eslint-disable-next-line no-unreachable
