@@ -135,7 +135,7 @@ async function main() {
     async function consumerOpen(o: { clientId?: string; clean?: boolean; expiry?: number; hold?: boolean } = {}): Promise<Rx> {
       const received = new Map<string, number>(), order: string[] = [], bytes = new Map<string, Buffer>(); let connectedAt = 0, firstAt = 0, lastAt = 0;
       const record = (msg: Buffer) => { const now = performance.now(); if (firstAt === 0) firstAt = now; lastAt = now; try { const env = JSON.parse(msg.toString('utf8')) as { payload_b64: string }; const raw = Buffer.from(env.payload_b64, 'base64'); let id = '';
-        try { id = String((JSON.parse(raw.toString('utf8')) as { eventId?: string }).eventId ?? ''); } catch { id = 'raw:' + raw.toString('hex').slice(0, 16); }
+        try { id = String((JSON.parse(raw.toString('utf8')) as { eventId?: string }).eventId ?? ''); } catch { id = 'raw:' + raw.toString('hex'); }
         received.set(id, (received.get(id) ?? 0) + 1); if (received.get(id) === 1) { order.push(id); bytes.set(id, raw); } } catch { /* not an envelope */ } };
       const c = mqttFactory(L().brokerUrl, { protocolVersion: 5, clientId: o.clientId ?? consumerId(), username: 'lab-consumer', password: L().secrets['lab-consumer'], clean: o.clean ?? false, reconnectPeriod: 0,
         properties: { sessionExpiryInterval: o.expiry ?? 3600 },
