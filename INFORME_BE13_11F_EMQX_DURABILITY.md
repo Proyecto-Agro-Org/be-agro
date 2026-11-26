@@ -47,6 +47,17 @@ Estados: PASS / KNOWN_LIMITATION / FAIL / NO_VERIFICABLE; un estado no se reetiq
 - **F-F3 (BAJO, corregido)**: fugas de volúmenes anónimos de contenedores del laboratorio y del lanzador; ahora `docker rm -f -v` / `docker rm --force --volumes` sólo sobre recursos propios.
 - Arnés: D13 falló por el propio arnés (sin espera de contabilidad ni recuperación `receipted`, y lectura majority imposible sin mayoría); corregido sin relajar `noLoss`.
 
+## Hallazgo fuera de EMQX: F-F7 (ALTO, abierto)
+
+D13b (Mongo sin majority 14 s, más que el timeout de elección) perdió 59 de 60 eventos ya ACKeados: `term` de Mongo 1→2, claims y mediciones ausentes, estados del inbox `completed`. Con 4 s sin elección (D13) se recuperan 60/60. La causa (rollback de escrituras no majority; pre-check de idempotencia con lecturas no majority) es una hipótesis sin confirmar; no se tocó código de persistencia. Es una pérdida posterior al ACK en la capa Mongo/inbox y debe investigarse antes de cualquier uso productivo.
+
+## Estado de las corridas finales (honesto)
+
+- Campaña completa de referencia: `d11f-full5` (26 PASS, 1 KNOWN_LIMITATION D04, 2 NO_VERIFICABLE, 1 FAIL D13 de arnés).
+- Dos corridas completas finales (RUN 1, RUN 2) se ejecutaron antes de corregir el arnés: ambas mostraron D04 KNOWN_LIMITATION y 21 PASS, con D13 y D27 FAIL (D27: `Not authorized` por un SIGKILL segundos después del bootstrap de la configuración por API, antes de que la autenticación se persistiera; corregido haciendo un reinicio ordenado previo). Los arreglos de arnés se validaron con corridas dirigidas (D13/D13b/D14, D27, D12). **No se repitió la campaña completa** por instrucción del usuario: la evidencia final es la suma de la campaña de referencia, esas corridas y las dirigidas.
+- Arnés corregido: espera de contabilidad y supervisor en D13, pausa de Mongo exacta y acotada, `waitHealthy` acotado, reintento de CONNECT rechazado tras reinicio, un valor único por evento. D12 mostró un timeout intermitente de 8 min en una corrida (no reproducido).
+- Mutantes: 8 de 8 detectados (M1 durabilidad desactivada, M2 cleanStart por defecto, M3 expiry 0, M4 clientId aleatorio, M5 oráculo ignora pérdidas, M6 olvida huecos, M7 mide contra enviados, M8 stale como limpio); no hubo mutantes inválidos.
+
 ## Alcance no cubierto
 
 No se actualizó la imagen de EMQX ni se probó 5.9/6.x (queda como decisión humana). No se evaluó clúster/HA. No se cambió la autenticación (username/password TEST_ONLY; `PRODUCTION AUTH = PENDING`). No se tocó `app.ts`.

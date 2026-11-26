@@ -18,7 +18,8 @@
 | D27 | Kill con buffer de 3 s | PASS = ventana demostrada | 50 de 50 |
 | D11 | Kill + inbox durable punta a punta | PASS | 0; 1 medición por evento |
 | D12 | Restart de broker + consumer | PASS | 0 |
-| D13 | Restart de broker con Mongo sin majority | PASS tras corregir arnés | 0 de 60 |
+| D13 | Restart de broker + Mongo sin majority 4 s (sin elección) | PASS (corrida dirigida final) | 0 de 60 |
+| D13b | Igual con 14 s (más allá del timeout de elección: step-down, elección, `term` +1) | **KNOWN_LIMITATION** (capa Mongo/inbox, no EMQX) | 59 de 60 (claims y mediciones revertidos) |
 | D14 | Broker recuperado y luego failover de Mongo | PASS | 0 |
 | D15 | cleanStart=true tras construir la cola | PASS (pérdida esperada, guard lo rechaza) | esperado |
 | D16 | sessionExpiry=0 | PASS (pérdida esperada) | esperado |
