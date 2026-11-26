@@ -63,7 +63,8 @@ Estado actualizado al cierre de BE13-10A (rama local, base `dev` `98dd2d8`). Dec
 
 - [x] Throughput, serialización de ACK, concurrencia, sesiones y fallos medidos en laboratorio (`LOCAL_LAB_EVIDENCE`).
 - [x] F-E1 y F-E3 corregidos (resultado `uncertain` irrecuperable; `start()` colgable).
-- [ ] Durabilidad de sesiones del broker ante reinicio (59, F-E2 abierto).
+- [x] Durabilidad de la cola OFFLINE de sesiones EMQX medida en laboratorio (`PROVEN_LOCAL`, BE13-11F).
+- [ ] Durabilidad del estado inflight y de la ventana PUBACK→durable (59, 63–70): F-E2 `BLOCKED_BY_BROKER_CAPABILITY` en EMQX 5.8.6 CE.
 - [ ] Requisitos de throughput, latencia y orden (53, 54, 56) y modelo de concurrencia (55, 57, 58).
 - [ ] Escalado de auditoría e inbox (60, 61) y política de mensajes veneno (62).
 - `productionReady` permanece `false`.
