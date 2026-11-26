@@ -21,6 +21,7 @@ import { provisionQuarantineCollection, quarantineCollection } from '../src/mode
 import { provisionAuditCollections } from '../src/models/ingestion-audit.models.js';
 import { brokerInboxCollection, provisionBrokerInboxCollection } from '../src/models/broker-inbox.models.js';
 import { brokerInboxStateCollection, provisionBrokerInboxStateCollection } from '../src/models/broker-inbox-state.models.js';
+import { createMongoMeasurementPersistence, idempotencyDocumentId, measurementDocumentId } from '../src/repositories/mongo-measurement-persistence.repository.js';
 import { loadMqttJsFactory } from '../src/adapters/emqx-mqtt-connect.js';
 import { LAB_VERIFIED_TOPIC } from '../src/adapters/emqx-mqtt-broker.adapter.js';
 import { EMQX_IMAGE, labContainersRemaining, labVolumesRemaining, startEmqxLab, type EmqxLab, type EmqxLabOptions } from './be13-11d/emqx-lab.js';
@@ -305,6 +306,30 @@ async function main() {
         const m = await mCountTag('d12'); await c2.stop(); live.delete(c2);
         noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m), acked: p.acked.size }); assert.ok(m <= sent.length);
         return { acked: p.acked.size, measurements: m, lostAfterPuback: Math.max(0, p.acked.size - m), publisherFailedDuringRestart: p.failed };
+      });
+      // BE13-11G (G01): is the idempotency PRE-CHECK safe against a claim that a majority does NOT hold? A claim written while the secondaries are
+      // paused exists only on the primary. If the pre-check reads it (readConcern local) it answers "duplicate" for an event whose measurement may
+      // later be rolled back: the event is then considered handled and is lost. The pre-check must never see data that is not majority-committed.
+      await scenario('G01', 'idempotency pre-check does NOT trust a claim that only the primary holds (no majority)', async () => {
+        const first = await consumerOpen(); await first.close(true);
+        const pr = await primaryIndex(), sec = [0, 1, 2].filter(i => i !== pr);
+        const store = createMongoMeasurementPersistence({ connection: conns[4]!, prefix: INGEST, realm: 'test' as never });
+        const key = { realm: 'test', sourceId: 'lab-source-a', operation: 'measurement', eventId: 'e11f-g01-0', field: 'temperature' } as never;
+        const claims = db.collection(inn.idempotency); const claimId = idempotencyDocumentId(key);
+        const claimDoc = { _id: claimId, realm: 'test', sourceId: 'lab-source-a', operation: 'measurement', eventId: 'e11f-g01-0', field: 'temperature', fingerprint: 'a'.repeat(64), state: 'committed', measurementId: measurementDocumentId(key), committedAt: new Date() };
+        let preCheck: string, majorityRead: string, localRead: string;
+        for (const s of sec) chaos(request, 'pause', s);
+        try {
+          await claims.insertOne(claimDoc as never, { writeConcern: { w: 1 } });                              // exists on the primary only
+          localRead = (await claims.findOne({ _id: claimId as never }, { maxTimeMS: 3000 })) ? 'visible' : 'absent';
+          majorityRead = (await claims.findOne({ _id: claimId as never }, { readConcern: { level: 'majority' }, maxTimeMS: 3000 } as never).then(d => d ? 'visible' : 'absent').catch(e => 'error:' + (e as Error).name));
+          preCheck = await bounded(store.lookup(key), 6000).then(r => (r as { status: string }).status).catch(e => 'error:' + (e as Error).message.slice(0, 40));
+        } finally { for (const s of sec) chaos(request, 'unpause', s); }
+        await waitHealthy();
+        const after = await claims.findOne({ _id: claimId as never }, { readConcern: { level: 'majority' }, maxTimeMS: 5000 } as never).then(d => d ? 'survived' : 'rolled-back').catch(() => 'unreadable');
+        await claims.deleteOne({ _id: claimId as never }, { writeConcern: { w: 'majority' } }).catch(() => {});
+        assert.notEqual(preCheck, 'present', 'the pre-check answered "present" for a claim that no majority holds: ' + JSON.stringify({ localRead, majorityRead, preCheck, after }));
+        return { localRead, majorityRead, preCheck, claimAfterHeal: after };
       });
       await scenario('D13', 'durable: broker restart + MONGO without majority (4 s, below the election timeout): the consumer cannot persist, does not ACK, the broker keeps the messages; after healing everything is processed', async () => {
         const mark = (m: string) => console.log('  [D13] ' + m); mark('start'); const first = await consumerOpen(); await first.close(true); await sleep(300);
