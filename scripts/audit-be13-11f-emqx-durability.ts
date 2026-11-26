@@ -34,6 +34,8 @@ const EXPECTED_LIMITATION = new Set(['D04', 'D09d', 'D13b']);
 const gaps: { id: string; lostAfterPuback: number; acked: number }[] = [];
 const results: { id: string; name: string; status: Status; evidence?: unknown; note?: string }[] = [];
 class NotVerifiable extends Error {}
+// BE13-11H (TEST_ONLY): session-history counters, read by the D13b snapshot.
+const sess = { brokerRestarts: 0, consumerOpens: 0, adapterStarts: 0 };
 let stage = 'bootstrap';
 // BE13_11F_ONLY=D04,D05 runs just those scenarios (development aid).
 const only = process.env.BE13_11F_ONLY ? new Set(process.env.BE13_11F_ONLY.split(',')) : null;
@@ -77,7 +79,7 @@ type MqttClient = { on(e: string, l: (...a: any[]) => void): void; publish(t: st
 // The broker's HTTP API can answer before its MQTT listener is back after a restart: a refused CONNECT is retried (bounded), any other error is not.
 async function startConsumerRetrying(o: Parameters<typeof startLabConsumer>[0]): Promise<LabConsumer> {
   let last: unknown;
-  for (let i = 0; i < 12; i += 1) { try { return await startLabConsumer(o); } catch (e) { last = e; if (!/ECONNREFUSED|CLOSED_BEFORE_READY|ETIMEDOUT/.test(String((e as Error).message))) throw e; await new Promise(r => setTimeout(r, 1500)); } }
+  for (let i = 0; i < 12; i += 1) { try { sess.adapterStarts += 1; return await startLabConsumer(o); } catch (e) { last = e; if (!/ECONNREFUSED|CLOSED_BEFORE_READY|ETIMEDOUT/.test(String((e as Error).message))) throw e; await new Promise(r => setTimeout(r, 1500)); } }
   throw last;
 }
 const consumerId = () => 'lab-consumer-durable';                    // a STABLE client id: a durable session can only be reclaimed with the same id
@@ -144,7 +146,7 @@ async function main() {
     // A raw (no pipeline) consumer: records every delivery, decoded from the broker-authored envelope. `hold` never ACKs (deliveries pile up in-flight).
     type Rx = { received: Map<string, number>; order: string[]; bytes: Map<string, Buffer>; client: MqttClient; sessionPresent: boolean; latencyMs(): { firstMs: number | null; lastMs: number | null }; close(graceful?: boolean): Promise<void> };
     async function consumerOpen(o: { clientId?: string; clean?: boolean; expiry?: number; hold?: boolean } = {}): Promise<Rx> {
-      const received = new Map<string, number>(), order: string[] = [], bytes = new Map<string, Buffer>(); let connectedAt = 0, firstAt = 0, lastAt = 0;
+      sess.consumerOpens += 1; const received = new Map<string, number>(), order: string[] = [], bytes = new Map<string, Buffer>(); let connectedAt = 0, firstAt = 0, lastAt = 0;
       const record = (msg: Buffer) => { const now = performance.now(); if (firstAt === 0) firstAt = now; lastAt = now; try { const env = JSON.parse(msg.toString('utf8')) as { payload_b64: string }; const raw = Buffer.from(env.payload_b64, 'base64'); let id = '';
         try { id = String((JSON.parse(raw.toString('utf8')) as { eventId?: string }).eventId ?? ''); } catch { id = 'raw:' + raw.toString('hex'); }
         received.set(id, (received.get(id) ?? 0) + 1); if (received.get(id) === 1) { order.push(id); bytes.set(id, raw); } } catch { /* not an envelope */ } };
@@ -160,7 +162,7 @@ async function main() {
     // wait until the measurement count reaches `target` OR stops growing for 20 s (a durability gap means it may never reach it)
     const settleCount = async (tag: string, target: number) => { let last = -1, since = Date.now(); const end = Date.now() + 150000; while (Date.now() < end) { const m = await mCountTag(tag); if (m >= target) return; if (m !== last) { last = m; since = Date.now(); } else if (Date.now() - since > 20000) return; await sleep(500); } };
     const ids = (tag: string, n: number) => Array.from({ length: n }, (_, i) => `e11f-${tag}-${i}`);
-    const withLab = async <T>(options: EmqxLabOptions, fn: () => Promise<T>) => { lab = await startEmqxLab(request.basePort, request.runId, [], options); try { return await fn(); } finally { for (const c of [...rawClients]) { try { c.end(true); } catch { /* */ } } rawClients.clear(); for (const c of [...live]) { await c.stop().catch(() => {}); live.delete(c); } lab.stop(); lab = null; } };
+    const withLab = async <T>(options: EmqxLabOptions, fn: () => Promise<T>) => { lab = await startEmqxLab(request.basePort, request.runId, [], options); for (const k of ['restart', 'stopStart', 'kill', 'recreate'] as const) { const orig = (lab[k] as (...a: never[]) => Promise<void>).bind(lab); (lab as unknown as Record<string, unknown>)[k] = async (...a: never[]) => { sess.brokerRestarts += 1; return orig(...a); }; } try { return await fn(); } finally { for (const c of [...rawClients]) { try { c.end(true); } catch { /* */ } } rawClients.clear(); for (const c of [...live]) { await c.stop().catch(() => {}); live.delete(c); } lab.stop(); lab = null; } };
     const disrupt = async (how: 'restart' | 'stopStart' | 'kill' | 'recreateSame' | 'recreateNew') => { const l = L(); if (how === 'restart') return l.restart(); if (how === 'stopStart') return l.stopStart(); if (how === 'kill') return l.kill(); return l.recreate({ keepVolume: how === 'recreateSame' }); };
     // THE canonical F-E2 flow: a persistent consumer session goes offline; the publisher gets PUBACKs; the broker is disrupted; the SAME consumer returns.
     async function offlineQueue(tag: string, n: number, how: Parameters<typeof disrupt>[0], opts: { reconnect?: Parameters<typeof consumerOpen>[0]; payloadOf?: (id: string, seq: number) => Buffer; immediate?: boolean } = {}) {
@@ -172,6 +174,15 @@ async function main() {
       const out = { how, ...acc, sessionPresent: rx.sessionPresent, recoveryLatencyAfterReconnectMs: rx.latencyMs(), pubAckMs: { p50: pct(p.lat, .5), p95: pct(p.lat, .95) } }; await rx.close(false);
       return { out, rx, p, sent };
     }
+    // BE13-11H: read-only snapshot of the durable session as the broker reports it (management API) + harness counters. Taken while the consumer is connected.
+    const sessionSnapshot = async (rx: Rx) => {
+      const get = async (path: string) => { try { const r = await L().api('GET', path); return { status: r.status, body: r.body.slice(0, 900) }; } catch (e) { return { error: (e as Error).message.slice(0, 80) }; } };
+      const client = await get('/clients/' + consumerId()); let c: Record<string, unknown> = {}; try { c = JSON.parse((client as { body?: string }).body ?? '{}') as Record<string, unknown>; } catch { /* partial body */ }
+      return { clientId: consumerId(), sessionPresent: rx.sessionPresent, cleanStartRequested: false, sessionExpiryRequested: 3600, brokerRestartsSoFar: sess.brokerRestarts, rawConsumerOpensSoFar: sess.consumerOpens, adapterStartsSoFar: sess.adapterStarts,
+        adapterConnectedMetric: metrics.filter(x => x.name === 'broker_adapter_connection_total' && (x.labels as { outcome?: string }).outcome === 'connected').length, scenariosBefore: results.map(r => r.id),
+        broker: { connected: c.connected, clean_start: c.clean_start, expiry_interval: c.expiry_interval, inflight_cnt: c.inflight_cnt, mqueue_len: c.mqueue_len, mqueue_dropped: c.mqueue_dropped, subscriptions_cnt: c.subscriptions_cnt, created_at: c.created_at, connected_at: c.connected_at, recv_cnt: c.recv_cnt, send_cnt: c.send_cnt, rawStatus: (client as { status?: number }).status },
+        subscriptions: await get('/subscriptions?clientid=' + consumerId()) };
+    };
     const perfProbe = async (label: string) => { const l = await publish(ids('perf' + label.replace(/\W/g, ''), 400), { window: 16 }); perf[label] = { acksPerS: r1(l.acked.size / (l.durationMs / 1000)), p50: pct(l.lat, .5), p95: pct(l.lat, .95), p99: pct(l.lat, .99) }; return perf[label]; };
 
     // ================================================================ GROUP 1: NON-DURABLE (the BE13-11E situation)
@@ -365,7 +376,7 @@ async function main() {
         return { acked: p.acked.size, processedWhileMongoDown: unreadable ? 'unreadable-without-majority (nothing could be committed either)' : during, measurementsAfterHealing: m, quarantined: q, inboxRecords: inboxN, supervisorRestarts: attempts, withheldDeliveries: withheld, stateCounts, quarantineTotal, quarantineSample, measurementsTotal, measurementsD13Local, metricTally, mongoTermBefore: termBefore, mongoTermAfter: termAfter, claimsD13, measurementsD13Nested, claimsTotal, claimSample, measurementSample, reconcileSamples: recon.slice(0, 2), lostAfterPuback: Math.max(0, p.acked.size - m - q) };
       });
       await scenario('D13b', 'durable: broker restart + MONGO without majority for 14 s (beyond the election timeout: primary steps down, an election happens): the consumer cannot persist, does not ACK, the broker keeps the messages; after healing everything is processed', async () => {
-        const mark = (m: string) => console.log('  [D13b] ' + m); mark('start'); const first = await consumerOpen(); await first.close(true); await sleep(300);
+        const mark = (m: string) => console.log('  [D13b] ' + m); mark('start'); const first = await consumerOpen(); const snapshotBefore = await sessionSnapshot(first); await first.close(true); await sleep(300);
         // BE13-11G knobs (TEST_ONLY): BE13_11G_N events, BE13_11G_PAUSE_MS outage length (0 = healthy control).
         const N = Number(process.env.BE13_11G_N ?? 60), pauseMs = Number(process.env.BE13_11G_PAUSE_MS ?? 14000), t0 = performance.now(), rel = () => Math.round(performance.now() - t0);
         const timings: TimingMap = new Map(); const tl: Record<string, unknown>[] = [];
@@ -407,8 +418,10 @@ async function main() {
           return { eventId: id, publisherPuback: p.acked.has(id), deliveries: tm?.deliveries ?? 0, receiptIssued: tm?.persisted !== undefined, mqttAckReleased: tm?.acked !== undefined, receiptDuringOutage: tm?.persisted !== undefined ? (tm.persisted - t0 >= pauseAt && tm.persisted - t0 <= unpauseAt) : null, inboxRowsAfterHeal: rows.length, states: rows.map(r => stateById.get(r.inboxId) ?? 'no-state'), claim: claimSet.has(id), measurement: measSet.has(id), quarantine: quarSet.has(id) }; });
         const summary = { events: N, pauseMs, publisherPuback: matrix.filter(x => x.publisherPuback).length, receiptIssued: matrix.filter(x => x.receiptIssued).length, mqttAckReleased: matrix.filter(x => x.mqttAckReleased).length, receiptDuringOutage: matrix.filter(x => x.receiptDuringOutage === true).length, withInboxRowAfterHeal: matrix.filter(x => x.inboxRowsAfterHeal > 0).length, withClaim: matrix.filter(x => x.claim).length, withMeasurement: matrix.filter(x => x.measurement).length, withQuarantine: matrix.filter(x => x.quarantine).length,
           // deliveries of events that are NOT part of this scenario = STALE redelivery of an earlier scenario's session state (the D04 family)
-          neverDelivered: matrix.filter(x => x.deliveries === 0).length, staleDeliveredEvents: [...timings.keys()].filter(k => !sent.includes(k)).length, staleSample: [...timings.keys()].filter(k => !sent.includes(k)).slice(0, 3) };
+          neverDelivered: matrix.filter(x => x.deliveries === 0).length, staleDeliveredEvents: [...timings.keys()].filter(k => !sent.includes(k)).length, staleSample: [...timings.keys()].filter(k => !sent.includes(k)).slice(0, 3),
+          staleByScenario: [...timings.keys()].filter(k => !sent.includes(k)).reduce((a: Record<string, number>, k) => { const t = k.split('-')[1] ?? '?'; a[t] = (a[t] ?? 0) + 1; return a; }, {}), deliveriesOfSent: matrix.reduce((n, x) => n + x.deliveries, 0) };
         writeFileSync('.local-evidence/be13-11g-event-matrix-' + pauseMs + '-' + N + '.json', JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', summary, timeline: tl, matrix }, null, 1));
+        if (process.env.BE13_11H_TAG) writeFileSync('.local-evidence/be13-11h-' + process.env.BE13_11H_TAG.replace(/[^\w.-]/g, '_') + '.json', JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', tag: process.env.BE13_11H_TAG, only: process.env.BE13_11F_ONLY ?? null, snapshotBefore, sessionCountersAtEnd: { ...sess }, summary, timeline: tl, matrix }, null, 1));
         noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m - q), acked: p.acked.size });
         // a loss here must come WITH an election (term change): any other loss is an unexpected FAIL, not the documented limitation
         if (p.acked.size - m - q > 0) assert.notEqual(termAfter, termBefore, 'loss without an election is unexplained');
