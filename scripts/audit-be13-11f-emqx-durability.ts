@@ -21,10 +21,11 @@ import { provisionQuarantineCollection, quarantineCollection } from '../src/mode
 import { provisionAuditCollections } from '../src/models/ingestion-audit.models.js';
 import { brokerInboxCollection, provisionBrokerInboxCollection } from '../src/models/broker-inbox.models.js';
 import { brokerInboxStateCollection, provisionBrokerInboxStateCollection } from '../src/models/broker-inbox-state.models.js';
+import { createMongoMeasurementPersistence, idempotencyDocumentId, measurementDocumentId } from '../src/repositories/mongo-measurement-persistence.repository.js';
 import { loadMqttJsFactory } from '../src/adapters/emqx-mqtt-connect.js';
 import { LAB_VERIFIED_TOPIC } from '../src/adapters/emqx-mqtt-broker.adapter.js';
 import { EMQX_IMAGE, labContainersRemaining, labVolumesRemaining, startEmqxLab, type EmqxLab, type EmqxLabOptions } from './be13-11d/emqx-lab.js';
-import { INGEST, BUSINESS, SENSOR, startLabConsumer, type LabConsumer, type MetricSink } from './be13-11d/lab-consumer.js';
+import { INGEST, BUSINESS, SENSOR, startLabConsumer, type LabConsumer, type MetricSink, type TimingMap } from './be13-11d/lab-consumer.js';
 
 // KNOWN_LIMITATION = a durability requirement the broker DEMONSTRABLY does not meet (documented, reproducible, expected here). A PUBACKed message that is
 // not recovered in any OTHER scenario is a plain FAIL: it is never relabelled.
@@ -306,6 +307,30 @@ async function main() {
         noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m), acked: p.acked.size }); assert.ok(m <= sent.length);
         return { acked: p.acked.size, measurements: m, lostAfterPuback: Math.max(0, p.acked.size - m), publisherFailedDuringRestart: p.failed };
       });
+      // BE13-11G (G01): is the idempotency PRE-CHECK safe against a claim that a majority does NOT hold? A claim written while the secondaries are
+      // paused exists only on the primary. If the pre-check reads it (readConcern local) it answers "duplicate" for an event whose measurement may
+      // later be rolled back: the event is then considered handled and is lost. The pre-check must never see data that is not majority-committed.
+      await scenario('G01', 'idempotency pre-check does NOT trust a claim that only the primary holds (no majority)', async () => {
+        const first = await consumerOpen(); await first.close(true);
+        const pr = await primaryIndex(), sec = [0, 1, 2].filter(i => i !== pr);
+        const store = createMongoMeasurementPersistence({ connection: conns[4]!, prefix: INGEST, realm: 'test' as never });
+        const key = { realm: 'test', sourceId: 'lab-source-a', operation: 'measurement', eventId: 'e11f-g01-0', field: 'temperature' } as never;
+        const claims = db.collection(inn.idempotency); const claimId = idempotencyDocumentId(key);
+        const claimDoc = { _id: claimId, realm: 'test', sourceId: 'lab-source-a', operation: 'measurement', eventId: 'e11f-g01-0', field: 'temperature', fingerprint: 'a'.repeat(64), state: 'committed', measurementId: measurementDocumentId(key), committedAt: new Date() };
+        let preCheck: string, majorityRead: string, localRead: string;
+        for (const s of sec) chaos(request, 'pause', s);
+        try {
+          await claims.insertOne(claimDoc as never, { writeConcern: { w: 1 } });                              // exists on the primary only
+          localRead = (await claims.findOne({ _id: claimId as never }, { maxTimeMS: 3000 })) ? 'visible' : 'absent';
+          majorityRead = (await claims.findOne({ _id: claimId as never }, { readConcern: { level: 'majority' }, maxTimeMS: 3000 } as never).then(d => d ? 'visible' : 'absent').catch(e => 'error:' + (e as Error).name));
+          preCheck = await bounded(store.lookup(key), 6000).then(r => (r as { status: string }).status).catch(e => 'error:' + (e as Error).message.slice(0, 40));
+        } finally { for (const s of sec) chaos(request, 'unpause', s); }
+        await waitHealthy();
+        const after = await claims.findOne({ _id: claimId as never }, { readConcern: { level: 'majority' }, maxTimeMS: 5000 } as never).then(d => d ? 'survived' : 'rolled-back').catch(() => 'unreadable');
+        await claims.deleteOne({ _id: claimId as never }, { writeConcern: { w: 'majority' } }).catch(() => {});
+        assert.notEqual(preCheck, 'present', 'the pre-check answered "present" for a claim that no majority holds: ' + JSON.stringify({ localRead, majorityRead, preCheck, after }));
+        return { localRead, majorityRead, preCheck, claimAfterHeal: after };
+      });
       await scenario('D13', 'durable: broker restart + MONGO without majority (4 s, below the election timeout): the consumer cannot persist, does not ACK, the broker keeps the messages; after healing everything is processed', async () => {
         const mark = (m: string) => console.log('  [D13] ' + m); mark('start'); const first = await consumerOpen(); await first.close(true); await sleep(300);
         const sent = ids('d13', 60), p = await publish(sent, { window: 8 }); mark('publisher done, restarting broker'); await L().restart(); await sleep(1500); mark('broker back');
@@ -341,16 +366,20 @@ async function main() {
       });
       await scenario('D13b', 'durable: broker restart + MONGO without majority for 14 s (beyond the election timeout: primary steps down, an election happens): the consumer cannot persist, does not ACK, the broker keeps the messages; after healing everything is processed', async () => {
         const mark = (m: string) => console.log('  [D13b] ' + m); mark('start'); const first = await consumerOpen(); await first.close(true); await sleep(300);
-        const sent = ids('d13b', 60), p = await publish(sent, { window: 8 }); mark('publisher done, restarting broker'); await L().restart(); await sleep(1500); mark('broker back');
+        // BE13-11G knobs (TEST_ONLY): BE13_11G_N events, BE13_11G_PAUSE_MS outage length (0 = healthy control).
+        const N = Number(process.env.BE13_11G_N ?? 60), pauseMs = Number(process.env.BE13_11G_PAUSE_MS ?? 14000), t0 = performance.now(), rel = () => Math.round(performance.now() - t0);
+        const timings: TimingMap = new Map(); const tl: Record<string, unknown>[] = [];
+        const snap = async (e: string) => { try { const st = (await bounded(db.admin().command({ replSetGetStatus: 1 }, { readPreference: 'nearest' }), 4000)) as { term?: number; optimes?: { lastCommittedOpTime?: { ts?: { toString(): string }; t?: number } }; members: { name: string; stateStr: string }[] }; tl.push({ t: rel(), e, term: st.term, commitTs: String(st.optimes?.lastCommittedOpTime?.ts), commitTerm: st.optimes?.lastCommittedOpTime?.t, members: st.members.map(m => m.name.split(':')[1] + ':' + m.stateStr).join(',') }); } catch { tl.push({ t: rel(), e, unreadable: true }); } };
+        const sent = ids('d13b', N), p = await publish(sent, { window: 8 }); mark('publisher done, restarting broker'); await L().restart(); await sleep(1500); mark('broker back');
         await waitHealthy(); const pr = await primaryIndex(), sec = [0, 1, 2].filter(i => i !== pr);
-        const mk = async () => { const c = await startConsumerRetrying({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
-        const termBefore = ((await status()) as { term?: number }).term; mark('mongo secondaries paused'); for (const s of sec) chaos(request, 'pause', s);
+        const mk = async () => { const c = await startConsumerRetrying({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600, timings }); live.add(c); return c; };
+        const termBefore = ((await status()) as { term?: number }).term; await snap('before-pause'); tl.push({ t: rel(), e: 'pause', nodes: sec, primary: pr }); mark('mongo secondaries paused'); if (pauseMs > 0) for (const s of sec) chaos(request, 'pause', s);
         let during = 0, unreadable = false;
         let started: Promise<LabConsumer | null> | null = null;
         // the pause lasts EXACTLY 14000 ms: the consumer is started in the background and every read is bounded (a blocked driver call must not stretch the outage)
-        try { started = mk().catch(() => null); await sleep(14000); during = await bounded(mCountTag('d13b'), 3000).catch(() => { unreadable = true; return 0; }); } finally { for (const s of sec) chaos(request, 'unpause', s); mark('unpaused'); }
+        try { started = mk().catch(() => null); await sleep(pauseMs); during = await bounded(mCountTag('d13b'), 3000).catch(() => { unreadable = true; return 0; }); } finally { if (pauseMs > 0) for (const s of sec) chaos(request, 'unpause', s); tl.push({ t: rel(), e: 'unpause' }); mark('unpaused'); }
         { const c = await started; if (c) { await c.stop().catch(() => {}); live.delete(c); } }
-        await waitHealthy(); const termAfter = ((await status()) as { term?: number }).term; assert.equal(during, 0, 'nothing was processed without a Mongo majority');
+        await waitHealthy(); await snap('healed'); const termAfter = ((await status()) as { term?: number }).term; assert.equal(during, 0, 'nothing was processed without a Mongo majority');
         // A consumer that withholds an ACK drops its connection (the adapter never reconnects by itself): a supervisor restarts it, as in 11E.
         const withheld0 = metrics.filter(x => x.name === 'broker_adapter_delivery_total' && (x.labels as { outcome?: string }).outcome === 'withheld').length; let attempts = 0;
         const accounted = async () => (await mCountTag('d13b')) + (await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13b-' } }));
@@ -368,11 +397,22 @@ async function main() {
         const quarantineTotal = await quarantineRows.countDocuments({}), quarantineSample = (await quarantineRows.find({}).limit(2).toArray()).map(d => JSON.stringify(d).slice(0, 420)), measurementsTotal = await measurements.countDocuments({}), measurementsD13Local = await measurements.countDocuments({ eventId: { $regex: '^e11f-d13b-' } }), metricTally = Object.entries(metrics.slice(mStart).reduce((a: Record<string, number>, x) => { const l = x.labels as Record<string, string>; const k = x.name + '|' + (l.outcome ?? '') + '|' + (l.reasonCode ?? ''); a[k] = (a[k] ?? 0) + 1; return a; }, {})).slice(0, 14), claimsD13 = await db.collection(inn.idempotency).countDocuments({ eventId: { $regex: '^e11f-d13b-' } }), measurementsD13Nested = await measurements.countDocuments({ 'event.eventId': { $regex: '^e11f-d13b-' } }), claimsTotal = await db.collection(inn.idempotency).countDocuments({}), claimSample = (await db.collection(inn.idempotency).find({}).sort({ _id: -1 }).limit(2).toArray()).map(d => JSON.stringify(d).slice(0, 600)), measurementSample = (await measurements.find({}).sort({ _id: -1 }).limit(2).toArray()).map(d => JSON.stringify(d).slice(0, 600)), d13Sample: string[] = [];
         const stateCounts = await stateRows.aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]).toArray();
         mark('reconcile done'); const m = await mCountTag('d13b'), q = await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13b-' } }), inboxN = await inboxRows.countDocuments({});
-        await c.stop(); live.delete(c);
+        await c.stop(); live.delete(c); await snap('end');
+        const rawRows = await inboxRows.find({}).toArray(); const evOf = (d: { rawPayload?: { buffer?: Uint8Array } }) => { try { return String((JSON.parse(Buffer.from(d.rawPayload!.buffer!).toString('utf8')) as { eventId?: string }).eventId); } catch { return ''; } };
+        const byEvent = new Map<string, { inboxId: string; persistedAt: unknown }[]>(); for (const d of rawRows) { const e = evOf(d as never); if (e.startsWith('e11f-d13b-')) byEvent.set(e, [...(byEvent.get(e) ?? []), { inboxId: String(d._id), persistedAt: (d as { rawPersistedAt?: unknown }).rawPersistedAt }]); }
+        const stateById = new Map((await stateRows.find({}).toArray()).map(d => [String(d._id), String((d as { status?: unknown }).status) + ':' + String((d as { outcome?: unknown }).outcome ?? '')]));
+        const claimSet = new Set((await db.collection(inn.idempotency).find({ eventId: { $regex: '^e11f-d13b-' } }).toArray()).map(d => String(d.eventId))), measSet = new Set((await measurements.find({ 'event.eventId': { $regex: '^e11f-d13b-' } }).toArray()).map(d => String((d as { event?: { eventId?: string } }).event?.eventId))), quarSet = new Set((await quarantineRows.find({ eventId: { $regex: '^e11f-d13b-' } }).toArray()).map(d => String(d.eventId)));
+        const pauseAt = Number((tl.find(x => x.e === 'pause') ?? { t: 0 }).t), unpauseAt = Number((tl.find(x => x.e === 'unpause') ?? { t: 0 }).t);
+        const matrix = sent.map(id => { const tm = timings.get(id); const rows = byEvent.get(id) ?? [];
+          return { eventId: id, publisherPuback: p.acked.has(id), deliveries: tm?.deliveries ?? 0, receiptIssued: tm?.persisted !== undefined, mqttAckReleased: tm?.acked !== undefined, receiptDuringOutage: tm?.persisted !== undefined ? (tm.persisted - t0 >= pauseAt && tm.persisted - t0 <= unpauseAt) : null, inboxRowsAfterHeal: rows.length, states: rows.map(r => stateById.get(r.inboxId) ?? 'no-state'), claim: claimSet.has(id), measurement: measSet.has(id), quarantine: quarSet.has(id) }; });
+        const summary = { events: N, pauseMs, publisherPuback: matrix.filter(x => x.publisherPuback).length, receiptIssued: matrix.filter(x => x.receiptIssued).length, mqttAckReleased: matrix.filter(x => x.mqttAckReleased).length, receiptDuringOutage: matrix.filter(x => x.receiptDuringOutage === true).length, withInboxRowAfterHeal: matrix.filter(x => x.inboxRowsAfterHeal > 0).length, withClaim: matrix.filter(x => x.claim).length, withMeasurement: matrix.filter(x => x.measurement).length, withQuarantine: matrix.filter(x => x.quarantine).length,
+          // deliveries of events that are NOT part of this scenario = STALE redelivery of an earlier scenario's session state (the D04 family)
+          neverDelivered: matrix.filter(x => x.deliveries === 0).length, staleDeliveredEvents: [...timings.keys()].filter(k => !sent.includes(k)).length, staleSample: [...timings.keys()].filter(k => !sent.includes(k)).slice(0, 3) };
+        writeFileSync('.local-evidence/be13-11g-event-matrix-' + pauseMs + '-' + N + '.json', JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', summary, timeline: tl, matrix }, null, 1));
         noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m - q), acked: p.acked.size });
         // a loss here must come WITH an election (term change): any other loss is an unexpected FAIL, not the documented limitation
         if (p.acked.size - m - q > 0) assert.notEqual(termAfter, termBefore, 'loss without an election is unexplained');
-        return { acked: p.acked.size, processedWhileMongoDown: unreadable ? 'unreadable-without-majority (nothing could be committed either)' : during, measurementsAfterHealing: m, quarantined: q, inboxRecords: inboxN, supervisorRestarts: attempts, withheldDeliveries: withheld, stateCounts, quarantineTotal, quarantineSample, measurementsTotal, measurementsD13Local, metricTally, mongoTermBefore: termBefore, mongoTermAfter: termAfter, claimsD13, measurementsD13Nested, claimsTotal, claimSample, measurementSample, reconcileSamples: recon.slice(0, 2), lostAfterPuback: Math.max(0, p.acked.size - m - q) };
+        return { acked: p.acked.size, processedWhileMongoDown: unreadable ? 'unreadable-without-majority (nothing could be committed either)' : during, measurementsAfterHealing: m, quarantined: q, inboxRecords: inboxN, supervisorRestarts: attempts, withheldDeliveries: withheld, stateCounts, quarantineTotal, quarantineSample, measurementsTotal, measurementsD13Local, metricTally, mongoTermBefore: termBefore, mongoTermAfter: termAfter, claimsD13, g11Summary: summary, g11Timeline: tl, measurementsD13Nested, claimsTotal, claimSample, measurementSample, reconcileSamples: recon.slice(0, 2), lostAfterPuback: Math.max(0, p.acked.size - m - q) };
       });
       await scenario('D14', 'durable: broker recovered, THEN a Mongo primary failover: exactly one measurement per event', async () => {
         const first = await consumerOpen(); await first.close(true); await sleep(300);

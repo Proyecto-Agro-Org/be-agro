@@ -74,8 +74,11 @@ Ninguna opción está seleccionada. Los responsables son **sugerencias de rol**,
 | 68 | Garantía ante caída dura del broker (ventana PUBACK→durable) | Aceptar la ventana · publisher reintenta con confirmación E2E · otro broker | Qué se promete a negocio | D27: 50 de 50 perdidos con buffer de 3 s; D04: 1–3 por ciclo | LIMITACIÓN demostrada en 5.8.6 CE | Requisito de no pérdida | Dueño del producto + líder técnico | PENDIENTE |
 | 69 | `flush_interval` / `max_items` del buffer de escritura | Valores por defecto · afinados | Ancho de la ventana | Sin impacto medible en el laboratorio (D22/D23) | Defaults de EMQX | Resultado de 68 | Operaciones | PENDIENTE |
 | 70 | Qué hacer con el estado inflight perdido (stale redelivery y pérdida de D04) | Aceptar · reconciliación E2E · cambiar broker | Cierre de F-E2 | F-E2 `BLOCKED_BY_BROKER_CAPABILITY` | Idempotencia absorbe stale; la pérdida no se detecta | 68 y 64 | Dueño del producto + líder técnico | PENDIENTE |
+| 71 | Mantener el pre-check de idempotencia con `readConcern: majority` y la clasificación de F-F7 | Mantener · linearizable · revertir | Coste de la lectura majority | F-F7 `REFUTED / MISCLASSIFIED`; G01 demostrado | Sin majority el pre-check no responde `duplicate` | 70 | Líder técnico | PENDIENTE |
 
 BE13-11E: las filas 53–62 se agregan sin elegir ninguna opción; 48, 49 y 51 quedan refinadas por la evidencia de sesiones, reconexión y concurrencia. Toda cifra de 11E es `LOCAL_LAB_EVIDENCE`, no un límite productivo.
+
+BE13-11G: la fila 71 se agrega sin elegir ninguna opción; el fix del pre-check (`525d8c4`) permanece. Toda cifra de 11G es `LOCAL_LAB_EVIDENCE`.
 
 BE13-11F: las filas 63–70 se agregan sin elegir ninguna opción; la 59 queda refinada: la cola offline durable es `PROVEN_LOCAL`, el estado inflight y la ventana PUBACK→durable son una limitación demostrada de EMQX 5.8.6 CE (F-E2 `BLOCKED_BY_BROKER_CAPABILITY`). Toda cifra de 11F es `LOCAL_LAB_EVIDENCE`.
 
