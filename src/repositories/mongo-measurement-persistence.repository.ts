@@ -56,7 +56,10 @@ export function createMongoMeasurementPersistence(options: { connection: Connect
   // Reads the committed claim and checks it really belongs to this key (a hash
   // collision or a tampered document fails closed instead of matching).
   async function readClaim(key: IdempotencyKey, session?: ClientSession) {
-    const raw = await claims.findOne({ _id: idempotencyDocumentId(key) as never, realm: key.realm }, { session, maxTimeMS: 3000 });
+    // BE13-11G (F-F7): the PRE-CHECK (no session) must only trust what a majority holds. A claim that exists on the primary alone (a commit whose
+    // majority acknowledgement timed out) is not a fact: answering `duplicate` from it marks the event handled and the claim can later be rolled back.
+    // Inside a transaction (session) the snapshot read is already consistent with the transaction's own majority-committed commit.
+    const raw = await claims.findOne({ _id: idempotencyDocumentId(key) as never, realm: key.realm }, { session, ...(session === undefined ? { readConcern: { level: 'majority' } } : {}), maxTimeMS: 3000 } as never);
     if (raw === null) return null;
     const claim = claimDocumentSchema.parse(raw);
     if (claim.sourceId !== key.sourceId || claim.operation !== key.operation || claim.eventId !== key.eventId || claim.field !== key.field ||
