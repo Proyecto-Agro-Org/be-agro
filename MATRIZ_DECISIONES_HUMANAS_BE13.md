@@ -75,8 +75,11 @@ Ninguna opción está seleccionada. Los responsables son **sugerencias de rol**,
 | 69 | `flush_interval` / `max_items` del buffer de escritura | Valores por defecto · afinados | Ancho de la ventana | Sin impacto medible en el laboratorio (D22/D23) | Defaults de EMQX | Resultado de 68 | Operaciones | PENDIENTE |
 | 70 | Qué hacer con el estado inflight perdido (stale redelivery y pérdida de D04) | Aceptar · reconciliación E2E · cambiar broker | Cierre de F-E2 | F-E2 `BLOCKED_BY_BROKER_CAPABILITY` | Idempotencia absorbe stale; la pérdida no se detecta | 68 y 64 | Dueño del producto + líder técnico | PENDIENTE |
 | 71 | Mantener el pre-check de idempotencia con `readConcern: majority` y la clasificación de F-F7 | Mantener · linearizable · revertir | Coste de la lectura majority | F-F7 `REFUTED / MISCLASSIFIED`; G01 demostrado | Sin majority el pre-check no responde `duplicate` | 70 | Líder técnico | PENDIENTE |
+| 72 | Cómo tratar la dependencia de D13b del historial de sesión (reentrega stale que desplaza lo nuevo) | Aceptar con reconciliación E2E · evaluar otra versión/modo del broker · capturar inflight y repetir | Cierre de F-E2 | `REPRODUCED_LOCAL` (D13 → D13b, 3/3); sin recibo+ACK+inbox ausente | La entrega de eventos nuevos puede demorarse o no llegar tras un restart | 70 y 71 | Dueño del producto + líder técnico | PENDIENTE |
 
 BE13-11E: las filas 53–62 se agregan sin elegir ninguna opción; 48, 49 y 51 quedan refinadas por la evidencia de sesiones, reconexión y concurrencia. Toda cifra de 11E es `LOCAL_LAB_EVIDENCE`, no un límite productivo.
+
+BE13-11H: la fila 72 se agrega sin elegir ninguna opción; no cambia F-F7 ni el fix de 11G. Toda cifra de 11H es `LOCAL_LAB_EVIDENCE`.
 
 BE13-11G: la fila 71 se agrega sin elegir ninguna opción; el fix del pre-check (`525d8c4`) permanece. Toda cifra de 11G es `LOCAL_LAB_EVIDENCE`.
 

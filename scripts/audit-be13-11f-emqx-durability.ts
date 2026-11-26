@@ -176,8 +176,8 @@ async function main() {
     }
     // BE13-11H: read-only snapshot of the durable session as the broker reports it (management API) + harness counters. Taken while the consumer is connected.
     const sessionSnapshot = async (rx: Rx) => {
-      const get = async (path: string) => { try { const r = await L().api('GET', path); return { status: r.status, body: r.body.slice(0, 900) }; } catch (e) { return { error: (e as Error).message.slice(0, 80) }; } };
-      const client = await get('/clients/' + consumerId()); let c: Record<string, unknown> = {}; try { c = JSON.parse((client as { body?: string }).body ?? '{}') as Record<string, unknown>; } catch { /* partial body */ }
+      const get = async (path: string) => { try { const r = await L().api('GET', path); return { status: r.status, full: r.body, body: r.body.slice(0, 900) }; } catch (e) { return { error: (e as Error).message.slice(0, 80) }; } };
+      const client = await get('/clients/' + consumerId()); let c: Record<string, unknown> = {}; try { c = JSON.parse((client as { full?: string }).full ?? '{}') as Record<string, unknown>; } catch { /* not JSON */ }
       return { clientId: consumerId(), sessionPresent: rx.sessionPresent, cleanStartRequested: false, sessionExpiryRequested: 3600, brokerRestartsSoFar: sess.brokerRestarts, rawConsumerOpensSoFar: sess.consumerOpens, adapterStartsSoFar: sess.adapterStarts,
         adapterConnectedMetric: metrics.filter(x => x.name === 'broker_adapter_connection_total' && (x.labels as { outcome?: string }).outcome === 'connected').length, scenariosBefore: results.map(r => r.id),
         broker: { connected: c.connected, clean_start: c.clean_start, expiry_interval: c.expiry_interval, inflight_cnt: c.inflight_cnt, mqueue_len: c.mqueue_len, mqueue_dropped: c.mqueue_dropped, subscriptions_cnt: c.subscriptions_cnt, created_at: c.created_at, connected_at: c.connected_at, recv_cnt: c.recv_cnt, send_cnt: c.send_cnt, rawStatus: (client as { status?: number }).status },
