@@ -8,6 +8,8 @@
 // No Atlas, no external broker, no hardware, no production; credentials are generated per run.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { once } from 'node:events';
+import express from 'express';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -25,7 +27,11 @@ import { createMongoMeasurementPersistence, idempotencyDocumentId, measurementDo
 import { loadMqttJsFactory } from '../src/adapters/emqx-mqtt-connect.js';
 import { LAB_VERIFIED_TOPIC } from '../src/adapters/emqx-mqtt-broker.adapter.js';
 import { EMQX_IMAGE, labContainersRemaining, labVolumesRemaining, startEmqxLab, type EmqxLab, type EmqxLabOptions } from './be13-11d/emqx-lab.js';
-import { INGEST, BUSINESS, SENSOR, startLabConsumer, type LabConsumer, type MetricSink, type TimingMap } from './be13-11d/lab-consumer.js';
+import { LAB_PRINCIPALS, INGEST, BUSINESS, SENSOR, startLabConsumer, type LabConsumer, type MetricSink, type TimingMap } from './be13-11d/lab-consumer.js';
+import { createIngestConfirmationService } from '../src/services/ingest-confirmation.service.js';
+import { createIngestConfirmationRouter } from '../src/routes/ingest-confirmation.routes.js';
+import { createMongoIngestConfirmationEvidence } from '../src/repositories/mongo-ingest-confirmation.evidence.js';
+import { reconcilePublish, type PublisherRetryPolicy, type ReconcileResult } from './be13-11j/publisher-reconciler.js';
 import { classifyEventualDelivery, classifyOutcome, deliveryTimeline, parseSessionResponses, scenarioOfEvent, type PacketRecord } from './be13-11i/delivery-order.js';
 
 // KNOWN_LIMITATION = a durability requirement the broker DEMONSTRABLY does not meet (documented, reproducible, expected here). A PUBACKed message that is
@@ -434,6 +440,40 @@ async function main() {
             if (st && (st.status === 404 || connected === false)) { await c.stop().catch(() => {}); live.delete(c); await sleep(1500); c = await mk(); restarts += 1; }
           }
           await sleep(2000); await c.idle(); extension = { extendMs, elapsedMs: Math.round(performance.now() - tStart), supervisorRestartsInExtension: restarts, timedOut, ...ownStats() }; mark('extended window end ' + JSON.stringify(extension));
+        }
+        // BE13-11J (TEST_ONLY, only with BE13_11J_TAG): the publisher does NOT trust the PUBACK it already holds for every event. It asks the backend
+        // (real HTTP router over the real Mongo evidence) and re-publishes the SAME eventId until it has backend evidence, quarantine, or the budget ends.
+        if (process.env.BE13_11J_TAG) {
+          mark('11J reconciliation start'); const j0 = performance.now();
+          const policy: PublisherRetryPolicy = { mode: 'TEST_ONLY', initialDelayMs: 2000, maxAttempts: 4, backoffFactor: 1.5, maxDelayMs: 6000, maxElapsedMs: 60000 };
+          const svc = createIngestConfirmationService({ evidence: createMongoIngestConfirmationEvidence({ connection: conns[3]!, prefix: INGEST, realm: 'test' }) });
+          const authority = { authenticate: async (req: { get(h: string): string | undefined }) => req.get('x-principal') ?? null, scopeOf: async (pr: string) => { const m = LAB_PRINCIPALS[pr]; return m ? { realm: 'test' as const, sourceId: m.sourceId } : null; } };
+          const app = express(); app.use(createIngestConfirmationRouter({ mode: 'TEST_ONLY', service: svc, authority: authority as never }));
+          const server = app.listen(0, '127.0.0.1'); await once(server, 'listening'); const base = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
+          const ask = async (id: string, principal = 'emqx-user:lab-device-a') => { const r = await fetch(base + '/ingest-confirmations/' + id, { headers: { 'x-principal': principal }, signal: AbortSignal.timeout(8000) }); return r.status === 200 ? { ok: true as const, status: ((await r.json()) as { status: string }).status } : { ok: false as const }; };
+          // keep the consumer connected while the publisher retries (same supervisor policy as the original window)
+          let keep = true; const keeper = (async () => { while (keep) { await sleep(3000); const st = await L().api('GET', '/clients/' + consumerId()).catch(() => null); let cn: boolean | null = null; try { cn = (JSON.parse(st?.body ?? '{}') as { connected?: boolean }).connected ?? null; } catch { /* */ } if (keep && st && (st.status === 404 || cn === false)) { await c.stop().catch(() => {}); live.delete(c); await sleep(1500); c = await mk(); } } })();
+          const results: ReconcileResult[] = []; let nextIdx = 0, republished = 0;
+          const worker = async () => { for (;;) { const i = nextIdx++; if (i >= sent.length) return; const id = sent[i]!;
+            results.push(await reconcilePublish(id, policy, { sleep, now: () => Date.now(), confirm: eid => ask(eid),
+              // attempt 1 IS the original publish (already PUBACKed before the broker restart): the publisher keeps that PUBACK as BROKER_ACCEPTED only
+              publish: async (eid, attempt) => { if (attempt === 1) return p.acked.has(eid); republished += 1; const r = await publish([eid], { window: 1 }); return r.acked.has(eid); } })); } };
+          await Promise.all(Array.from({ length: 20 }, worker)); await sleep(2500); await c.idle(); keep = false; await keeper;
+          // cross-tenant probe: device B asks about a confirmed event of device A
+          const probeId = results.find(r => r.outcome === 'CONFIRMED')?.eventId ?? sent[0]!; const cross = await ask(probeId, 'emqx-user:lab-device-b'), own = await ask(probeId);
+          const perEvent = await measurements.aggregate([{ $match: { 'event.eventId': { $regex: '^e11f-d13b-' } } }, { $group: { _id: '$event.eventId', n: { $sum: 1 } } }]).toArray();
+          const nByEvent = new Map(perEvent.map(d => [String(d._id), Number(d.n)])), claimsNow = new Set((await db.collection(inn.idempotency).find({ eventId: { $regex: '^e11f-d13b-' } }).toArray()).map(d => String(d.eventId)));
+          const outcomes = { CONFIRMED: 0, QUARANTINED: 0, UNCONFIRMED_EXPLICIT: 0 } as Record<string, number>; for (const r of results) outcomes[r.outcome] = (outcomes[r.outcome] ?? 0) + 1;
+          const byStatus = results.reduce((a: Record<string, number>, r) => { a[r.finalConfirmation] = (a[r.finalConfirmation] ?? 0) + 1; return a; }, {});
+          const dupMeasurements = [...nByEvent.values()].filter(n => n > 1).length, confirmedWithoutEvidence = results.filter(r => r.outcome === 'CONFIRMED' && !claimsNow.has(r.eventId) && r.finalConfirmation === 'processed').length;
+          const summary11j = { publisherPuback: p.acked.size, reconciled: results.length, outcomes, finalStatusCounts: byStatus, retried: results.filter(r => r.attempts > 1).length, republishedPublishes: republished, brokerAcceptedAny: results.filter(r => r.brokerAcceptedAny).length,
+            confirmedAfterRetry: results.filter(r => r.outcome === 'CONFIRMED' && r.attempts > 1).length, unconfirmed: results.filter(r => r.outcome === 'UNCONFIRMED_EXPLICIT').map(r => r.eventId), measurementsDistinctEvents: nByEvent.size, measurementsTotalD13b: [...nByEvent.values()].reduce((a, b) => a + b, 0), eventsWithMoreThanOneMeasurement: dupMeasurements,
+            confirmedProcessedWithoutClaim: confirmedWithoutEvidence, crossTenantProbe: { eventId: probeId, askedByB: cross, askedByOwner: own }, policy, elapsedMs: Math.round(performance.now() - j0) };
+          writeFileSync('.local-evidence/be13-11j-' + process.env.BE13_11J_TAG.replace(/[^\w.-]/g, '_') + '.json', JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', tag: process.env.BE13_11J_TAG, summary: summary11j, originalWindow, results }, null, 1));
+          server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); mark('11J reconciliation done ' + JSON.stringify({ outcomes, byStatus, retried: summary11j.retried }));
+          assert.equal(results.length, sent.length, 'every PUBACKed event was reconciled'); assert.equal(outcomes.CONFIRMED! + outcomes.QUARANTINED! + outcomes.UNCONFIRMED_EXPLICIT!, sent.length, 'each event ends in exactly one explicit outcome');
+          assert.equal(dupMeasurements, 0, 'a retried eventId never produced a second measurement'); assert.equal(confirmedWithoutEvidence, 0, 'no event was confirmed `processed` without a committed claim');
+          assert.equal(cross.ok && cross.status, 'not-found', 'cross-tenant probe must not see the event');
         }
         // an attempt that hit the lost majority may sit RECEIPTED: the receipted recovery (TEST_ONLY policy) settles it, as in D14
         const recon: unknown[] = [];
