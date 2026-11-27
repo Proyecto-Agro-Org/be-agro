@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 const src = readFileSync(new URL('../scripts/audit-be13-11f-emqx-durability.ts', import.meta.url), 'utf8');
 
 test('H1: D13b takes a session snapshot (clientId, sessionPresent, broker counters) before closing the first consumer', () => {
-  assert.match(src, /const snapshotBefore = await sessionSnapshot\(first\); await first\.close\(true\)/);
+  assert.match(src, /const snapshotBefore = await sessionSnapshot\(first\);[^\n]*await first\.close\(true\)/);
   for (const field of ['sessionPresent', 'clientId', 'brokerRestartsSoFar', 'rawConsumerOpensSoFar', 'inflight_cnt', 'mqueue_len', 'clean_start', 'expiry_interval']) assert.ok(src.includes(field), field);
 });
 

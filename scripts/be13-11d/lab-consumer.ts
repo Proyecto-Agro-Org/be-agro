@@ -3,6 +3,7 @@
 import type { Connection } from 'mongoose';
 import { createEmqxMqttBrokerAdapter, type EmqxMqttBrokerAdapter, type PoisonLabPolicy } from '../../src/adapters/emqx-mqtt-broker.adapter.js';
 import { loadMqttJsFactory } from '../../src/adapters/emqx-mqtt-connect.js';
+import { eventIdFromEnvelope, type PacketRecord } from '../be13-11i/delivery-order.js';
 import { decideBrokerAck, type AdapterObservedDelivery } from '../../src/iot/broker-adapter.contracts.js';
 import type { DurableBrokerAdmissionDependencies, DurableBrokerAdmissionService } from '../../src/iot/mqtt-ingestion-boundary.contracts.js';
 import type { BrokerInboxReconciler, BrokerInboxReconciliationStore } from '../../src/iot/inbox-reconciliation.contracts.js';
@@ -120,7 +121,7 @@ export interface LabConsumer {
 
 export async function startLabConsumer(options: { conn: Connection; brokerUrl: string; password: string; clientId?: string; hooks?: LabConsumerHooks; poisonPolicy?: PoisonLabPolicy;
   metricsSink: MetricSink; realm?: string; clean?: boolean; durableSession?: boolean; sessionExpirySeconds?: number; subscribeTopic?: string; receiveMaximum?: number; handlerDelayMs?: number; timings?: TimingMap;
-  extras?: LabDepsExtras }): Promise<LabConsumer> {
+  extras?: LabDepsExtras; packetSink?: (r: PacketRecord & { cmd: string; sessionPresent?: boolean }) => void; packetScenario?: string }): Promise<LabConsumer> {
   const realm = options.realm ?? 'test';
   const store = createMongoBrokerInboxReconciliationStore({ connection: options.conn, prefix: INGEST, realm: realm as never });
   const deps = createLabDeps(options.conn, options.metricsSink, realm, options.extras);
@@ -162,7 +163,7 @@ export async function startLabConsumer(options: { conn: Connection; brokerUrl: s
     return decideBrokerAck(delivery.brokerObserved.qos, r);
   };
   const adapter = createEmqxMqttBrokerAdapter({ brokerUrl: options.brokerUrl, clientId: options.clientId ?? 'lab-consumer-1', username: 'lab-consumer', password: options.password,
-    mqttFactory: await loadMqttJsFactory(), poisonPolicy: options.poisonPolicy ?? 'ack-and-drop', metrics: deps.metrics,
+    mqttFactory: await packetTappedFactory(options), poisonPolicy: options.poisonPolicy ?? 'ack-and-drop', metrics: deps.metrics,
     ...(options.clean === undefined ? {} : { clean: options.clean }), ...(options.durableSession ? { durableSession: true } : {}), ...(options.sessionExpirySeconds === undefined ? {} : { sessionExpirySeconds: options.sessionExpirySeconds }), ...(options.subscribeTopic === undefined ? {} : { subscribeTopic: options.subscribeTopic }),
     ...(options.receiveMaximum === undefined ? {} : { receiveMaximum: options.receiveMaximum }),
     testHooks: { afterAck: delivery => { log.push({ at: 'acked', detail: 'puback-released' }); stamp(delivery, 'acked'); const id = receipts.get(delivery); if (id !== undefined) processFromRecord(id, delivery); } } });
@@ -170,4 +171,19 @@ export async function startLabConsumer(options: { conn: Connection; brokerUrl: s
   return { adapter, admission, reconciler, store, log, concurrency,
     async idle() { while (pending.size > 0) await Promise.allSettled([...pending]); },
     async stop() { await adapter.stop(); } };
+}
+
+// BE13-11I (TEST_ONLY): passive tap on the MQTT.js client the adapter creates. 'packetreceive' fires for every inbound packet BEFORE the adapter handles it, so the MQTT DUP flag,
+// the delivery order and the CONNACK sessionPresent are observed without touching the adapter. No sink -> the factory is returned untouched.
+async function packetTappedFactory(options: { packetSink?: (r: PacketRecord & { cmd: string; sessionPresent?: boolean }) => void; packetScenario?: string }) {
+  const base = await loadMqttJsFactory();
+  const sink = options.packetSink; if (!sink) return base;
+  return ((url: string, o?: Record<string, unknown>) => {
+    const c = base(url, o ?? {}) as unknown as { on(e: string, f: (p: { cmd?: string; dup?: boolean; qos?: number; messageId?: number; payload?: Buffer; sessionPresent?: boolean }) => void): void };
+    c.on('packetreceive', p => {
+      if (p.cmd === 'connack') sink({ t: performance.now(), scn: options.packetScenario ?? '', dup: null, qos: null, messageId: null, eventId: '', cmd: 'connack', ...(p.sessionPresent === undefined ? {} : { sessionPresent: p.sessionPresent }) });
+      else if (p.cmd === 'publish') sink({ t: performance.now(), scn: options.packetScenario ?? '', dup: typeof p.dup === 'boolean' ? p.dup : null, qos: p.qos ?? null, messageId: p.messageId ?? null, eventId: p.payload ? eventIdFromEnvelope(p.payload) : '', cmd: 'publish' });
+    });
+    return c;
+  }) as typeof base;
 }

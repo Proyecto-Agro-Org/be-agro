@@ -30,7 +30,7 @@ export interface EmqxLab {
   readonly volumeName: string | null;
   readonly durable: boolean;
   readonly secrets: Readonly<Record<string, string>>;
-  api(method: string, path: string, body?: unknown): Promise<{ status: number; body: string }>;
+  api(method: string, path: string, body?: unknown, o?: { full?: boolean }): Promise<{ status: number; body: string }>;
   restart(): Promise<void>;                              // docker restart (same container, same volume)
   stopStart(): Promise<void>;                            // docker stop (graceful) then start (same container, same volume)
   kill(): Promise<void>;                                 // docker kill (SIGKILL) then start: a hard crash, same container, same volume
@@ -52,10 +52,11 @@ export async function startEmqxLab(basePort: number, runId: string, loadUsers: r
   const all = [...Object.values(secrets), dashPassword];
   const scrub = (text: string) => all.reduce((t, s) => t.split(s).join('***'), text);
   let token = '';
-  const api = async (method: string, path: string, body?: unknown) => {
+  // BE13-11I: bodies are cut to 600 chars by default (log hygiene); `full` returns the COMPLETE management-API answer for evidence snapshots.
+  const api = async (method: string, path: string, body?: unknown, o: { full?: boolean } = {}) => {
     const response = await fetch(`http://127.0.0.1:${apiPort}/api/v5${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-    return { status: response.status, body: scrub((await response.text()).slice(0, 600)) };
+    return { status: response.status, body: scrub(o.full ? await response.text() : (await response.text()).slice(0, 600)) };
   };
   const createVolume = () => { volumeName = containerName + '-data' + (volumeSeq === 0 ? '' : '-' + volumeSeq); volumeSeq += 1;
     docker('volume', 'create', '--label', 'agro.emqx.lab=' + runId, volumeName); };
