@@ -39,10 +39,15 @@ export interface OutboxSnapshot { nextSeq: number; entries: OutboxRecord[] }
 export interface DurableOutboxStore { load(): OutboxSnapshot; save(snapshot: OutboxSnapshot): void }
 export function createMemoryStore(): DurableOutboxStore & { snapshot(): OutboxSnapshot } { let s: OutboxSnapshot = { nextSeq: 1, entries: [] }; return { load: () => structuredClone(s), save: n => { s = structuredClone(n); }, snapshot: () => structuredClone(s) }; }
 /** TEST_ONLY local file store: temp file + fsync + atomic rename. The real device store (flash/SQLite/...) is a product decision. */
-export function createFileStore(path: string): DurableOutboxStore {
+const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+/** Atomic rename with a BOUNDED retry: on Windows a rename over an existing file can fail transiently (EPERM/EBUSY/EACCES) while an AV scanner or another handle holds it (found by the BE14-01 campaign). */
+export function renameWithRetry(rename: (from: string, to: string) => void, from: string, to: string, attempts = 12): void {
+  for (let i = 1; ; i += 1) { try { rename(from, to); return; } catch (e) { const code = (e as NodeJS.ErrnoException).code; if (i >= attempts || !['EPERM', 'EBUSY', 'EACCES'].includes(code ?? '')) throw e; sleepSync(Math.min(200, 10 * i)); } }
+}
+export function createFileStore(path: string, ops: { rename?: (from: string, to: string) => void } = {}): DurableOutboxStore {
   return {
     load() { if (!existsSync(path)) return { nextSeq: 1, entries: [] }; const p = JSON.parse(readFileSync(path, 'utf8')) as { version: 1; nextSeq: number; entries: OutboxRecord[] }; if (p.version !== 1 || !Array.isArray(p.entries) || !Number.isInteger(p.nextSeq)) throw new Error('OUTBOX_FILE_CORRUPT'); return { nextSeq: p.nextSeq, entries: p.entries }; },
-    save(s) { mkdirSync(dirname(path), { recursive: true }); const tmp = path + '.tmp'; writeFileSync(tmp, JSON.stringify({ version: 1, ...s }), 'utf8'); const fd = openSync(tmp, 'r+'); try { fsyncSync(fd); } finally { closeSync(fd); } renameSync(tmp, path); },
+    save(s) { mkdirSync(dirname(path), { recursive: true }); const tmp = path + '.tmp'; writeFileSync(tmp, JSON.stringify({ version: 1, ...s }), 'utf8'); const fd = openSync(tmp, 'r+'); try { fsyncSync(fd); } finally { closeSync(fd); } renameWithRetry(ops.rename ?? renameSync, tmp, path); },
   };
 }
 

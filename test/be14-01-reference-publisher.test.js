@@ -1,7 +1,7 @@
 // BE14-01 — reference publisher for the BE13 reconciliation contract (offline: fake clock/MQTT, REAL confirmation service + router, in-memory evidence).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, mkdtempSync, renameSync as renameSyncNode } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as mod from '../dist/scripts/be14-01/reference-publisher.js';
@@ -192,4 +192,14 @@ test('B21 the E2E campaign wiring: real MQTT port, file outbox, backend restart,
   const h = readFileSync(new URL('../scripts/audit-be13-11f-emqx-durability.ts', import.meta.url), 'utf8');
   for (const needle of ['BE14_01_TAG', 'createMqttPublisherPort', 'createRefFileStore(path)', "events.push({ at: 'backend-down' })", 'j14.holder.pub = j14.make()', 'CONFLICT_REQUIRES_REVIEW', 'confirmedWithoutBackendEvidence', 'eventsWithMoreThanOneMeasurement', "'emqx-user:lab-device-b'", 'e14-normal-']) assert.ok(h.includes(needle), needle);
   assert.match(h, /withLab\(\{ durable: true, flushIntervalMs: 1, writeBufferMaxItems: 1 \}/);
+});
+
+test('B22 file store: a transient EPERM/EBUSY on the atomic rename is retried (bounded); other errors and persistent failures are NOT swallowed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pub-')), path = join(dir, 'o.json'); let n = 0, calls = 0;
+  const flaky = (from, to) => { calls += 1; if (++n <= 3) throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); return renameImpl(from, to); };
+  const renameImpl = (from, to) => import('node:fs').then(() => 0) && require_rename(from, to);
+  function require_rename(from, to) { return renameSyncNode(from, to); }
+  const store = mod.createFileStore(path, { rename: flaky }); store.save({ nextSeq: 7, entries: [] }); assert.equal(store.load().nextSeq, 7); assert.equal(calls, 4);
+  assert.throws(() => mod.createFileStore(path, { rename: () => { throw Object.assign(new Error('x'), { code: 'EPERM' }); } }).save({ nextSeq: 1, entries: [] }), /x/);
+  let once = 0; assert.throws(() => mod.createFileStore(path, { rename: () => { once += 1; throw Object.assign(new Error('nope'), { code: 'ENOSPC' }); } }).save({ nextSeq: 1, entries: [] }), /nope/); assert.equal(once, 1);
 });
