@@ -1,0 +1,8 @@
+{
+  "_comment": "BE14-03 MODE B example. Secrets are NEVER written here: only the NAMES of environment variables. No external publisher exists yet; this file is a template.",
+  "technicalKey": "ESP32-AGRO-001",
+  "mqtt": { "url": "mqtt://127.0.0.1:1883", "usernameEnv": "CONFORMANCE_MQTT_USER", "passwordEnv": "CONFORMANCE_MQTT_PASSWORD" },
+  "reconciliation": { "principal": "TEST_ONLY_PRINCIPAL_A", "tokenEnv": "CONFORMANCE_RECONCILIATION_TOKEN" },
+  "scope": { "foreignPrincipal": "TEST_ONLY_PRINCIPAL_B" },
+  "bridge": { "command": "node", "args": ["path/to/your-publisher-bridge.mjs"] }
+}
