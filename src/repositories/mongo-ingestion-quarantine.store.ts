@@ -15,6 +15,7 @@ import type {
 } from '../iot/ingestion-recovery.contracts.js';
 import type { TrustGateRealm } from '../iot/trust-gate.contracts.js';
 import { quarantineCollection } from '../models/ingestion-quarantine.models.js';
+import { currentQuarantineScope } from '../iot/quarantine-reconcile-scope.js';
 
 // BE13-08 — Mongo quarantine store. Realm is part of every filter AND of the
 // quarantineId derivation. Dedupe: one document per (realm, stage, sourceId,
@@ -25,6 +26,7 @@ const code = z.string().regex(/^[a-z][a-z0-9-]{1,63}$/);
 const text = z.string().min(1).max(256).refine(v => !/[\p{Cc}]/u.test(v));
 const hex = z.string().regex(/^[0-9a-f]{64}$/);
 const evidence = z.string().min(1).max(256).regex(/^[A-Za-z0-9:_./-]+$/);
+const principalRef = z.string().min(1).max(128).regex(/^[A-Za-z0-9:_./@-]+$/);
 export const quarantineEntrySchema = z.object({
   realm: catalogueRealmSchema,
   stage: z.enum(['mapper', 'trust-gate', 'builder', 'be12', 'composition', 'persistence', 'recovery', 'retry']),
@@ -33,6 +35,7 @@ export const quarantineEntrySchema = z.object({
   reasonCode: code, cause: code.nullable(),
   retryClass: z.enum(['transient', 'ambiguous-commit', 'validation', 'security', 'conflict', 'policy-blocked', 'consistency', 'unknown']),
   fingerprint: hex.nullable(), documentDigest: hex.nullable(),
+  principalReference: principalRef.nullable().optional(), payloadSha256: hex.nullable().optional(), declaredEventId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$/).nullable().optional(),
 }).strict().refine(e => e.eventId !== null || e.documentDigest !== null, 'eventId or documentDigest required for dedupe');
 const auditSchema = z.object({ action: z.enum(['recorded', 'transition', 'replay']), outcome: code, reasonCode: code.nullable(), evidence: evidence.nullable() }).strict();
 const statusSchema = z.enum(['OPEN', 'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED']);
@@ -41,7 +44,8 @@ const date = z.date().transform(d => d.getTime());
 const storedSchema = z.object({ _id: idSchema, realm: catalogueRealmSchema, stage: quarantineEntrySchema.shape.stage,
   sourceId: text.nullable(), operation: z.enum(['measurement', 'device-status']).nullable(), eventId: text.nullable(), field: text.nullable(),
   device: z.object({ kind: z.enum(['mqtt-clientid', 'device-id']), value: text }).strict().nullable(), reasonCode: code, cause: code.nullable(),
-  retryClass: quarantineEntrySchema.shape.retryClass, fingerprint: hex.nullable(), documentDigest: hex.nullable(), status: statusSchema,
+  retryClass: quarantineEntrySchema.shape.retryClass, fingerprint: hex.nullable(), documentDigest: hex.nullable(),
+  principalReference: principalRef.nullable().optional(), payloadSha256: hex.nullable().optional(), declaredEventId: z.string().nullable().optional(), status: statusSchema,
   version: z.number().int().min(1), attemptCount: z.number().int().min(1), firstSeenAt: date, lastSeenAt: date, createdAt: date, updatedAt: date,
   audit: z.array(z.object({ action: z.enum(['recorded', 'transition', 'replay']), at: date, outcome: code, reasonCode: code.nullable(), evidence: evidence.nullable() }).strict()).max(100),
   lease: z.object({ ownerId: evidence.max(128), acquiredAt: date, token: z.number().int().min(1) }).strict().optional(),
@@ -80,7 +84,9 @@ export function createMongoIngestionQuarantineStore(options: { connection: Conne
 
   return Object.freeze({
     async record(rawEntry: unknown) {
-      const entry = quarantineEntrySchema.parse(rawEntry);
+      // BE13-11M: a NEW row keeps the authenticated scope + hash + declared eventId the boundary proved (ambient context). The dedupe identity (quarantineId) ignores them.
+      const ambient = currentQuarantineScope();
+      const entry = quarantineEntrySchema.parse(ambient && rawEntry && typeof rawEntry === 'object' ? { ...(rawEntry as object), principalReference: ambient.principalReference, payloadSha256: ambient.payloadSha256, declaredEventId: ambient.declaredEventId } : rawEntry);
       if (entry.realm !== realm) throw new Error('QUARANTINE_REALM_MISMATCH');
       const id = quarantineIdFor(entry);
       const fixed = Object.fromEntries(Object.entries(entry).map(([k, v]) => [k, { $ifNull: ['$' + k, literal(v)] }]));

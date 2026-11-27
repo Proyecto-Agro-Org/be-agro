@@ -35,6 +35,9 @@ export const quarantineValidator = { $expr: quarantineLeaseCoherence, $jsonSchem
     reasonCode: code, cause: { anyOf: [code, { bsonType: 'null' }] },
     retryClass: { enum: ['transient', 'ambiguous-commit', 'validation', 'security', 'conflict', 'policy-blocked', 'consistency', 'unknown'] },
     fingerprint: hexOrNull, documentDigest: hexOrNull, status,
+    // BE13-11M: optional reconciliation scope for NEW rows (legacy rows have none).
+    principalReference: { anyOf: [{ bsonType: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9:_./@-]+$' }, { bsonType: 'null' }] },
+    payloadSha256: hexOrNull, declaredEventId: { anyOf: [{ bsonType: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$' }, { bsonType: 'null' }] },
     version: { bsonType: ['int', 'long'], minimum: 1, maximum: 9_007_199_254_740_991 },
     attemptCount: { bsonType: ['int', 'long'], minimum: 1, maximum: 1_000_000 },
     firstSeenAt: { bsonType: 'date' }, lastSeenAt: { bsonType: 'date' }, createdAt: { bsonType: 'date' }, updatedAt: { bsonType: 'date' },
@@ -51,6 +54,8 @@ export const quarantineValidator = { $expr: quarantineLeaseCoherence, $jsonSchem
 export const quarantineIndexes = [
   { key: { realm: 1, status: 1, updatedAt: 1 }, name: 'quarantine_realm_status' },
   { key: { realm: 1, eventId: 1 }, name: 'quarantine_realm_event' },
+  // BE13-11M: publisher reconciliation lookup for rows whose sourceId is unknown (scope = authenticated principal).
+  { key: { realm: 1, principalReference: 1, declaredEventId: 1 }, name: 'quarantine_realm_principal_event' },
 ] as const;
 
 // BE13-10B — LOCAL validator upgrade for an existing BE13-08/09 quarantine collection. Order: (1) deploy code that
@@ -71,4 +76,17 @@ export async function provisionQuarantineCollection(connection: Connection, pref
   if (!db || (await db.listCollections({ name }).toArray()).length) throw new TypeError('New explicit quarantine namespace required');
   await db.createCollection(name, { collation: { locale: 'simple' }, validationLevel: 'strict', validationAction: 'error', validator: quarantineValidator });
   await db.collection(name).createIndexes(quarantineIndexes.map(index => ({ ...index, collation: { locale: 'simple' } })));
+}
+
+// BE13-11M — LOCAL upgrade of an existing quarantine collection: allow the optional reconciliation fields and create the principal lookup index.
+// Same contract as the 10B upgrade: refuses to run if a REPLAYING document has no lease. Existing rows stay valid (the new fields are optional).
+export async function upgradeQuarantineScopeBe1311m(connection: Connection, prefix: string) {
+  const name = quarantineCollection(prefix), db = connection.db;
+  if (!db || (await db.listCollections({ name }).toArray()).length !== 1) throw new TypeError('Existing quarantine namespace required');
+  const orphanReplaying = await db.collection(name).countDocuments({ status: 'REPLAYING', lease: { $exists: false } }, { readConcern: { level: 'majority' } } as never);
+  if (orphanReplaying > 0) return Object.freeze({ status: 'blocked' as const, orphanReplaying });
+  await db.command({ collMod: name, validator: quarantineValidator, validationLevel: 'strict', validationAction: 'error' });
+  const present = new Set((await db.collection(name).indexes()).map(i => i.name));
+  for (const index of quarantineIndexes) if (!present.has(index.name)) await db.collection(name).createIndex(index.key as never, { name: index.name, collation: { locale: 'simple' } } as never);
+  return Object.freeze({ status: 'upgraded' as const, orphanReplaying: 0 });
 }

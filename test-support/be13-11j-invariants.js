@@ -15,7 +15,8 @@ export function createBackend() {
   const evidence = {
     async claims(scope, id) { if (down.claims) throw new Error('down'); return claims.filter(c => c.realm === scope.realm && c.sourceId === scope.sourceId && c.eventId === id); },
     async inbox(scope, id) { if (down.inbox) throw new Error('down'); return inbox.filter(c => c.realm === scope.realm && c.sourceId === scope.sourceId && c.eventId === id); },
-    async quarantine(scope, id) { if (down.quarantine) throw new Error('down'); return quarantine.filter(c => c.realm === scope.realm && c.sourceId === scope.sourceId && c.eventId === id); },
+    async quarantine(scope, id) { if (down.quarantine) throw new Error('down');
+      return quarantine.filter(c => c.realm === scope.realm && ((c.sourceId === scope.sourceId && c.eventId === id) || (typeof scope.principalReference === 'string' && c.principalReference === scope.principalReference && c.declaredEventId === id))); },
   };
   return {
     evidence, down, claims, inbox, quarantine, measurements,

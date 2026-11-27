@@ -24,7 +24,11 @@ export const PAYLOAD_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 export const SOURCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/;
 
 /** Authorized scope of the caller. Derived by the server from the authenticated principal, never from the request. */
-export interface ConfirmationScope { readonly realm: TrustGateRealm; readonly sourceId: string }
+export interface ConfirmationScope {
+  readonly realm: TrustGateRealm; readonly sourceId: string;
+  /** BE13-11M: the authenticated principal, so a quarantine row written BEFORE a sourceId was known can still be reconciled by its owner. Never taken from the request. */
+  readonly principalReference?: string;
+}
 
 export type EvidenceState = 'present' | 'absent' | 'unavailable';
 export interface IngestConfirmation {
@@ -46,13 +50,17 @@ export interface IngestConfirmation {
 // Rows carry their own scope so the service can re-verify it (defence in depth: a store that ever returned a foreign row must not confirm).
 export interface ClaimEvidence { readonly realm: TrustGateRealm; readonly sourceId: string; readonly eventId: string; readonly committedAt: number }
 export interface InboxEvidence { readonly realm: TrustGateRealm; readonly sourceId: string; readonly eventId: string; readonly persistedAt: number; readonly payloadSha256: string }
-export interface QuarantineEvidence { readonly realm: TrustGateRealm; readonly sourceId: string | null; readonly eventId: string }
+export interface QuarantineEvidence {
+  readonly realm: TrustGateRealm; readonly sourceId: string | null; readonly eventId: string | null;
+  // BE13-11M (new rows only; absent on legacy rows)
+  readonly principalReference?: string | null; readonly declaredEventId?: string | null; readonly payloadSha256?: string | null;
+}
 
 /** Read-only evidence lookups. Each may reject (store unavailable): the service then answers `pending`, never `confirmed`. */
 export interface ConfirmationEvidencePort {
   claims(scope: ConfirmationScope, eventId: string): Promise<readonly ClaimEvidence[]>;
   inbox(scope: ConfirmationScope, eventId: string): Promise<readonly InboxEvidence[]>;
-  quarantine(scope: ConfirmationScope, eventId: string): Promise<readonly QuarantineEvidence[]>;
+  quarantine(scope: ConfirmationScope, eventId: string, payloadSha256: string): Promise<readonly QuarantineEvidence[]>;
 }
 
 export interface IngestConfirmationService {

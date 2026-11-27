@@ -69,6 +69,10 @@ export interface QuarantineEntry {
   readonly retryClass: RetryClass;
   readonly fingerprint: string | null;      // technical input fingerprint (no payload)
   readonly documentDigest: string | null;   // SHA-256 of a canonical document when no eventId exists
+  // BE13-11M: reconciliation scope for NEW rows (set by the store from the boundary's proven context, never by callers). Absent on legacy rows.
+  readonly principalReference?: string | null;
+  readonly payloadSha256?: string | null;
+  readonly declaredEventId?: string | null;
 }
 export interface QuarantineAuditEntry {
   readonly action: 'recorded' | 'transition' | 'replay';
