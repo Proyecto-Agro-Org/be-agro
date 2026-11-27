@@ -34,6 +34,7 @@ import { createIngestConfirmationService } from '../src/services/ingest-confirma
 import { createIngestConfirmationRouter } from '../src/routes/ingest-confirmation.routes.js';
 import { createMongoIngestConfirmationEvidence } from '../src/repositories/mongo-ingest-confirmation.evidence.js';
 import { reconcilePublish, type PublisherRetryPolicy, type ReconcileResult } from './be13-11j/publisher-reconciler.js';
+import { createFileOutboxStore, createOutboxPublisher, sha256Hex, type OutboxPolicy } from './be13-11n/publisher-outbox.js';
 import { classifyEventualDelivery, classifyOutcome, deliveryTimeline, parseSessionResponses, scenarioOfEvent, type PacketRecord } from './be13-11i/delivery-order.js';
 
 // KNOWN_LIMITATION = a durability requirement the broker DEMONSTRABLY does not meet (documented, reproducible, expected here). A PUBACKed message that is
@@ -204,6 +205,28 @@ async function main() {
       return snap;
     };
     const i11Tap = (scn: string) => i11.on ? { packetScenario: scn, packetSink: (r: PacketRecord & { cmd: string; sessionPresent?: boolean }) => { i11.packets.push(r); } } : {};
+    // BE13-11N (TEST_ONLY, only with BE13_11N_TAG): durable publisher. ONE MQTT connection per publisher identity (the boundary binds the MQTT clientId to the device key),
+    // a file outbox that survives a crash, confirmation through the reconciliation router over the real Mongo evidence.
+    const pubStats = { opens: 0, maxConcurrent: 0, concurrent: 0 }; let pubConn: MqttClient | null = null, pubOpening: Promise<MqttClient | null> | null = null;
+    const ensurePub = async (): Promise<MqttClient | null> => {
+      if (pubConn && !(pubConn as MqttClient & { isClosed: () => boolean }).isClosed()) return pubConn;
+      if (!pubOpening) pubOpening = (async () => { const c = await pubOpen('lab-device-a'); if (c) { pubStats.opens += 1; pubStats.concurrent += 1; pubStats.maxConcurrent = Math.max(pubStats.maxConcurrent, pubStats.concurrent); c.on('close', () => { pubStats.concurrent -= 1; }); } pubConn = c; pubOpening = null; return c; })();
+      return pubOpening;
+    };
+    const closePub = async () => { const c = pubConn; pubConn = null; if (c) await new Promise<void>(res => { c.end(true, {}, () => res()); setTimeout(res, 1500); }); };
+    const publishOne = async (_eventId: string, bytes: Uint8Array): Promise<boolean> => { try { const c = await ensurePub(); if (!c) return false;
+      return await new Promise<boolean>(res => { const t = setTimeout(() => res(false), 8000); c.publish('agro/lab/in/a', Buffer.from(bytes), { qos: 1 }, e => { clearTimeout(t); res(!e); }); }); } catch { return false; } };
+    const startOutboxPublisher = async (sent: string[]) => {
+      mkdirSync('.local-evidence', { recursive: true }); const path = '.local-evidence/outbox-' + process.env.BE13_11N_TAG!.replace(/[^\w.-]/g, '_') + '.json'; writeFileSync(path, JSON.stringify({ version: 1, entries: [] }));
+      const policy: OutboxPolicy = { mode: 'TEST_ONLY', capacity: 200, fast: { initialDelayMs: 2000, backoffFactor: 1.5, maxDelayMs: 6000, jitterRatio: 0.25, maxAttempts: 6, maxElapsedMs: 600000 }, slow: { intervalMs: 12000, confirmWaitMs: 2000, maxElapsedMs: 270000 } };
+      const make = () => createOutboxPublisher({ store: createFileOutboxStore(path), policy, deps: { now: () => Date.now(), random: () => Math.random(), publish: publishOne, confirm: (eid, h) => confirmVia(eid, h) } });
+      let pub = make(); const t0 = performance.now();
+      const submitted = sent.map(id => pub.submit({ eventId: id, bytes: eventBody(id, 0) }).result);
+      await pub.tick(8); pub.setGate(false);                                    // attempt 1 of every event = the original publication; confirmations are HELD until the original window is over
+      const acked = new Set(pub.entries().filter(e => e.brokerAcceptedCount > 0).map(e => e.eventId));
+      return { get pub() { return pub; }, rebuild() { pub = make(); return pub; }, path, policy, submitted, initial: { acked, lat: [] as number[], durationMs: performance.now() - t0, failed: sent.length - acked.size } };
+    };
+    let confirmVia: (eventId: string, payloadSha256: string) => Promise<{ ok: true; status: string } | { ok: false }> = async () => ({ ok: false });
     const perfProbe = async (label: string) => { const l = await publish(ids('perf' + label.replace(/\W/g, ''), 400), { window: 16 }); perf[label] = { acksPerS: r1(l.acked.size / (l.durationMs / 1000)), p50: pct(l.lat, .5), p95: pct(l.lat, .95), p99: pct(l.lat, .99) }; return perf[label]; };
 
     // ================================================================ GROUP 1: NON-DURABLE (the BE13-11E situation)
@@ -403,7 +426,8 @@ async function main() {
         const N = Number(process.env.BE13_11G_N ?? 60), pauseMs = Number(process.env.BE13_11G_PAUSE_MS ?? 14000), t0 = performance.now(), rel = () => Math.round(performance.now() - t0);
         const timings: TimingMap = new Map(); const tl: Record<string, unknown>[] = [];
         const snap = async (e: string) => { try { const st = (await bounded(db.admin().command({ replSetGetStatus: 1 }, { readPreference: 'nearest' }), 4000)) as { term?: number; optimes?: { lastCommittedOpTime?: { ts?: { toString(): string }; t?: number } }; members: { name: string; stateStr: string }[] }; tl.push({ t: rel(), e, term: st.term, commitTs: String(st.optimes?.lastCommittedOpTime?.ts), commitTerm: st.optimes?.lastCommittedOpTime?.t, members: st.members.map(m => m.name.split(':')[1] + ':' + m.stateStr).join(',') }); } catch { tl.push({ t: rel(), e, unreadable: true }); } };
-        const sent = ids('d13b', N), p = await publish(sent, { window: 8 }); mark('publisher done, restarting broker'); await L().restart(); await sleep(1500); mark('broker back'); await deepSnapshot('S2', { note: 'after the broker restart, consumer NOT yet reconnected' });
+        const sent = ids('d13b', N); const j11n = process.env.BE13_11N_TAG ? await startOutboxPublisher(sent) : null;
+        const p = j11n ? j11n.initial : await publish(sent, { window: 8 }); mark('publisher done, restarting broker'); await L().restart(); await sleep(1500); mark('broker back'); await deepSnapshot('S2', { note: 'after the broker restart, consumer NOT yet reconnected' });
         await waitHealthy(); const pr = await primaryIndex(), sec = [0, 1, 2].filter(i => i !== pr);
         const staleIds = ids('d13', 60); let s3p: Promise<unknown> | null = null, s4p: Promise<unknown> | null = null;
         const tap = i11.on ? { packetScenario: 'd13b', packetSink: (r: PacketRecord & { cmd: string; sessionPresent?: boolean }) => { i11.packets.push(r); if (r.cmd === 'connack' && !s3p) s3p = deepSnapshot('S3', { connackSessionPresent: r.sessionPresent ?? null, note: 'first CONNACK of D13b consumer, snapshot requested right after it (deliveries may already be in flight)' }); } } : {};
@@ -442,6 +466,45 @@ async function main() {
             if (st && (st.status === 404 || connected === false)) { await c.stop().catch(() => {}); live.delete(c); await sleep(1500); c = await mk(); restarts += 1; }
           }
           await sleep(2000); await c.idle(); extension = { extendMs, elapsedMs: Math.round(performance.now() - tStart), supervisorRestartsInExtension: restarts, timedOut, ...ownStats() }; mark('extended window end ' + JSON.stringify(extension));
+        }
+        // BE13-11N: the durable publisher resumes. Confirmation = the real TEST_ONLY router over the real Mongo evidence; the PUBACKs it already holds are only BROKER_ACCEPTED.
+        if (j11n) {
+          mark('11N publisher reconciliation start'); const n0 = performance.now();
+          const evidence = createMongoIngestConfirmationEvidence({ connection: conns[3]!, prefix: INGEST, realm: 'test' }), svc = createIngestConfirmationService({ evidence });
+          const authority = { kind: 'TEST_ONLY' as const, authenticate: async (req: { get(h: string): string | undefined }) => req.get('x-principal') ?? null, scopeOf: async (pr: string) => { const m = LAB_PRINCIPALS[pr]; return m ? { realm: 'test' as const, sourceId: m.sourceId, principalReference: pr } : null; } };
+          // campaign-local limits (NOT the 11K proposal): the campaign polls up to 60 events from one principal
+          const limiter = createTokenBucketRateLimiter({ mode: 'TEST_ONLY', perPrincipalRatePerSecond: 200, perPrincipalBurst: 400, globalRatePerSecond: 1000, globalBurst: 2000, maxKeys: 100 });
+          const app = express(); app.use(createIngestConfirmationRouter({ mode: 'TEST_ONLY', service: svc, authority: authority as never, rateLimiter: limiter }));
+          const server = app.listen(0, '127.0.0.1'); await once(server, 'listening'); const base = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
+          const ask = async (id: string, hash: string, principal = 'emqx-user:lab-device-a') => { const r = await fetch(base + '/ingest-confirmations/' + id + '?payloadSha256=' + hash, { headers: { 'x-principal': principal }, signal: AbortSignal.timeout(8000) }); return r.status === 200 ? { ok: true as const, status: ((await r.json()) as { status: string }).status } : { ok: false as const }; };
+          confirmVia = (eid, h) => ask(eid, h);
+          let keep = true; const keeper = (async () => { while (keep) { await sleep(3000); const st = await L().api('GET', '/clients/' + consumerId()).catch(() => null); let cn: boolean | null = null; try { cn = (JSON.parse(st?.body ?? '{}') as { connected?: boolean }).connected ?? null; } catch { /* */ } if (keep && st && (st.status === 404 || cn === false)) { await c.stop().catch(() => {}); live.delete(c); await sleep(1500); c = await mk(); } } })();
+          const before = j11n.pub.entries(); j11n.pub.setGate(true);
+          let busy = false, crashed: Record<string, unknown> | null = null; const startedAt = Date.now();
+          const ticker = setInterval(() => { if (busy) return; busy = true; void j11n.pub.tick(8).finally(() => { busy = false; }); }, 400);
+          // simulated publisher CRASH/RESTART ~8 s into the reconciliation: the in-memory publisher and its connection are dropped; a new instance is rebuilt ONLY from the file
+          await sleep(8000); clearInterval(ticker); while (busy) await sleep(100); const pre = j11n.pub.entries(); await closePub(); const post = j11n.rebuild().entries();
+          crashed = { entriesBefore: pre.length, entriesAfter: post.length, identical: JSON.stringify(pre.map(e => [e.eventId, e.payloadSha256, e.attempts, e.status, e.lane, e.phase])) === JSON.stringify(post.map(e => [e.eventId, e.payloadSha256, e.attempts, e.status, e.lane, e.phase])), connectionsOpenedSoFar: pubStats.opens };
+          const ticker2 = setInterval(() => { if (busy) return; busy = true; void j11n.pub.tick(8).finally(() => { busy = false; }); }, 400);
+          const deadline = Date.now() + 240000;
+          while (Date.now() < deadline && j11n.pub.stats().pending > 0) await sleep(1000);
+          clearInterval(ticker2); while (busy) await sleep(100); await sleep(1500); await c.idle(); keep = false; await keeper;
+          const finalEntries = j11n.pub.entries(), stats = j11n.pub.stats();
+          const probeId = finalEntries.find(e => e.status === 'CONFIRMED')?.eventId ?? sent[0]!; const probeHash = sha256Hex(eventBody(probeId, 0)), cross = await ask(probeId, probeHash, 'emqx-user:lab-device-b'), own = await ask(probeId, probeHash);
+          const perEvent = await measurements.aggregate([{ $match: { 'event.eventId': { $regex: '^e11f-d13b-' } } }, { $group: { _id: '$event.eventId', n: { $sum: 1 } } }]).toArray(); const nByEvent = new Map(perEvent.map(d => [String(d._id), Number(d.n)]));
+          const claimsNow = new Set((await db.collection(inn.idempotency).find({ eventId: { $regex: '^e11f-d13b-' } }).toArray()).map(d => String(d.eventId)));
+          const inboxNow = new Set<string>(); for (const d of await inboxRows.find({}, { projection: { eventId: 1, rawPayloadSha256: 1 } }).toArray()) { const e = (d as { eventId?: string }).eventId; if (e && e.startsWith('e11f-d13b-') && (d as { rawPayloadSha256?: string }).rawPayloadSha256 === sha256Hex(eventBody(e, 0))) inboxNow.add(e); }
+          const byStatus = stats.byStatus, confirmedNoEvidence = finalEntries.filter(e => e.status === 'CONFIRMED' && !claimsNow.has(e.eventId) && !inboxNow.has(e.eventId)).map(e => e.eventId);
+          const pubackNotConfirmed = finalEntries.filter(e => e.brokerAcceptedCount > 0 && e.status !== 'CONFIRMED').length;
+          const summary11n = { events: sent.length, submitted: j11n.submitted.reduce((a: Record<string, number>, r) => { a[r] = (a[r] ?? 0) + 1; return a; }, {}), originalPubackedFirstPass: p.acked.size, byStatus, stillPending: stats.pending, pendingInSlowLane: stats.slow, unconfirmedAlertRaised: finalEntries.filter(e => e.unconfirmedSince !== null).length,
+            retried: finalEntries.filter(e => e.attempts > 1).length, totalPublishAttempts: finalEntries.reduce((a, e) => a + e.attempts, 0), brokerAcceptedAnyButNotConfirmed: pubackNotConfirmed, confirmedWithoutBackendEvidence: confirmedNoEvidence,
+            measurementsDistinctEvents: nByEvent.size, eventsWithMoreThanOneMeasurement: [...nByEvent.values()].filter(n => n > 1).length, publisherConnectionsOpened: pubStats.opens, publisherMaxConcurrentConnections: pubStats.maxConcurrent, crashRestart: crashed,
+            crossTenantProbe: { eventId: probeId, askedByB: cross, askedByOwner: own }, policy: j11n.policy, elapsedMs: Math.round(performance.now() - n0), startedAt };
+          writeFileSync('.local-evidence/be13-11n-' + process.env.BE13_11N_TAG!.replace(/[^\w.-]/g, '_') + '.json', JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', tag: process.env.BE13_11N_TAG, summary: summary11n, originalWindow, before: before.map(e => ({ eventId: e.eventId, attempts: e.attempts, brokerAcceptedCount: e.brokerAcceptedCount })), entries: finalEntries.map(e => ({ ...e, payloadB64: undefined })) }, null, 1));
+          server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); await closePub(); mark('11N publisher reconciliation done ' + JSON.stringify({ byStatus, stillPending: stats.pending, retried: summary11n.retried }));
+          assert.equal(pubStats.maxConcurrent <= 1, true, 'one publisher identity = at most ONE connection at a time'); assert.equal(confirmedNoEvidence.length, 0, 'no entry was CONFIRMED without backend evidence'); assert.equal(summary11n.eventsWithMoreThanOneMeasurement, 0, 'a retried eventId never produced a second measurement');
+          assert.equal((crashed as { identical: boolean }).identical, true, 'the outbox rebuilt from disk is identical to the in-memory one'); assert.equal(cross.ok && cross.status, 'not-found', 'cross-tenant probe must not see the event');
+          assert.equal(Object.values(byStatus).reduce((a, b) => a + b, 0), sent.length, 'every event is accounted for in an explicit outbox state');
         }
         // BE13-11J (TEST_ONLY, only with BE13_11J_TAG): the publisher does NOT trust the PUBACK it already holds for every event. It asks the backend
         // (real HTTP router over the real Mongo evidence) and re-publishes the SAME eventId until it has backend evidence, quarantine, or the budget ends.
