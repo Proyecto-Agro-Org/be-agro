@@ -35,6 +35,8 @@ import { createIngestConfirmationRouter } from '../src/routes/ingest-confirmatio
 import { createMongoIngestConfirmationEvidence } from '../src/repositories/mongo-ingest-confirmation.evidence.js';
 import { reconcilePublish, type PublisherRetryPolicy, type ReconcileResult } from './be13-11j/publisher-reconciler.js';
 import { createFileOutboxStore, createOutboxPublisher, sha256Hex, type OutboxPolicy } from './be13-11n/publisher-outbox.js';
+import { createFileStore as createRefFileStore, createHttpReconciliationClient, createMemoryStore as createRefMemoryStore, createReferencePublisher, createTestOnlyAuth } from './be14-01/reference-publisher.js';
+import { createMqttPublisherPort } from './be14-01/mqtt-port.js';
 import { classifyEventualDelivery, classifyOutcome, deliveryTimeline, parseSessionResponses, scenarioOfEvent, type PacketRecord } from './be13-11i/delivery-order.js';
 
 // KNOWN_LIMITATION = a durability requirement the broker DEMONSTRABLY does not meet (documented, reproducible, expected here). A PUBACKed message that is
@@ -227,6 +229,20 @@ async function main() {
       return { get pub() { return pub; }, rebuild() { pub = make(); return pub; }, path, policy, submitted, initial: { acked, lat: [] as number[], durationMs: performance.now() - t0, failed: sent.length - acked.size } };
     };
     let confirmVia: (eventId: string, payloadSha256: string) => Promise<{ ok: true; status: string } | { ok: false }> = async () => ({ ok: false });
+    // BE14-01 (REFERENCE_IMPLEMENTATION_ONLY, only with BE14_01_TAG): the reference publisher with a REAL MQTT.js connection (one per identity, clientId = device key) and a file outbox.
+    let refBase = '';
+    const refClient = (principal = 'emqx-user:lab-device-a') => createHttpReconciliationClient({ baseUrl: refBase, auth: createTestOnlyAuth(principal), timeoutMs: 4000 });
+    const startRefPublisher = async (sent: string[]) => {
+      mkdirSync('.local-evidence', { recursive: true }); const path = '.local-evidence/ref-outbox-' + process.env.BE14_01_TAG!.replace(/[^\w.-]/g, '_') + '.json'; writeFileSync(path, JSON.stringify({ version: 1, nextSeq: 1, entries: [] }));
+      const policy: OutboxPolicy = { mode: 'TEST_ONLY', capacity: 200, fast: { initialDelayMs: 2000, backoffFactor: 1.5, maxDelayMs: 6000, jitterRatio: 0.25, maxAttempts: 6, maxElapsedMs: 600000 }, slow: { intervalMs: 12000, confirmWaitMs: 2000, maxElapsedMs: 270000 } };
+      const mqttPort = createMqttPublisherPort({ url: L().brokerUrl, technicalKey: 'lab-device-a', username: 'lab-device-a', password: L().secrets['lab-device-a']!, topic: 'agro/lab/in/a' });
+      const make = (store = createRefFileStore(path)) => createReferencePublisher({ store, policy, technicalKey: 'lab-device-a', mqtt: mqttPort, reconciliation: { query: (eid, h) => refClient().query(eid, h) } });
+      const holder = { pub: make() };
+      const t0 = performance.now(); const submitted = sent.map((id, i) => holder.pub.submitReading({ eventId: id, payload: { temperature: 1000 + i }, topic: 'agro/lab/in/a', dataOrigin: 'simulated' }).result);
+      await holder.pub.tick(8); holder.pub.setGate(false);                 // attempt 1 of every event = the original publication; confirmations are HELD until the original window is over
+      const acked = new Set(holder.pub.entries().filter(e => e.brokerAcceptedCount > 0).map(e => e.eventId));
+      return { holder, path, policy, mqttPort, make, submitted, initial: { acked, lat: [] as number[], durationMs: performance.now() - t0, failed: sent.length - acked.size } };
+    };
     const perfProbe = async (label: string) => { const l = await publish(ids('perf' + label.replace(/\W/g, ''), 400), { window: 16 }); perf[label] = { acksPerS: r1(l.acked.size / (l.durationMs / 1000)), p50: pct(l.lat, .5), p95: pct(l.lat, .95), p99: pct(l.lat, .99) }; return perf[label]; };
 
     // ================================================================ GROUP 1: NON-DURABLE (the BE13-11E situation)
@@ -426,8 +442,8 @@ async function main() {
         const N = Number(process.env.BE13_11G_N ?? 60), pauseMs = Number(process.env.BE13_11G_PAUSE_MS ?? 14000), t0 = performance.now(), rel = () => Math.round(performance.now() - t0);
         const timings: TimingMap = new Map(); const tl: Record<string, unknown>[] = [];
         const snap = async (e: string) => { try { const st = (await bounded(db.admin().command({ replSetGetStatus: 1 }, { readPreference: 'nearest' }), 4000)) as { term?: number; optimes?: { lastCommittedOpTime?: { ts?: { toString(): string }; t?: number } }; members: { name: string; stateStr: string }[] }; tl.push({ t: rel(), e, term: st.term, commitTs: String(st.optimes?.lastCommittedOpTime?.ts), commitTerm: st.optimes?.lastCommittedOpTime?.t, members: st.members.map(m => m.name.split(':')[1] + ':' + m.stateStr).join(',') }); } catch { tl.push({ t: rel(), e, unreadable: true }); } };
-        const sent = ids('d13b', N); const j11n = process.env.BE13_11N_TAG ? await startOutboxPublisher(sent) : null;
-        const p = j11n ? j11n.initial : await publish(sent, { window: 8 }); mark('publisher done, restarting broker'); await L().restart(); await sleep(1500); mark('broker back'); await deepSnapshot('S2', { note: 'after the broker restart, consumer NOT yet reconnected' });
+        const sent = ids('d13b', N); const j11n = process.env.BE13_11N_TAG ? await startOutboxPublisher(sent) : null; const j14 = process.env.BE14_01_TAG ? await startRefPublisher(sent) : null;
+        const p = j14 ? j14.initial : j11n ? j11n.initial : await publish(sent, { window: 8 }); mark('publisher done, restarting broker'); await L().restart(); await sleep(1500); mark('broker back'); await deepSnapshot('S2', { note: 'after the broker restart, consumer NOT yet reconnected' });
         await waitHealthy(); const pr = await primaryIndex(), sec = [0, 1, 2].filter(i => i !== pr);
         const staleIds = ids('d13', 60); let s3p: Promise<unknown> | null = null, s4p: Promise<unknown> | null = null;
         const tap = i11.on ? { packetScenario: 'd13b', packetSink: (r: PacketRecord & { cmd: string; sessionPresent?: boolean }) => { i11.packets.push(r); if (r.cmd === 'connack' && !s3p) s3p = deepSnapshot('S3', { connackSessionPresent: r.sessionPresent ?? null, note: 'first CONNACK of D13b consumer, snapshot requested right after it (deliveries may already be in flight)' }); } } : {};
@@ -466,6 +482,51 @@ async function main() {
             if (st && (st.status === 404 || connected === false)) { await c.stop().catch(() => {}); live.delete(c); await sleep(1500); c = await mk(); restarts += 1; }
           }
           await sleep(2000); await c.idle(); extension = { extendMs, elapsedMs: Math.round(performance.now() - tStart), supervisorRestartsInExtension: restarts, timedOut, ...ownStats() }; mark('extended window end ' + JSON.stringify(extension));
+        }
+        // BE14-01: the reference publisher resumes against the REAL backend pieces (router + service + Mongo evidence), with a backend restart and a publisher restart in the middle.
+        if (j14) {
+          mark('14-01 reference publisher reconciliation start'); const n0 = performance.now();
+          const evidence = createMongoIngestConfirmationEvidence({ connection: conns[3]!, prefix: INGEST, realm: 'test' }), svc = createIngestConfirmationService({ evidence });
+          const authority = { kind: 'TEST_ONLY' as const, authenticate: async (req: { get(h: string): string | undefined }) => req.get('x-principal') ?? null, scopeOf: async (pr: string) => { const m = LAB_PRINCIPALS[pr]; return m ? { realm: 'test' as const, sourceId: m.sourceId, principalReference: pr } : null; } };
+          const limiter = createTokenBucketRateLimiter({ mode: 'TEST_ONLY', perPrincipalRatePerSecond: 200, perPrincipalBurst: 400, globalRatePerSecond: 1000, globalBurst: 2000, maxKeys: 100 });
+          const app = express(); app.use(createIngestConfirmationRouter({ mode: 'TEST_ONLY', service: svc, authority: authority as never, rateLimiter: limiter }));
+          let server = app.listen(0, '127.0.0.1'); await once(server, 'listening'); const port = (server.address() as { port: number }).port; refBase = 'http://127.0.0.1:' + port;
+          let keep = true; const keeper = (async () => { while (keep) { await sleep(3000); const st = await L().api('GET', '/clients/' + consumerId()).catch(() => null); let cn: boolean | null = null; try { cn = (JSON.parse(st?.body ?? '{}') as { connected?: boolean }).connected ?? null; } catch { /* */ } if (keep && st && (st.status === 404 || cn === false)) { await c.stop().catch(() => {}); live.delete(c); await sleep(1500); c = await mk(); } } })();
+          const before = j14.holder.pub.entries(); j14.holder.pub.setGate(true); let busy = false; const tickLoop = () => setInterval(() => { if (busy) return; busy = true; void j14.holder.pub.tick(8).finally(() => { busy = false; }); }, 400);
+          let ticker = tickLoop(); const events: Record<string, unknown>[] = []; let countersBeforeCrash: Record<string, number> = {};
+          // (1) the reconciliation API goes DOWN for 6 s (backend restart): the publisher must neither confirm nor lose anything
+          await sleep(3000); server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); events.push({ at: 'backend-down' }); await sleep(6000); server = app.listen(port, '127.0.0.1'); await once(server, 'listening'); events.push({ at: 'backend-up' });
+          // (2) the PUBLISHER crashes/restarts: in-memory engine + MQTT connection dropped; a new engine is rebuilt ONLY from the file
+          await sleep(2000); clearInterval(ticker); while (busy) await sleep(100); const pre = j14.holder.pub.entries(); countersBeforeCrash = j14.holder.pub.counters(); await j14.mqttPort.close(); j14.holder.pub = j14.make(); const post = j14.holder.pub.entries();
+          const crashInfo = { entriesBefore: pre.length, entriesAfter: post.length, identical: JSON.stringify(pre.map(e => [e.eventId, e.payloadSha256, e.publishAttempts, e.state, e.lane])) === JSON.stringify(post.map(e => [e.eventId, e.payloadSha256, e.publishAttempts, e.state, e.lane])), restartRecovered: j14.holder.pub.counters().publisher_restart_recovered };
+          ticker = tickLoop(); const deadline = Date.now() + 240000; const open = () => j14.holder.pub.stats().outbox_depth;
+          while (Date.now() < deadline && open() > 0) await sleep(1000);
+          // (3) NORMAL path: 10 new readings on a healthy system (first query, no retry expected)
+          const normalIds: string[] = []; for (let i = 0; i < 10; i += 1) { const r = j14.holder.pub.submitReading({ eventId: 'e14-normal-' + i, payload: { temperature: 5000 + i }, topic: 'agro/lab/in/a', dataOrigin: 'simulated' }); assert.equal(r.result, 'ACCEPTED'); normalIds.push('e14-normal-' + i); }
+          const nDeadline = Date.now() + 60000; while (Date.now() < nDeadline && open() > 0) await sleep(1000);
+          // (4) CONFLICT: a firmware that lost its outbox reuses an eventId with DIFFERENT bytes (same identity, same connection)
+          const rogue = createReferencePublisher({ store: createRefMemoryStore(), policy: j14.policy, technicalKey: 'lab-device-a', mqtt: j14.mqttPort, reconciliation: { query: (eid, h) => refClient().query(eid, h) } });
+          const conflictId = sent[5]!; rogue.submitReading({ eventId: conflictId, payload: { temperature: 99999 }, topic: 'agro/lab/in/a', dataOrigin: 'simulated' });
+          const cDeadline = Date.now() + 40000; const tickRogue = setInterval(() => { void rogue.tick(1); }, 400); while (Date.now() < cDeadline && rogue.stats().outbox_depth > 0) await sleep(1000); clearInterval(tickRogue);
+          clearInterval(ticker); while (busy) await sleep(100); await sleep(1500); await c.idle(); keep = false; await keeper;
+          const finalEntries = j14.holder.pub.entries(), rogueEntry = rogue.get(conflictId)!, counters = j14.holder.pub.counters(); const byState = j14.holder.pub.stats().byState;
+          const probe = finalEntries.find(e => e.state === 'CONFIRMED')!; const cross = await refClient('emqx-user:lab-device-b').query(probe.eventId, probe.payloadSha256), own = await refClient().query(probe.eventId, probe.payloadSha256);
+          const perEvent = await measurements.aggregate([{ $match: { $or: [{ 'event.eventId': { $regex: '^e11f-d13b-' } }, { 'event.eventId': { $regex: '^e14-normal-' } }] } }, { $group: { _id: '$event.eventId', n: { $sum: 1 } } }]).toArray(); const nByEvent = new Map(perEvent.map(d => [String(d._id), Number(d.n)]));
+          const claimsNow = new Set((await db.collection(inn.idempotency).find({ $or: [{ eventId: { $regex: '^e11f-d13b-' } }, { eventId: { $regex: '^e14-normal-' } }] }).toArray()).map(d => String(d.eventId)));
+          const inboxNow = new Set<string>(); for (const d of await inboxRows.find({}, { projection: { eventId: 1, rawPayloadSha256: 1 } }).toArray()) { const e = (d as { eventId?: string }).eventId, h = (d as { rawPayloadSha256?: string }).rawPayloadSha256; const m = finalEntries.find(x => x.eventId === e); if (e && m && m.payloadSha256 === h) inboxNow.add(e); }
+          const confirmedNoEvidence = finalEntries.filter(e => e.state === 'CONFIRMED' && !claimsNow.has(e.eventId) && !inboxNow.has(e.eventId)).map(e => e.eventId);
+          const normal = finalEntries.filter(e => normalIds.includes(e.eventId)), fe2 = finalEntries.filter(e => sent.includes(e.eventId));
+          const total = (k: string) => (counters as Record<string, number>)[k]! + (countersBeforeCrash[k] ?? 0);
+          const summary14 = { totalEvents: sent.length + normalIds.length + 1, f_e2_events: sent.length, normal_events: normalIds.length, submitted: j14.submitted.reduce((a: Record<string, number>, r) => { a[r] = (a[r] ?? 0) + 1; return a; }, {}), originalPubackedFirstPass: p.acked.size, byState, f_e2: { confirmed: fe2.filter(e => e.state === 'CONFIRMED').length, retried: fe2.filter(e => e.publishAttempts > 1).length, states: fe2.reduce((a: Record<string, number>, e) => { a[e.state] = (a[e.state] ?? 0) + 1; return a; }, {}) },
+            normal: { confirmed: normal.filter(e => e.state === 'CONFIRMED').length, firstTryConfirmed: normal.filter(e => e.state === 'CONFIRMED' && e.publishAttempts === 1).length }, conflict: { eventId: conflictId, state: rogueEntry.state, republished: rogueEntry.publishAttempts, measurementsForEvent: nByEvent.get(conflictId) ?? 0 },
+            counters: Object.fromEntries(Object.keys(counters).map(k => [k, total(k)])), brokerAcceptedAnyNotConfirmed: finalEntries.filter(e => e.brokerAcceptedCount > 0 && e.state !== 'CONFIRMED').length, confirmedWithoutBackendEvidence: confirmedNoEvidence,
+            measurementsDistinctEvents: nByEvent.size, eventsWithMoreThanOneMeasurement: [...nByEvent.values()].filter(n => n > 1).length, publisherCrash: crashInfo, backendRestart: events, mqttConnectionsOpenNow: j14.mqttPort.connectionsOpen,
+            crossTenantProbe: { eventId: probe.eventId, askedByB: cross, askedByOwner: own }, elapsedMs: Math.round(performance.now() - n0) };
+          writeFileSync('.local-evidence/be14-01-' + process.env.BE14_01_TAG!.replace(/[^\w.-]/g, '_') + '.json', JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', tag: process.env.BE14_01_TAG, summary: summary14, originalWindow, before: before.map(e => ({ eventId: e.eventId, publishAttempts: e.publishAttempts, brokerAcceptedCount: e.brokerAcceptedCount })), entries: finalEntries.map(e => ({ ...e, payloadB64: undefined })) }, null, 1));
+          server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); await j14.mqttPort.close(); mark('14-01 done ' + JSON.stringify({ byState, f_e2: summary14.f_e2, normal: summary14.normal, conflict: summary14.conflict }));
+          assert.equal(confirmedNoEvidence.length, 0, 'no entry CONFIRMED without backend evidence'); assert.equal(summary14.eventsWithMoreThanOneMeasurement, 0, 'no duplicate measurement'); assert.equal(crashInfo.identical, true, 'outbox rebuilt from disk is identical');
+          assert.equal(rogueEntry.state, 'CONFLICT_REQUIRES_REVIEW', 'same eventId + different bytes => conflict'); assert.equal(rogueEntry.publishAttempts, 1, 'a conflict is never republished'); assert.equal(cross.kind === 'status' && cross.status, 'not-found', 'cross-tenant probe sees nothing');
+          assert.equal(fe2.length, sent.length, 'every F-E2 event is in the outbox'); assert.ok(finalEntries.every(e => ['CONFIRMED', 'QUARANTINED', 'CONFLICT_REQUIRES_REVIEW', 'UNCONFIRMED_EXPLICIT'].includes(e.state) || e.lane === 'slow' || e.state !== 'CONFIRMED'), 'accounted'); assert.ok(summary14.mqttConnectionsOpenNow <= 1);
         }
         // BE13-11N: the durable publisher resumes. Confirmation = the real TEST_ONLY router over the real Mongo evidence; the PUBACKs it already holds are only BROKER_ACCEPTED.
         if (j11n) {

@@ -1,0 +1,106 @@
+{
+ "version": 1,
+ "note": "BE14-01 golden vectors: exact bytes + SHA-256 shared by the publisher and the backend. Changing a byte changes the hash: update only with a contract change.",
+ "vectors": [
+  {
+   "name": "V1-basic",
+   "reading": {
+    "eventId": "ESP32-AGRO-001:1",
+    "sentAt": 1795115600000,
+    "clientid": "ESP32-AGRO-001",
+    "payload": {
+     "soil_temperature_c": 21.5,
+     "soil_moisture_reported_pct": 43
+    },
+    "topic": "uade/a26t02/ESP32-AGRO-001/telemetry",
+    "dataOrigin": "simulated"
+   },
+   "eventId": "ESP32-AGRO-001:1",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:1\",\"sentAt\":1795115600000,\"clientid\":\"ESP32-AGRO-001\",\"payload\":{\"soil_temperature_c\":21.5,\"soil_moisture_reported_pct\":43},\"mqtt\":{\"topic\":\"uade/a26t02/ESP32-AGRO-001/telemetry\",\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "payloadSha256": "b8abca28adcb97c94b5e365a1f5a43ac67d76b4826f662925502d9effb63b8ee"
+  },
+  {
+   "name": "V2-null-and-zero",
+   "reading": {
+    "eventId": "ESP32-AGRO-001:2",
+    "sentAt": 1795115660000,
+    "clientid": "ESP32-AGRO-001",
+    "payload": {
+     "soil_temperature_c": null,
+     "soil_moisture_reported_pct": 0
+    },
+    "dataOrigin": "simulated"
+   },
+   "eventId": "ESP32-AGRO-001:2",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:2\",\"sentAt\":1795115660000,\"clientid\":\"ESP32-AGRO-001\",\"payload\":{\"soil_temperature_c\":null,\"soil_moisture_reported_pct\":0},\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "payloadSha256": "d86be60af5314e868a7d14e0c0163c38c82a2605ba4d54a08d86b2bfd2638c2e"
+  },
+  {
+   "name": "V3-bool-string",
+   "reading": {
+    "eventId": "sensor_7:00000042",
+    "sentAt": 1795115720000,
+    "clientid": "sensor_7",
+    "payload": {
+     "valve_open": true,
+     "status_text": "ok"
+    },
+    "topic": "a26t02/clientes/cliente_001/campos/campo_001/dispositivos/sensor_001/telemetria",
+    "dataOrigin": "physical-unverified"
+   },
+   "eventId": "sensor_7:00000042",
+   "bytes": "{\"version\":1,\"eventId\":\"sensor_7:00000042\",\"sentAt\":1795115720000,\"clientid\":\"sensor_7\",\"payload\":{\"valve_open\":true,\"status_text\":\"ok\"},\"mqtt\":{\"topic\":\"a26t02/clientes/cliente_001/campos/campo_001/dispositivos/sensor_001/telemetria\",\"messageType\":\"telemetry\",\"dataOrigin\":\"physical-unverified\"}}",
+   "payloadSha256": "54aac5269367926e5254dcb363080ff56f0e58b2a7c921011ebfd0321d8b3da7"
+  },
+  {
+   "name": "V4-unicode",
+   "reading": {
+    "eventId": "ESP32-AGRO-001:4",
+    "sentAt": 1795115780000,
+    "clientid": "ESP32-AGRO-001",
+    "payload": {
+     "note": "ñandú – riego ☔ 😀"
+    },
+    "dataOrigin": "unknown"
+   },
+   "eventId": "ESP32-AGRO-001:4",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:4\",\"sentAt\":1795115780000,\"clientid\":\"ESP32-AGRO-001\",\"payload\":{\"note\":\"ñandú – riego ☔ 😀\"},\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"unknown\"}}",
+   "payloadSha256": "a18346502b3365196ffb443440ee30f0f5d50ba7344c98bb49b751589de4cc4f"
+  },
+  {
+   "name": "V5-number-formats",
+   "reading": {
+    "eventId": "ESP32-AGRO-001:5",
+    "sentAt": 1795115840000,
+    "clientid": "ESP32-AGRO-001",
+    "payload": {
+     "a": -0.000001,
+     "b": 1e+21,
+     "c": 123456789.125,
+     "d": -7
+    },
+    "dataOrigin": "simulated"
+   },
+   "eventId": "ESP32-AGRO-001:5",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:5\",\"sentAt\":1795115840000,\"clientid\":\"ESP32-AGRO-001\",\"payload\":{\"a\":-0.000001,\"b\":1e+21,\"c\":123456789.125,\"d\":-7},\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "payloadSha256": "481de9913fd7d71c35d9d89e3698de61d36371f539c6fb3c2e0b9dec872487f2"
+  },
+  {
+   "name": "V6-device-timestamp",
+   "reading": {
+    "eventId": "ESP32-AGRO-001:6",
+    "sentAt": 1795115900000,
+    "clientid": "ESP32-AGRO-001",
+    "deviceTimestamp": "2026-11-18T10:15:00Z",
+    "payload": {
+     "soil_temperature_c": 19.25
+    },
+    "topic": "uade/a26t02/ESP32-AGRO-001/telemetry",
+    "dataOrigin": "simulated"
+   },
+   "eventId": "ESP32-AGRO-001:6",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:6\",\"sentAt\":1795115900000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":\"2026-11-18T10:15:00Z\",\"payload\":{\"soil_temperature_c\":19.25},\"mqtt\":{\"topic\":\"uade/a26t02/ESP32-AGRO-001/telemetry\",\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "payloadSha256": "f8ee513fb34c7de17e83e11428efc2207e1ec2d864bb96b9ec72568e406b24a3"
+  }
+ ]
+}
