@@ -10,19 +10,25 @@ import {
 // > any evidence source unavailable (pending) > nothing anywhere (not-found).
 
 type Settled<T> = { readonly ok: true; readonly rows: readonly T[] } | { readonly ok: false };
-async function settle<T>(work: () => Promise<readonly T[]>): Promise<Settled<T>> {
-  try { const rows = await work(); return Array.isArray(rows) ? { ok: true, rows } : { ok: false }; } catch { return { ok: false }; }
+// BE13-11Q: every evidence read is BOUNDED. With no primary (majority lost) a driver call can wait for server selection far longer than any publisher is willing to wait; a read that does not
+// answer in time is an unavailable source => `pending` (fail-closed), never a long hang and never a confirmation.
+export const DEFAULT_EVIDENCE_TIMEOUT_MS = 4000;
+async function settle<T>(work: () => Promise<readonly T[]>, timeoutMs: number): Promise<Settled<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { const rows = await Promise.race([work(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('EVIDENCE_TIMEOUT')), timeoutMs); })]); return Array.isArray(rows) ? { ok: true, rows } : { ok: false }; }
+  catch { return { ok: false }; } finally { if (timer) clearTimeout(timer); }
 }
 
-export function createIngestConfirmationService(options: { evidence: ConfirmationEvidencePort; clock?: () => number; metrics?: IngestionMetricsPort }): IngestConfirmationService {
-  const { evidence } = options;
+export function createIngestConfirmationService(options: { evidence: ConfirmationEvidencePort; clock?: () => number; metrics?: IngestionMetricsPort; evidenceTimeoutMs?: number }): IngestConfirmationService {
+  const { evidence } = options; const timeoutMs = options.evidenceTimeoutMs ?? DEFAULT_EVIDENCE_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) throw new TypeError('Invalid evidenceTimeoutMs');
   if (!evidence || typeof evidence.claims !== 'function' || typeof evidence.inbox !== 'function' || typeof evidence.quarantine !== 'function') throw new TypeError('Evidence port required');
   return {
     async confirm(scope: ConfirmationScope, eventId: string, payloadSha256: string): Promise<IngestConfirmation> {
       if (typeof eventId !== 'string' || !EVENT_ID_PATTERN.test(eventId)) throw new TypeError('Invalid eventId');
       if (typeof payloadSha256 !== 'string' || !PAYLOAD_SHA256_PATTERN.test(payloadSha256)) throw new TypeError('Invalid payloadSha256');
       if (!scope || typeof scope.sourceId !== 'string' || !SOURCE_ID_PATTERN.test(scope.sourceId) || typeof scope.realm !== 'string') throw new TypeError('Invalid scope');
-      const [claims, inbox, quarantine] = await Promise.all([settle(() => evidence.claims(scope, eventId)), settle(() => evidence.inbox(scope, eventId)), settle(() => evidence.quarantine(scope, eventId, payloadSha256))]);
+      const [claims, inbox, quarantine] = await Promise.all([settle(() => evidence.claims(scope, eventId), timeoutMs), settle(() => evidence.inbox(scope, eventId), timeoutMs), settle(() => evidence.quarantine(scope, eventId, payloadSha256), timeoutMs)]);
       // Defence in depth: only rows that carry EXACTLY the caller's scope and the asked eventId count. A foreign or malformed row is ignored, never confirmed.
       const mine = <T extends { realm: string; eventId: string; sourceId: string | null }>(rows: readonly T[]) =>
         rows.filter(r => r.realm === scope.realm && r.sourceId === scope.sourceId && r.eventId === eventId);

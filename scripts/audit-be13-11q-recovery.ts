@@ -65,15 +65,22 @@ async function main() {
       const pub = createOutboxPublisher({ store: createMemoryOutboxStore(), policy, deps: { now: () => Date.now(), random: () => Math.random(),
         // PUBACK always; the backend only receives the event once the store is healthy (a delivery that cannot be persisted is never ACKed in the real adapter)
         publish: async eventId => { if (healed && !delivered.has(eventId)) { await deliver(eventId); delivered.add(eventId); } return true; }, confirm: async (id, h) => { const r = await ask(id); return r.ok ? { ok: true, status: r.status } : { ok: false }; } } });
-      for (const id of ['q-durable', 'q-late-1', 'q-late-2']) pub.submit({ eventId: id, bytes: body(id) });
+      for (const id of ['q-durable', 'q-during', 'q-late-1']) pub.submit({ eventId: id, bytes: body(id) });
       const loop = async (ms: number) => { const end = Date.now() + ms; while (Date.now() < end) { await pub.tick(8); await sleep(300); } };
       const primary = (await status()).members.find(m => m.stateStr === 'PRIMARY')!; const pIdx = request.ports.indexOf(Number(primary.name.split(':')[1])); paused = [0, 1, 2].filter(i => i !== pIdx);
       let outage: unknown;
-      await check('REAL majority loss: the API answers `pending` (never a confirmation, never `not-found`) within a bounded time, even for an event that IS durable on the primary', async () => {
-        for (const i of paused) chaos(request, 'pause', i); const t0 = Date.now(); await sleep(1500);
-        const durable = await ask('q-durable'), unknown = await ask('q-unknown'), late = await ask('q-late-1');
-        for (const r of [durable, unknown, late]) { assert.equal(r.ok, true, JSON.stringify(r)); assert.equal((r as { status: string }).status, 'pending', JSON.stringify(r)); assert.ok(r.ms < 8000, 'bounded latency ' + r.ms); }
-        outage = { durable, unknown, late, afterMs: Date.now() - t0 }; return outage;
+      await check('REAL majority loss, primary still up: a majority-committed event is STILL confirmable; an event written during the loss is NEVER confirmed', async () => {
+        for (const i of paused) chaos(request, 'pause', i); await sleep(1200);
+        const durable = await ask('q-durable'); assert.equal(durable.ok && durable.status, 'received-durable');                       // majority snapshot: durable evidence keeps its value
+        let writeError = 'none'; await deliver('q-during').catch(e => { writeError = String((e as Error).message).slice(0, 80); });       // w:majority cannot be acknowledged
+        const during = await ask('q-during'), unknown = await ask('q-unknown');
+        for (const r of [during, unknown]) { assert.equal(r.ok, true, JSON.stringify(r)); assert.ok(['not-found', 'pending'].includes((r as { status: string }).status), 'never confirmed: ' + JSON.stringify(r)); assert.ok(r.ms < 8000); }
+        outage = { phase1: { durable, during, unknown, writeError } }; return outage;
+      });
+      await check('REAL majority loss, primary stepped down (no primary): every read is bounded and answers `pending`, even for the durable event', async () => {
+        await sleep(13_000); const durable = await ask('q-durable'), unknown = await ask('q-unknown'), during = await ask('q-during');
+        for (const r of [durable, unknown, during]) { assert.equal(r.ok, true, JSON.stringify(r)); assert.equal((r as { status: string }).status, 'pending', JSON.stringify(r)); assert.ok(r.ms < 8000, 'bounded latency ' + r.ms); }
+        (outage as Record<string, unknown>).phase2 = { durable, unknown, during }; return (outage as Record<string, unknown>).phase2;
       });
       await check('durable publisher during the outage: nothing is CONFIRMED, nothing is lost, retries keep the same eventId', async () => {
         await loop(12_000); const es = pub.entries(); assert.ok(es.every(e => e.status === 'PENDING'), JSON.stringify(es.map(e => e.status))); assert.ok(es.every(e => e.lastConfirmation === 'pending' || e.lastConfirmation === 'unreachable' || e.lastConfirmation === null));
