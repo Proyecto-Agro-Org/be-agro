@@ -26,6 +26,7 @@ import { loadMqttJsFactory } from '../src/adapters/emqx-mqtt-connect.js';
 import { LAB_VERIFIED_TOPIC } from '../src/adapters/emqx-mqtt-broker.adapter.js';
 import { EMQX_IMAGE, labContainersRemaining, labVolumesRemaining, startEmqxLab, type EmqxLab, type EmqxLabOptions } from './be13-11d/emqx-lab.js';
 import { INGEST, BUSINESS, SENSOR, startLabConsumer, type LabConsumer, type MetricSink, type TimingMap } from './be13-11d/lab-consumer.js';
+import { classifyEventualDelivery, classifyOutcome, deliveryTimeline, parseSessionResponses, scenarioOfEvent, type PacketRecord } from './be13-11i/delivery-order.js';
 
 // KNOWN_LIMITATION = a durability requirement the broker DEMONSTRABLY does not meet (documented, reproducible, expected here). A PUBACKed message that is
 // not recovered in any OTHER scenario is a plain FAIL: it is never relabelled.
@@ -183,6 +184,18 @@ async function main() {
         broker: { connected: c.connected, clean_start: c.clean_start, expiry_interval: c.expiry_interval, inflight_cnt: c.inflight_cnt, mqueue_len: c.mqueue_len, mqueue_dropped: c.mqueue_dropped, subscriptions_cnt: c.subscriptions_cnt, created_at: c.created_at, connected_at: c.connected_at, recv_cnt: c.recv_cnt, send_cnt: c.send_cnt, rawStatus: (client as { status?: number }).status },
         subscriptions: await get('/subscriptions?clientid=' + consumerId()) };
     };
+    // BE13-11I (TEST_ONLY, active only with BE13_11I_TAG): COMPLETE management-API snapshots of the durable session (S0..S5), a passive MQTT packet tap (DUP flag, order, CONNACK) and per-scenario D13 counters.
+    const i11 = { on: Boolean(process.env.BE13_11I_TAG), t0: performance.now(), snapshots: [] as Record<string, unknown>[], packets: [] as (PacketRecord & { cmd?: string; sessionPresent?: boolean })[], d13: {} as Record<string, unknown>, d13Timings: new Map() as TimingMap };
+    const deepSnapshot = async (point: string, extra: Record<string, unknown> = {}) => {
+      if (!i11.on) return null;
+      const id = consumerId(); const get = async (path: string) => { try { const r = await L().api('GET', path); return { status: r.status, body: r.body }; } catch (e) { return { error: (e as Error).message.slice(0, 80) }; } };
+      const raw = { client: await get('/clients/' + id), subscriptions: await get('/subscriptions?clientid=' + id), inflight: await get('/clients/' + id + '/inflight_messages?limit=1000'), mqueue: await get('/clients/' + id + '/mqueue_messages?limit=1000') };
+      const parsed = parseSessionResponses(raw); const f = (n: string) => parsed.fields.find(x => x.name === n);
+      const snap = { point, tMs: Math.round(performance.now() - i11.t0), at: new Date().toISOString(), clientId: id, ...extra, parsed, raw };
+      i11.snapshots.push(snap); console.log('  [11I] ' + point + ' client=' + String(parsed.clientHttpStatus) + ' connected=' + String(f('connected')?.value) + ' inflight_cnt=' + String(f('inflight_cnt')?.value ?? 'NOT_EXPOSED') + ' mqueue_len=' + String(f('mqueue_len')?.value ?? 'NOT_EXPOSED') + ' inflightMsgs=' + String(parsed.inflightMessages?.length ?? 'NOT_EXPOSED') + ' mqueueMsgs=' + String(parsed.mqueueMessages?.length ?? 'NOT_EXPOSED') + ' subs=' + String(parsed.subscriptions?.length ?? 'NOT_EXPOSED'));
+      return snap;
+    };
+    const i11Tap = (scn: string) => i11.on ? { packetScenario: scn, packetSink: (r: PacketRecord & { cmd: string; sessionPresent?: boolean }) => { i11.packets.push(r); } } : {};
     const perfProbe = async (label: string) => { const l = await publish(ids('perf' + label.replace(/\W/g, ''), 400), { window: 16 }); perf[label] = { acksPerS: r1(l.acked.size / (l.durationMs / 1000)), p50: pct(l.lat, .5), p95: pct(l.lat, .95), p99: pct(l.lat, .99) }; return perf[label]; };
 
     // ================================================================ GROUP 1: NON-DURABLE (the BE13-11E situation)
@@ -343,10 +356,10 @@ async function main() {
         return { localRead, majorityRead, preCheck, claimAfterHeal: after };
       });
       await scenario('D13', 'durable: broker restart + MONGO without majority (4 s, below the election timeout): the consumer cannot persist, does not ACK, the broker keeps the messages; after healing everything is processed', async () => {
-        const mark = (m: string) => console.log('  [D13] ' + m); mark('start'); const first = await consumerOpen(); await first.close(true); await sleep(300);
+        const mark = (m: string) => console.log('  [D13] ' + m); mark('start'); const first = await consumerOpen(); await deepSnapshot('S0', { sessionPresent: first.sessionPresent }); await first.close(true); await sleep(300);
         const sent = ids('d13', 60), p = await publish(sent, { window: 8 }); mark('publisher done, restarting broker'); await L().restart(); await sleep(1500); mark('broker back');
         await waitHealthy(); const pr = await primaryIndex(), sec = [0, 1, 2].filter(i => i !== pr);
-        const mk = async () => { const c = await startConsumerRetrying({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600 }); live.add(c); return c; };
+        const mk = async () => { const c = await startConsumerRetrying({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600, ...(i11.on ? { timings: i11.d13Timings } : {}), ...i11Tap('d13') }); live.add(c); return c; };
         const termBefore = ((await status()) as { term?: number }).term; mark('mongo secondaries paused'); for (const s of sec) chaos(request, 'pause', s);
         let during = 0, unreadable = false;
         let started: Promise<LabConsumer | null> | null = null;
@@ -371,19 +384,25 @@ async function main() {
         const quarantineTotal = await quarantineRows.countDocuments({}), quarantineSample = (await quarantineRows.find({}).limit(2).toArray()).map(d => JSON.stringify(d).slice(0, 420)), measurementsTotal = await measurements.countDocuments({}), measurementsD13Local = await measurements.countDocuments({ eventId: { $regex: '^e11f-d13-' } }), metricTally = Object.entries(metrics.slice(mStart).reduce((a: Record<string, number>, x) => { const l = x.labels as Record<string, string>; const k = x.name + '|' + (l.outcome ?? '') + '|' + (l.reasonCode ?? ''); a[k] = (a[k] ?? 0) + 1; return a; }, {})).slice(0, 14), claimsD13 = await db.collection(inn.idempotency).countDocuments({ eventId: { $regex: '^e11f-d13-' } }), measurementsD13Nested = await measurements.countDocuments({ 'event.eventId': { $regex: '^e11f-d13-' } }), claimsTotal = await db.collection(inn.idempotency).countDocuments({}), claimSample = (await db.collection(inn.idempotency).find({}).sort({ _id: -1 }).limit(2).toArray()).map(d => JSON.stringify(d).slice(0, 600)), measurementSample = (await measurements.find({}).sort({ _id: -1 }).limit(2).toArray()).map(d => JSON.stringify(d).slice(0, 600)), d13Sample: string[] = [];
         const stateCounts = await stateRows.aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]).toArray();
         mark('reconcile done'); const m = await mCountTag('d13'), q = await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13-' } }), inboxN = await inboxRows.countDocuments({});
+        if (i11.on) { const tm = [...i11.d13Timings.entries()].filter(([k]) => sent.includes(k)); i11.d13 = { published: sent.length, publisherPuback: p.acked.size, delivered: tm.filter(([, v]) => v.deliveries > 0).length, receipts: tm.filter(([, v]) => v.persisted !== undefined).length, consumerAcks: tm.filter(([, v]) => v.acked !== undefined).length, measurements: m, quarantined: q, supervisorRestarts: attempts }; }
         await c.stop(); live.delete(c);
         noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m - q), acked: p.acked.size });
         return { acked: p.acked.size, processedWhileMongoDown: unreadable ? 'unreadable-without-majority (nothing could be committed either)' : during, measurementsAfterHealing: m, quarantined: q, inboxRecords: inboxN, supervisorRestarts: attempts, withheldDeliveries: withheld, stateCounts, quarantineTotal, quarantineSample, measurementsTotal, measurementsD13Local, metricTally, mongoTermBefore: termBefore, mongoTermAfter: termAfter, claimsD13, measurementsD13Nested, claimsTotal, claimSample, measurementSample, reconcileSamples: recon.slice(0, 2), lostAfterPuback: Math.max(0, p.acked.size - m - q) };
       });
       await scenario('D13b', 'durable: broker restart + MONGO without majority for 14 s (beyond the election timeout: primary steps down, an election happens): the consumer cannot persist, does not ACK, the broker keeps the messages; after healing everything is processed', async () => {
-        const mark = (m: string) => console.log('  [D13b] ' + m); mark('start'); const first = await consumerOpen(); const snapshotBefore = await sessionSnapshot(first); await first.close(true); await sleep(300);
+        const mark = (m: string) => console.log('  [D13b] ' + m); mark('start'); const first = await consumerOpen(); const snapshotBefore = await sessionSnapshot(first); await deepSnapshot('S1', { sessionPresent: first.sessionPresent }); await first.close(true); await sleep(300);
         // BE13-11G knobs (TEST_ONLY): BE13_11G_N events, BE13_11G_PAUSE_MS outage length (0 = healthy control).
         const N = Number(process.env.BE13_11G_N ?? 60), pauseMs = Number(process.env.BE13_11G_PAUSE_MS ?? 14000), t0 = performance.now(), rel = () => Math.round(performance.now() - t0);
         const timings: TimingMap = new Map(); const tl: Record<string, unknown>[] = [];
         const snap = async (e: string) => { try { const st = (await bounded(db.admin().command({ replSetGetStatus: 1 }, { readPreference: 'nearest' }), 4000)) as { term?: number; optimes?: { lastCommittedOpTime?: { ts?: { toString(): string }; t?: number } }; members: { name: string; stateStr: string }[] }; tl.push({ t: rel(), e, term: st.term, commitTs: String(st.optimes?.lastCommittedOpTime?.ts), commitTerm: st.optimes?.lastCommittedOpTime?.t, members: st.members.map(m => m.name.split(':')[1] + ':' + m.stateStr).join(',') }); } catch { tl.push({ t: rel(), e, unreadable: true }); } };
-        const sent = ids('d13b', N), p = await publish(sent, { window: 8 }); mark('publisher done, restarting broker'); await L().restart(); await sleep(1500); mark('broker back');
+        const sent = ids('d13b', N), p = await publish(sent, { window: 8 }); mark('publisher done, restarting broker'); await L().restart(); await sleep(1500); mark('broker back'); await deepSnapshot('S2', { note: 'after the broker restart, consumer NOT yet reconnected' });
         await waitHealthy(); const pr = await primaryIndex(), sec = [0, 1, 2].filter(i => i !== pr);
-        const mk = async () => { const c = await startConsumerRetrying({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600, timings }); live.add(c); return c; };
+        const staleIds = ids('d13', 60); let s3p: Promise<unknown> | null = null, s4p: Promise<unknown> | null = null;
+        const tap = i11.on ? { packetScenario: 'd13b', packetSink: (r: PacketRecord & { cmd: string; sessionPresent?: boolean }) => { i11.packets.push(r); if (r.cmd === 'connack' && !s3p) s3p = deepSnapshot('S3', { connackSessionPresent: r.sessionPresent ?? null, note: 'first CONNACK of D13b consumer, snapshot requested right after it (deliveries may already be in flight)' }); } } : {};
+        const mk = async () => { const c = await startConsumerRetrying({ conn: conns[2]!, brokerUrl: L().brokerUrl, password: L().secrets['lab-consumer']!, metricsSink: metrics, clientId: consumerId(), clean: false, durableSession: true, sessionExpirySeconds: 3600, timings, ...tap }); live.add(c); return c; };
+        // S4 = the instant every one of the 60 stale D13 events has had its ACK released
+        const watcher = i11.on ? setInterval(() => { if (!s4p && staleIds.every(id => timings.get(id)?.acked !== undefined)) s4p = deepSnapshot('S4', { note: 'all 60 stale D13 events ACK-released' }); }, 150) : null;
+        const ownStats = () => { const own = new Set(sent), ts = [...timings.entries()]; return { ownDelivered: sent.filter(id => (timings.get(id)?.deliveries ?? 0) > 0).length, ownReceipts: sent.filter(id => timings.get(id)?.persisted !== undefined).length, ownAcks: sent.filter(id => timings.get(id)?.acked !== undefined).length, staleDelivered: ts.filter(([k]) => !own.has(k)).length, staleAcked: staleIds.filter(id => timings.get(id)?.acked !== undefined).length }; };
         const termBefore = ((await status()) as { term?: number }).term; await snap('before-pause'); tl.push({ t: rel(), e: 'pause', nodes: sec, primary: pr }); mark('mongo secondaries paused'); if (pauseMs > 0) for (const s of sec) chaos(request, 'pause', s);
         let during = 0, unreadable = false;
         let started: Promise<LabConsumer | null> | null = null;
@@ -402,12 +421,27 @@ async function main() {
         }
         mark('supervisor done after ' + attempts); const withheld = metrics.filter(x => x.name === 'broker_adapter_delivery_total' && (x.labels as { outcome?: string }).outcome === 'withheld').length - withheld0;
         await sleep(2000); await c.idle();
+        const originalWindow = { ...ownStats(), atMs: rel(), supervisorRestarts: attempts }; let extension: Record<string, unknown> | null = null;
+        // BE13-11I R2: ONLY the observation is extended (same consumer, same session, same supervisor policy: a dropped connection is restarted). Nothing about the broker or the adapter changes.
+        const extendMs = Number(process.env.BE13_11I_EXTEND_MS ?? 0);
+        if (extendMs > 0) {
+          const tStart = performance.now(); let restarts = 0, timedOut = false; mark('extended window start (' + extendMs + ' ms)');
+          for (;;) {
+            if (ownStats().ownDelivered >= N && (await accounted()) >= p.acked.size) break;
+            if (performance.now() - tStart > extendMs) { timedOut = true; break; }
+            await sleep(2000);
+            const st = await L().api('GET', '/clients/' + consumerId()).catch(() => null); let connected: boolean | null = null; try { connected = (JSON.parse(st?.body ?? '{}') as { connected?: boolean }).connected ?? null; } catch { /* */ }
+            if (st && (st.status === 404 || connected === false)) { await c.stop().catch(() => {}); live.delete(c); await sleep(1500); c = await mk(); restarts += 1; }
+          }
+          await sleep(2000); await c.idle(); extension = { extendMs, elapsedMs: Math.round(performance.now() - tStart), supervisorRestartsInExtension: restarts, timedOut, ...ownStats() }; mark('extended window end ' + JSON.stringify(extension));
+        }
         // an attempt that hit the lost majority may sit RECEIPTED: the receipted recovery (TEST_ONLY policy) settles it, as in D14
         const recon: unknown[] = [];
         for (let i = 0; i < 6 && (await mCountTag('d13b')) < p.acked.size; i += 1) { await sleep(2000); const r = await c.reconciler.reconcileBrokerInbox({ mode: 'reconcile', limit: 100 }); recon.push(JSON.stringify(r).slice(0, 220)); }
         const quarantineTotal = await quarantineRows.countDocuments({}), quarantineSample = (await quarantineRows.find({}).limit(2).toArray()).map(d => JSON.stringify(d).slice(0, 420)), measurementsTotal = await measurements.countDocuments({}), measurementsD13Local = await measurements.countDocuments({ eventId: { $regex: '^e11f-d13b-' } }), metricTally = Object.entries(metrics.slice(mStart).reduce((a: Record<string, number>, x) => { const l = x.labels as Record<string, string>; const k = x.name + '|' + (l.outcome ?? '') + '|' + (l.reasonCode ?? ''); a[k] = (a[k] ?? 0) + 1; return a; }, {})).slice(0, 14), claimsD13 = await db.collection(inn.idempotency).countDocuments({ eventId: { $regex: '^e11f-d13b-' } }), measurementsD13Nested = await measurements.countDocuments({ 'event.eventId': { $regex: '^e11f-d13b-' } }), claimsTotal = await db.collection(inn.idempotency).countDocuments({}), claimSample = (await db.collection(inn.idempotency).find({}).sort({ _id: -1 }).limit(2).toArray()).map(d => JSON.stringify(d).slice(0, 600)), measurementSample = (await measurements.find({}).sort({ _id: -1 }).limit(2).toArray()).map(d => JSON.stringify(d).slice(0, 600)), d13Sample: string[] = [];
         const stateCounts = await stateRows.aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]).toArray();
         mark('reconcile done'); const m = await mCountTag('d13b'), q = await quarantineRows.countDocuments({ eventId: { $regex: '^e11f-d13b-' } }), inboxN = await inboxRows.countDocuments({});
+        await deepSnapshot('S5', { note: 'end of the D13b observation window, consumer still connected' }); if (watcher) clearInterval(watcher); await s3p; await s4p;
         await c.stop(); live.delete(c); await snap('end');
         const rawRows = await inboxRows.find({}).toArray(); const evOf = (d: { rawPayload?: { buffer?: Uint8Array } }) => { try { return String((JSON.parse(Buffer.from(d.rawPayload!.buffer!).toString('utf8')) as { eventId?: string }).eventId); } catch { return ''; } };
         const byEvent = new Map<string, { inboxId: string; persistedAt: unknown }[]>(); for (const d of rawRows) { const e = evOf(d as never); if (e.startsWith('e11f-d13b-')) byEvent.set(e, [...(byEvent.get(e) ?? []), { inboxId: String(d._id), persistedAt: (d as { rawPersistedAt?: unknown }).rawPersistedAt }]); }
@@ -422,6 +456,20 @@ async function main() {
           staleByScenario: [...timings.keys()].filter(k => !sent.includes(k)).reduce((a: Record<string, number>, k) => { const t = k.split('-')[1] ?? '?'; a[t] = (a[t] ?? 0) + 1; return a; }, {}), deliveriesOfSent: matrix.reduce((n, x) => n + x.deliveries, 0) };
         writeFileSync('.local-evidence/be13-11g-event-matrix-' + pauseMs + '-' + N + '.json', JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', summary, timeline: tl, matrix }, null, 1));
         if (process.env.BE13_11H_TAG) writeFileSync('.local-evidence/be13-11h-' + process.env.BE13_11H_TAG.replace(/[^\w.-]/g, '_') + '.json', JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', tag: process.env.BE13_11H_TAG, only: process.env.BE13_11F_ONLY ?? null, snapshotBefore, sessionCountersAtEnd: { ...sess }, summary, timeline: tl, matrix }, null, 1));
+        if (i11.on) {
+          const rel0 = (t: number | null) => t === null ? null : Math.round(t - i11.t0), ownSet = new Set(sent);
+          const pk = i11.packets.filter(x => x.cmd === 'publish' && x.scn === 'd13b');
+          const firstPk = new Map<string, number>(); const order: string[] = []; for (const x of pk) if (!firstPk.has(x.eventId)) { firstPk.set(x.eventId, x.t); order.push(x.eventId); }
+          const ackedAt = new Map<string, number>(); for (const [k, v] of timings) if (v.acked !== undefined) ackedAt.set(k, v.acked);
+          const tlOut = deliveryTimeline(pk, ownSet, staleIds, ackedAt), fin = ownStats(), eventual = classifyEventualDelivery(fin.ownDelivered, N);
+          const outcome = classifyOutcome({ n: N, ownDeliveredFinal: fin.ownDelivered, ownDeliveredAfterDrain: tlOut.ownDeliveredAfterStaleDrained, staleDelivered: fin.staleDelivered, staleDrained: tlOut.staleDrained, timedOut: extension ? extension.timedOut === true : false });
+          const rowsBy = new Map<string, string[]>(); for (const d of rawRows) { const e = evOf(d as never); if (scenarioOfEvent(e)) rowsBy.set(e, [...(rowsBy.get(e) ?? []), stateById.get(String(d._id)) ?? 'no-state']); }
+          const meas13 = new Set((await measurements.find({ 'event.eventId': { $regex: '^e11f-d13-' } }).toArray()).map(d => String((d as { event?: { eventId?: string } }).event?.eventId)));
+          const row = (id: string, src: string, pub: boolean) => { const tm = timings.get(id), dups = pk.filter(x => x.eventId === id).map(x => x.dup); return { eventId: id, scenarioSource: src, publisherPuback: pub, delivered: (tm?.deliveries ?? 0) > 0, deliveryOrder: order.indexOf(id) >= 0 ? order.indexOf(id) + 1 : null, deliveryFirstAtMs: rel0(firstPk.get(id) ?? null), packetsReceived: dups.length, dupFlags: dups.length ? (dups.every(x => x === null) ? 'NO_VERIFICABLE' : dups) : null, receiptIssued: tm?.persisted !== undefined, consumerAck: tm?.acked !== undefined, duplicateResolution: (rowsBy.get(id) ?? []).join('|') || null, inboxRows: (rowsBy.get(id) ?? []).length, measurement: src === 'D13b' ? measSet.has(id) : meas13.has(id), quarantine: quarSet.has(id) }; };
+          const matrix11i = [...staleIds.map(id => row(id, 'D13', true)), ...sent.map(id => row(id, 'D13b', p.acked.has(id)))].map(x => ({ ...x, finalClassification: x.scenarioSource === 'D13' ? (x.delivered ? (x.receiptIssued && x.consumerAck ? 'STALE_REDELIVERED_ACKED' : 'STALE_REDELIVERED_NOT_ACKED') : 'STALE_NOT_REDELIVERED') : (x.delivered ? (x.consumerAck ? 'OWN_DELIVERED_ACKED' : 'OWN_DELIVERED_NOT_ACKED') : 'OWN_NEVER_DELIVERED') }));
+          writeFileSync('.local-evidence/be13-11i-' + process.env.BE13_11I_TAG!.replace(/[^\w.-]/g, '_') + '.json', JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', tag: process.env.BE13_11I_TAG, extendMs, d13: i11.d13, originalWindow, extension, final: fin, eventual, outcome, timeline: { ...tlOut, firstStaleAt: rel0(tlOut.firstStaleAt), lastStaleAt: rel0(tlOut.lastStaleAt), lastStaleAckAt: rel0(tlOut.lastStaleAckAt), firstOwnAt: rel0(tlOut.firstOwnAt), lastOwnAt: rel0(tlOut.lastOwnAt) },
+            snapshotPoints: ['S0', 'S1', 'S2', 'S3', 'S4', 'S5'].map(pt => ({ point: pt, taken: i11.snapshots.some(x => x.point === pt) })), snapshots: i11.snapshots, packets: i11.packets.map(x => ({ ...x, t: Math.round(x.t - i11.t0) })), snapshotBefore, sessionCountersAtEnd: { ...sess }, summary, timeline11g: tl, matrix: matrix11i }, null, 1));
+        }
         noLoss({ lostAfterPuback: Math.max(0, p.acked.size - m - q), acked: p.acked.size });
         // a loss here must come WITH an election (term change): any other loss is an unexpected FAIL, not the documented limitation
         if (p.acked.size - m - q > 0) assert.notEqual(termAfter, termBefore, 'loss without an election is unexplained');
