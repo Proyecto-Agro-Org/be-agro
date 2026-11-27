@@ -188,7 +188,7 @@ async function main() {
     const i11 = { on: Boolean(process.env.BE13_11I_TAG), t0: performance.now(), snapshots: [] as Record<string, unknown>[], packets: [] as (PacketRecord & { cmd?: string; sessionPresent?: boolean })[], d13: {} as Record<string, unknown>, d13Timings: new Map() as TimingMap };
     const deepSnapshot = async (point: string, extra: Record<string, unknown> = {}) => {
       if (!i11.on) return null;
-      const id = consumerId(); const get = async (path: string) => { try { const r = await L().api('GET', path); return { status: r.status, body: r.body }; } catch (e) { return { error: (e as Error).message.slice(0, 80) }; } };
+      const id = consumerId(); const get = async (path: string) => { try { const r = await L().api('GET', path, undefined, { full: true }); return { status: r.status, body: r.body }; } catch (e) { return { error: (e as Error).message.slice(0, 80) }; } };
       const raw = { client: await get('/clients/' + id), subscriptions: await get('/subscriptions?clientid=' + id), inflight: await get('/clients/' + id + '/inflight_messages?limit=1000'), mqueue: await get('/clients/' + id + '/mqueue_messages?limit=1000') };
       const parsed = parseSessionResponses(raw); const f = (n: string) => parsed.fields.find(x => x.name === n);
       const snap = { point, tMs: Math.round(performance.now() - i11.t0), at: new Date().toISOString(), clientId: id, ...extra, parsed, raw };

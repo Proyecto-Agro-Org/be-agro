@@ -1,7 +1,7 @@
 // BE13-11I — LOCAL_TEST_ONLY pure helpers for the D13 -> D13b stale-replay / eventual-delivery analysis. No I/O, no broker access, never imported by app code.
 
 export type PacketRecord = { t: number; scn: string; dup: boolean | null; qos: number | null; messageId: number | null; eventId: string };
-export type FieldReport = { name: string; value: unknown; source: string; status: 'OBSERVED' | 'NOT_EXPOSED' };
+export type FieldReport = { name: string; value: unknown; source: string; status: 'OBSERVED' | 'NOT_EXPOSED' | 'OBSERVED_PARTIAL_BODY' | 'NOT_OBSERVED_TRUNCATED' };
 
 /** Decodes the broker-authored envelope (`{ payload_b64 }`) and returns the eventId of the inner payload ('' when it cannot be decoded). */
 export function eventIdFromEnvelope(payload: Uint8Array): string {
@@ -22,16 +22,28 @@ export function splitStaleOwn(deliveredIds: Iterable<string>, ownIds: ReadonlySe
   return { own, stale };
 }
 
+/** Scalar `"key":value` pairs that are COMPLETE inside a (possibly cut) JSON prefix. A token cut by the truncation never matches (it needs a following `,` or `}`). */
+export function salvagePrefixFields(body: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const m of body.matchAll(/"([A-Za-z_0-9.]+)":(-?\d+(?:\.\d+)?|true|false|null|"[^"\\]*")(?=[,}])/g)) { try { out[m[1]!] = JSON.parse(m[2]!); } catch { /* skip */ } }
+  return out;
+}
+
 const SESSION_FIELDS = ['clientid', 'connected', 'clean_start', 'expiry_interval', 'inflight_cnt', 'inflight_max', 'mqueue_len', 'mqueue_max', 'mqueue_dropped', 'subscriptions_cnt', 'created_at', 'connected_at', 'disconnected_at',
-  'recv_cnt', 'recv_msg', 'send_cnt', 'send_msg', 'awaiting_rel_cnt', 'awaiting_rel_max', 'recv_msg.qos1', 'send_msg.qos1', 'send_msg.dropped', 'send_msg.dropped.queue_full', 'send_msg.dropped.expired', 'durable', 'proto_ver', 'node'] as const;
+  'recv_cnt', 'recv_msg', 'send_cnt', 'send_msg', 'awaiting_rel_cnt', 'awaiting_rel_max', 'recv_msg.qos1', 'send_msg.qos1', 'send_msg.dropped', 'send_msg.dropped.queue_full', 'send_msg.dropped.expired', 'durable', 'proto_ver', 'node', 'seqno_q1_comm', 'seqno_q1_dup', 'seqno_q1_next', 'seqno_q2_comm', 'seqno_q2_dup', 'seqno_q2_rec', 'seqno_q2_next', 'mailbox_len', 'is_persistent', 'is_expired', 'n_streams'] as const;
 type Resp = { status?: number; body?: string; error?: string } | undefined;
 
 /** Parses the COMPLETE management-API bodies (never truncated before JSON.parse). A field the API does not return is `NOT_EXPOSED`; nothing is inferred. */
 export function parseSessionResponses(r: { client?: Resp; subscriptions?: Resp; inflight?: Resp; mqueue?: Resp }): { fields: FieldReport[]; subscriptions: unknown[] | null; inflightMessages: unknown[] | null; mqueueMessages: unknown[] | null; clientHttpStatus: number | null } {
   const parse = (x: Resp): unknown => { if (!x || x.status !== 200 || typeof x.body !== 'string') return undefined; try { return JSON.parse(x.body); } catch { return undefined; } };
   const c = parse(r.client) as Record<string, unknown> | undefined;
+  // A 200 whose body is NOT valid JSON is a truncated answer (the 11H/11I lab cut it at 600 chars): fields present in the prefix are PARTIAL, absent ones are NOT_OBSERVED_TRUNCATED, never NOT_EXPOSED.
+  const truncated = c === undefined && r.client?.status === 200 && typeof r.client.body === 'string';
+  const partial = truncated ? salvagePrefixFields(r.client!.body!) : null;
   const fields: FieldReport[] = SESSION_FIELDS.map(name => c !== undefined && Object.prototype.hasOwnProperty.call(c, name)
-    ? { name, value: c[name], source: 'GET /clients/{clientid}', status: 'OBSERVED' as const } : { name, value: null, source: 'GET /clients/{clientid}', status: 'NOT_EXPOSED' as const });
+    ? { name, value: c[name], source: 'GET /clients/{clientid}', status: 'OBSERVED' as const }
+    : partial ? (name in partial ? { name, value: partial[name], source: 'GET /clients/{clientid} (truncated body, prefix only)', status: 'OBSERVED_PARTIAL_BODY' as const } : { name, value: null, source: 'GET /clients/{clientid} (truncated body)', status: 'NOT_OBSERVED_TRUNCATED' as const })
+    : { name, value: null, source: 'GET /clients/{clientid}', status: 'NOT_EXPOSED' as const });
   const list = (x: unknown): unknown[] | null => Array.isArray(x) ? x : x && typeof x === 'object' && Array.isArray((x as { data?: unknown }).data) ? (x as { data: unknown[] }).data : null;
   return { fields, subscriptions: list(parse(r.subscriptions)), inflightMessages: list(parse(r.inflight)), mqueueMessages: list(parse(r.mqueue)), clientHttpStatus: r.client?.status ?? null };
 }

@@ -76,3 +76,24 @@ test('I8: the 11I harness keeps the historical configuration and only adds obser
   assert.match(src, /BE13_11I_EXTEND_MS/);
   assert.match(src, /be13-11i-/);
 });
+
+test('I9: a truncated 200 body is PARTIAL (not NOT_EXPOSED): prefix fields observed, the rest NOT_OBSERVED_TRUNCATED, a cut token never matches', async () => {
+  const { salvagePrefixFields } = await import('../dist/scripts/be13-11i/delivery-order.js');
+  const full = JSON.stringify({ a: 1, seqno_q1_comm: 60, inflight_cnt: 28, mqueue_len: 0, tail: 'x'.repeat(2000) });
+  const cut = full.slice(0, 60);                          // ends inside the "inflight_cnt" token or just after it
+  assert.deepEqual(salvagePrefixFields('{"seqno_q1_comm":60,"inflight_cnt":2'), { seqno_q1_comm: 60 });   // `2` was cut from 28: never reported
+  const r = parseSessionResponses({ client: { status: 200, body: cut } });
+  const f = n => r.fields.find(x => x.name === n);
+  assert.equal(f('seqno_q1_comm').status, 'OBSERVED_PARTIAL_BODY'); assert.equal(f('seqno_q1_comm').value, 60);
+  assert.equal(f('expiry_interval').status, 'NOT_OBSERVED_TRUNCATED');
+  const ok = parseSessionResponses({ client: { status: 200, body: full } });
+  assert.equal(ok.fields.find(x => x.name === 'mqueue_len').status, 'OBSERVED');
+  assert.equal(ok.fields.find(x => x.name === 'clean_start').status, 'NOT_EXPOSED');                   // complete body without the field
+});
+
+test('I10: the lab API cuts bodies at 600 chars unless `full` is requested, and the 11I snapshot requests `full`', () => {
+  const lab = readFileSync(new URL('../scripts/be13-11d/emqx-lab.ts', import.meta.url), 'utf8');
+  const h = readFileSync(new URL('../scripts/audit-be13-11f-emqx-durability.ts', import.meta.url), 'utf8');
+  assert.match(lab, /o\.full \? await response\.text\(\) : \(await response\.text\(\)\)\.slice\(0, 600\)/);
+  assert.match(h, /api\('GET', path, undefined, \{ full: true \}\)/);
+});
