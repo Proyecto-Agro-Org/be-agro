@@ -1,5 +1,7 @@
 # CONTRATO BE13-11J — `IngestConfirmation` (confirmación end-to-end del backend)
 
+> **SUPERSEDED** por `CONTRATO_BE13_RECONCILIACION_E2E.md` (BE13-FINAL). Se conserva como historia del prototipo 11J: la consulta solo por `eventId` ya no es válida (hash obligatorio desde 11L).
+
 Estado: prototipo local `TEST_ONLY`. No compuesto en `app.ts`, no habilitado en Production, `productionReady=false`. Ninguna decisión productiva queda tomada.
 
 ## 1. Principio: tres niveles que no se mezclan
