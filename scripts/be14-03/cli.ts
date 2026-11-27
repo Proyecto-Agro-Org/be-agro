@@ -8,6 +8,7 @@ import { loadVectors, type Level } from './catalog.js';
 import { createReferenceAdapter } from './reference-adapter.js';
 import { EXIT, exitCodeFor, humanSummary, runConformance } from './runner.js';
 import { validateExternalConfig } from './external-config.js';
+import { buildObservedRun } from '../be14-04/observed-run.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export function parseCliArgs(argv: readonly string[]) {
@@ -20,17 +21,19 @@ export async function main(argv: readonly string[], env: Record<string, string |
   let args; try { args = parseCliArgs(argv); } catch (e) { out('INVALID CONFIGURATION: ' + (e as Error).message); return EXIT.INVALID_CONFIG; }
   let vectors; try { vectors = loadVectors(args.vectors); if (vectors.version !== 1 || !vectors.payloads?.length) throw new Error('vectors file invalid'); } catch (e) { out('INVALID CONFIGURATION: cannot load vectors: ' + (e as Error).message); return EXIT.INVALID_CONFIG; }
   let integrated: never[] | undefined; if (args.integrated) { try { integrated = (JSON.parse(readFileSync(args.integrated, 'utf8')) as { results: never[] }).results; if (!Array.isArray(integrated)) throw new Error('no results[]'); } catch (e) { out('INVALID CONFIGURATION: integrated report unreadable: ' + (e as Error).message); return EXIT.INVALID_CONFIG; } }
-  let factory: Parameters<typeof runConformance>[0]['adapterFactory'], closeBridge: (() => void) | null = null;
+  let factory: Parameters<typeof runConformance>[0]['adapterFactory'], cfg0: ReturnType<typeof validateExternalConfig> | undefined, closeBridge: (() => void) | null = null, observed: Awaited<ReturnType<typeof buildObservedRun>> = null;
   if (args.mode === 'reference') factory = w => createReferenceAdapter(w);
   else {
     if (!args.config) { out('INVALID CONFIGURATION: --mode external requires --config <file> (see be14-03.external.example.json). No external publisher exists in this workspace; nothing was run.'); return EXIT.INVALID_CONFIG; }
-    let cfg; try { cfg = validateExternalConfig(JSON.parse(readFileSync(args.config, 'utf8')), env); } catch (e) { out('INVALID CONFIGURATION: ' + (e as Error).message); return EXIT.INVALID_CONFIG; }
+    let cfg; try { cfg = cfg0 = validateExternalConfig(JSON.parse(readFileSync(args.config, 'utf8')), env); } catch (e) { out('INVALID CONFIGURATION: ' + (e as Error).message); return EXIT.INVALID_CONFIG; }
     const bridges: { close(): void }[] = [];                                                        // one bridge process per test session (a test may shut its publisher down)
-    factory = () => { const b = createStdioBridgeAdapter({ command: cfg.bridge.command, ...(cfg.bridge.args ? { args: cfg.bridge.args } : {}) }); bridges.push(b); return b; }; closeBridge = () => bridges.forEach(b => b.close());
+    try { observed = await buildObservedRun(cfg, env); } catch (e) { out('INVALID CONFIGURATION: ' + (e as Error).message); return EXIT.INVALID_CONFIG; }
+    factory = () => { const b = createStdioBridgeAdapter({ command: cfg.bridge.command, ...(cfg.bridge.args ? { args: cfg.bridge.args } : {}), ...(cfg.timeouts?.bridgeMs ? { timeoutMs: cfg.timeouts.bridgeMs } : {}) }); bridges.push(b); return b; }; closeBridge = () => bridges.forEach(b => b.close());
   }
   try {
-    const report = await runConformance({ vectors, mode: args.mode, adapterFactory: factory, ...(args.levels ? { levels: args.levels } : {}), ...(args.only ? { only: args.only } : {}), ...(integrated ? { integrated } : {}), onProgress: r => out(`  ${r.status.padEnd(7)} ${r.testId}  ${r.title}${r.failureCode ? '  [' + r.failureCode + ']' : ''}`) });
+    if (observed) await observed.start();                       // observer failure = INFRASTRUCTURE (exit 3), never a silent skip
+    const report = await runConformance({ vectors, mode: args.mode, adapterFactory: factory, ...(observed ? { externalObserved: observed.options } : {}), ...(cfg0?.timeouts?.perTestMs ? { perTestTimeoutMs: cfg0.timeouts.perTestMs } : {}), ...(args.levels ? { levels: args.levels } : {}), ...(args.only ? { only: args.only } : {}), ...(integrated ? { integrated } : {}), onProgress: r => out(`  ${r.status.padEnd(7)} ${r.testId}  ${r.title}${r.failureCode ? '  [' + r.failureCode + ']' : ''}`) });
     mkdirSync(dirname(resolve(args.report)), { recursive: true }); writeFileSync(args.report, JSON.stringify(report, null, 1)); out(humanSummary(report)); out('report: ' + args.report); return exitCodeFor(report);
-  } catch (e) { out('INFRASTRUCTURE UNAVAILABLE: ' + (e as Error).message); return EXIT.INFRASTRUCTURE; } finally { closeBridge?.(); }
+  } catch (e) { out('INFRASTRUCTURE UNAVAILABLE: ' + (e as Error).message); return EXIT.INFRASTRUCTURE; } finally { closeBridge?.(); await observed?.stop(); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2)).then(c => { process.exitCode = c; });

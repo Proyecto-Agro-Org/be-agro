@@ -17,7 +17,9 @@ export interface ConnectRecord { clientId: string; at: number }
 export interface HttpRecord { path: string; query: Record<string, string>; principal: string | null; method: string; mode: string }
 type Row = { realm: 'test'; sourceId: string; eventId: string; persistedAt?: number; committedAt?: number; payloadSha256?: string; principalReference?: string | null; declaredEventId?: string | null };
 
-export function createWorld(o: { technicalKey: string; principalA?: string; principalB?: string }) {
+/** BE14-04: an EXTERNAL MQTT surface (observer + fault controller) can replace the fake broker. Everything else (evidence, HTTP, fault injection) stays the same. */
+export interface ExternalMqttSurface { publishes(): PublishRecord[]; connects(): ConnectRecord[]; maxConcurrent(): number; setMqtt(m: MqttMode): void | Promise<void>; dropConnections(): void | Promise<void> }
+export function createWorld(o: { technicalKey: string; principalA?: string; principalB?: string; externalMqtt?: ExternalMqttSurface }) {
   const principalA = o.principalA ?? 'p-a', principalB = o.principalB ?? 'p-b', other = 'other-device-01'; let t = 0;
   const claims: Row[] = [], inbox: Row[] = [], quarantine: Row[] = [], measurements = new Map<string, number>(); const forced = new Map<string, string>();
   const publishes: PublishRecord[] = [], connects: ConnectRecord[] = [], requests: HttpRecord[] = []; let mqttMode: MqttMode = 'normal'; let http: HttpMode = { kind: 'normal' }; const open = new Map<string, number>(); let maxConcurrent = 0; const clients: { close(): void; clientId: string }[] = [];
@@ -56,20 +58,24 @@ export function createWorld(o: { technicalKey: string; principalA?: string; prin
   app.use((req, res, next) => { const id = decodeURIComponent(req.path.split('/').pop() ?? ''); const f = forced.get(id); if (f !== undefined && req.method === 'GET') return void res.status(200).json({ eventId: id, status: f, confirmed: ['processed', 'duplicate-confirmed', 'received-durable'].includes(f), evidenceVersion: 1, deliveries: null, durableAt: null }); next(); });
   app.use(createIngestConfirmationRouter({ mode: 'TEST_ONLY', service, authority: { kind: 'TEST_ONLY', authenticate: async (r: { get(h: string): string | undefined }) => r.get('x-principal') ?? null, scopeOf: async (p: string) => scopes[p] ?? null } as never,
     rateLimiter: createTokenBucketRateLimiter({ ...PROPOSED_TEST_RATE_LIMIT, perPrincipalBurst: 100000, globalBurst: 100000, perPrincipalRatePerSecond: 100000, globalRatePerSecond: 100000 }) }));
-  let server: Server | null = null, baseUrl = '';
+  let server: Server | null = null, baseUrl = '', httpPort = 0;
   const api = {
     principalA, principalB, technicalKey: o.technicalKey, mqttFactory: factory, evidence, service,
-    setMqtt(m: MqttMode) { mqttMode = m; if (m === 'down') api.dropConnections(); }, setHttp(m: HttpMode) { http = m; }, force(eventId: string, status: string | null) { if (status === null) forced.delete(eventId); else forced.set(eventId, status); },
-    dropConnections() { for (const c of [...clients]) c.close(); },
+    setMqtt(m: MqttMode): void | Promise<void> { if (o.externalMqtt) return o.externalMqtt.setMqtt(m); mqttMode = m; if (m === 'down') void api.dropConnections(); }, setHttp(m: HttpMode) { http = m; }, force(eventId: string, status: string | null) { if (status === null) forced.delete(eventId); else forced.set(eventId, status); },
+    dropConnections(): void | Promise<void> { if (o.externalMqtt) return o.externalMqtt.dropConnections(); for (const c of [...clients]) c.close(); },
     /** The backend already holds the same eventId with OTHER bytes (a publisher that lost its outbox, or a buggy one). */
     seedConflict(eventId: string) { t += 1; inbox.push({ realm: 'test', sourceId: o.technicalKey, eventId, persistedAt: t, payloadSha256: 'f'.repeat(64) }); },
     markQuarantine(eventId: string) { quarantine.push({ realm: 'test', sourceId: o.technicalKey, eventId }); },
     /** The backend processes the event on its own (the publisher's confirmation answer is what gets lost/delayed). */
     backendReceives(bytes: Buffer) { ingest(o.technicalKey, bytes); },
-    publishes, connects, requests, measurements: () => [...measurements.entries()].map(([k, n]) => ({ key: k, n })), measurementTotal: () => [...measurements.values()].reduce((a, b) => a + b, 0), inboxFor: (id: string) => inbox.filter(r => r.eventId === id),
-    maxConcurrentConnections: () => maxConcurrent, get baseUrl() { return baseUrl; },
-    async start() { server = app.listen(0, '127.0.0.1'); await once(server, 'listening'); baseUrl = 'http://127.0.0.1:' + (server.address() as { port: number }).port; return baseUrl; },
-    async stop() { api.dropConnections(); if (server) { server.closeAllConnections(); await new Promise<void>(r => server!.close(() => r())); server = null; } },
+    get publishes() { return o.externalMqtt ? o.externalMqtt.publishes() : publishes; }, get connects() { return o.externalMqtt ? o.externalMqtt.connects() : connects; }, requests, measurements: () => [...measurements.entries()].map(([k, n]) => ({ key: k, n })), measurementTotal: () => [...measurements.values()].reduce((a, b) => a + b, 0), inboxFor: (id: string) => inbox.filter(r => r.eventId === id),
+    maxConcurrentConnections: () => o.externalMqtt ? o.externalMqtt.maxConcurrent() : maxConcurrent, get baseUrl() { return baseUrl; },
+    async start() { server = app.listen(0, '127.0.0.1'); await once(server, 'listening'); httpPort = (server.address() as { port: number }).port; baseUrl = 'http://127.0.0.1:' + httpPort; return baseUrl; },
+    /** BE14-04: the reconciliation API goes DOWN (connection refused) and comes back on the SAME port. */
+    async stopHttp() { if (server) { server.closeAllConnections(); await new Promise<void>(r => server!.close(() => r())); server = null; } },
+    async startHttp() { if (server) return baseUrl; server = app.listen(httpPort, '127.0.0.1'); await once(server, 'listening'); return baseUrl; },
+    httpIsUp: () => server !== null,
+    async stop() { if (!o.externalMqtt) await api.dropConnections(); if (server) { server.closeAllConnections(); await new Promise<void>(r => server!.close(() => r())); server = null; } },
   };
   return api;
 }

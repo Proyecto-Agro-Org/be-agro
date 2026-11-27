@@ -10,6 +10,8 @@ export interface BootConfig {
   technicalKey: string; mqttUrl: string; reconciliationUrl: string; principal: string; topic: string;
   /** optional tuning, honoured only when the capability `policy-config` / `capacity-config` is declared (the kit never demands concrete production values) */
   policy?: { fastMaxAttempts: number; fastDelayMs: number; fastMaxElapsedMs: number; slowIntervalMs: number; slowMaxElapsedMs: number }; capacity?: number; storePath?: string;
+  /** BE14-04: runtime-only credentials for a real broker (never read from a file, never logged, never in a report). */
+  mqttCredentials?: { username: string; password: string };
 }
 export type CreateInput = { payload: Record<string, number | string | boolean | null>; eventId?: string; deviceTimestamp?: number | string | null | 'OMIT'; sentAt?: number };
 export type CreateResult = { result: 'accepted'; eventId: string } | { result: 'rejected'; reason: string };
@@ -31,6 +33,8 @@ export interface PublisherAdapter {
   corruptOutbox?(kind: 'garbage' | 'torn-tmp'): Promise<void>;
   restart(): Promise<BootResult>;
   shutdown(): Promise<void>;
+  /** BE14-04 (optional): self-description. A bridge that wraps a simulated/reference publisher MUST set `testDouble: true`; it can then never earn `CONFORMANCE PASS EXTERNAL`. */
+  identity?(): Promise<{ name?: string; testDouble?: boolean }>;
 }
 
 // ---------------------------------------------------------------- external bridge (line-delimited JSON over stdio)
@@ -47,6 +51,6 @@ export function createStdioBridgeAdapter(cfg: BridgeConfig): PublisherAdapter & 
   };
   const call = <T>(op: string, args: unknown = {}): Promise<T> => { start(); return new Promise<T>((res, rej) => { const id = nextId++; const timer = setTimeout(() => { pending.delete(id); rej(new Error('BRIDGE_TIMEOUT ' + op)); }, cfg.timeoutMs ?? 15000); pending.set(id, { res: res as (v: unknown) => void, rej, timer }); child!.stdin.write(JSON.stringify({ id, op, args }) + '\n'); }); };
   return { capabilities: () => call('capabilities'), boot: c => call('boot', c), createEvent: i => call('createEvent', i), advance: ms => call('advance', { ms }), inspectPending: () => call('inspectPending'),
-    armCrash: p => call('armCrash', { point: p }), setClock: ms => call('setClock', { ms }), corruptOutbox: k => call('corruptOutbox', { kind: k }), restart: () => call('restart'), shutdown: async () => { try { await call('shutdown'); } catch { /* */ } },
+    armCrash: p => call('armCrash', { point: p }), setClock: ms => call('setClock', { ms }), corruptOutbox: k => call('corruptOutbox', { kind: k }), restart: () => call('restart'), identity: () => call('identity'), shutdown: async () => { try { await call('shutdown'); } catch { /* */ } },
     close() { try { child?.kill(); } catch { /* */ } child = null; } };
 }
