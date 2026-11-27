@@ -18,7 +18,7 @@ export const CONFIRMED_STATUSES: readonly IngestConfirmationStatus[] = Object.fr
 
 // eventId is the reconciliation key: publisher-chosen, stable across retries, independent of the MQTT clientId, and namespaced by the
 // AUTHENTICATED sourceId (never taken from the payload or the request) and the realm, so two tenants may even reuse the same text safely.
-export const EVENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$/;
+export { EVENT_ID_PATTERN } from './event-id.js';          // BE14-02: ONE definition (src/iot/event-id.ts); the API can never be more permissive than the parser
 // BE13-11L: the publisher proves WHICH content it asks about. SHA-256 (lowercase hex) of the exact bytes it published, identical on every retry.
 export const PAYLOAD_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 export const SOURCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/;

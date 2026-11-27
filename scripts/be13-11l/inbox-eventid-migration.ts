@@ -13,9 +13,10 @@ import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { mongo } from 'mongoose';
 type Db = mongo.Db; type Collection = mongo.Collection;
+import { EVENT_ID_PATTERN } from '../../src/iot/event-id.js';
 import { INBOX_EVENT_INDEX_NAME, brokerInboxCollection, brokerInboxIndexes, brokerInboxValidator } from '../../src/models/broker-inbox.models.js';
 
-const EVENT_ID = /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$/;
+const EVENT_ID = EVENT_ID_PATTERN;                       // BE14-02: the canonical definition
 export type LegacyClass =
   | { readonly kind: 'has-eventid'; readonly eventId: string }
   | { readonly kind: 'backfillable'; readonly eventId: string }

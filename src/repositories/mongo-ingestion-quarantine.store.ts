@@ -15,6 +15,7 @@ import type {
 } from '../iot/ingestion-recovery.contracts.js';
 import type { TrustGateRealm } from '../iot/trust-gate.contracts.js';
 import { quarantineCollection } from '../models/ingestion-quarantine.models.js';
+import { eventIdSchema } from '../iot/event-id.js';
 import { currentQuarantineScope } from '../iot/quarantine-reconcile-scope.js';
 
 // BE13-08 — Mongo quarantine store. Realm is part of every filter AND of the
@@ -35,7 +36,7 @@ export const quarantineEntrySchema = z.object({
   reasonCode: code, cause: code.nullable(),
   retryClass: z.enum(['transient', 'ambiguous-commit', 'validation', 'security', 'conflict', 'policy-blocked', 'consistency', 'unknown']),
   fingerprint: hex.nullable(), documentDigest: hex.nullable(),
-  principalReference: principalRef.nullable().optional(), payloadSha256: hex.nullable().optional(), declaredEventId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$/).nullable().optional(),
+  principalReference: principalRef.nullable().optional(), payloadSha256: hex.nullable().optional(), declaredEventId: eventIdSchema.nullable().optional(),
 }).strict().refine(e => e.eventId !== null || e.documentDigest !== null, 'eventId or documentDigest required for dedupe');
 const auditSchema = z.object({ action: z.enum(['recorded', 'transition', 'replay']), outcome: code, reasonCode: code.nullable(), evidence: evidence.nullable() }).strict();
 const statusSchema = z.enum(['OPEN', 'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED']);
@@ -45,7 +46,7 @@ const storedSchema = z.object({ _id: idSchema, realm: catalogueRealmSchema, stag
   sourceId: text.nullable(), operation: z.enum(['measurement', 'device-status']).nullable(), eventId: text.nullable(), field: text.nullable(),
   device: z.object({ kind: z.enum(['mqtt-clientid', 'device-id']), value: text }).strict().nullable(), reasonCode: code, cause: code.nullable(),
   retryClass: quarantineEntrySchema.shape.retryClass, fingerprint: hex.nullable(), documentDigest: hex.nullable(),
-  principalReference: principalRef.nullable().optional(), payloadSha256: hex.nullable().optional(), declaredEventId: z.string().nullable().optional(), status: statusSchema,
+  principalReference: principalRef.nullable().optional(), payloadSha256: hex.nullable().optional(), declaredEventId: eventIdSchema.nullable().optional(), status: statusSchema,
   version: z.number().int().min(1), attemptCount: z.number().int().min(1), firstSeenAt: date, lastSeenAt: date, createdAt: date, updatedAt: date,
   audit: z.array(z.object({ action: z.enum(['recorded', 'transition', 'replay']), at: date, outcome: code, reasonCode: code.nullable(), evidence: evidence.nullable() }).strict()).max(100),
   lease: z.object({ ownerId: evidence.max(128), acquiredAt: date, token: z.number().int().min(1) }).strict().optional(),

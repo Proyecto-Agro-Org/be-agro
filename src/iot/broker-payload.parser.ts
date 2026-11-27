@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { eventIdSchema } from './event-id.js';
 import type { DeclaredDeviceEnvelope, MqttPayloadLimits } from './mqtt-ingestion-boundary.contracts.js';
 
 // BE13-11A — structural parser for raw broker payload bytes. Order (cheapest first, nothing deep before it passes):
@@ -18,7 +19,7 @@ const fieldKey = z.string().regex(/^[a-z][a-z0-9_]{0,63}$/);
 // retryable, ...) makes the whole delivery malformed — device-declared fields can never carry authority.
 const envelopeSchema = z.object({
   version: z.literal(1),
-  eventId: technicalId,
+  eventId: eventIdSchema,                                   // BE14-02: the canonical definition (src/iot/event-id.ts)
   sentAt: z.number().int().min(0).max(8.64e15),
   clientid: technicalId.optional(),
   deviceTimestamp: z.union([z.string().max(128), z.number().finite(), z.null()]).optional(),

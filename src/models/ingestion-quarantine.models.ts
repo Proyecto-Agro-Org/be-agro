@@ -1,3 +1,4 @@
+import { EVENT_ID_PATTERN_SOURCE } from '../iot/event-id.js';
 import type { Connection } from 'mongoose';
 import { ingestionPrefix } from './ingestion-persistence.models.js';
 
@@ -37,7 +38,7 @@ export const quarantineValidator = { $expr: quarantineLeaseCoherence, $jsonSchem
     fingerprint: hexOrNull, documentDigest: hexOrNull, status,
     // BE13-11M: optional reconciliation scope for NEW rows (legacy rows have none).
     principalReference: { anyOf: [{ bsonType: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9:_./@-]+$' }, { bsonType: 'null' }] },
-    payloadSha256: hexOrNull, declaredEventId: { anyOf: [{ bsonType: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$' }, { bsonType: 'null' }] },
+    payloadSha256: hexOrNull, declaredEventId: { anyOf: [{ bsonType: 'string', pattern: EVENT_ID_PATTERN_SOURCE }, { bsonType: 'null' }] },
     version: { bsonType: ['int', 'long'], minimum: 1, maximum: 9_007_199_254_740_991 },
     attemptCount: { bsonType: ['int', 'long'], minimum: 1, maximum: 1_000_000 },
     firstSeenAt: { bsonType: 'date' }, lastSeenAt: { bsonType: 'date' }, createdAt: { bsonType: 'date' }, updatedAt: { bsonType: 'date' },

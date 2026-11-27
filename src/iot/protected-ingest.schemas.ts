@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { eventIdSchema } from './event-id.js';
 const technicalId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/);
 const instant = z.date().refine(value => Number.isSafeInteger(value.getTime()) && value.getTime() >= 0);
 const deviceTimestamp = z.union([z.string().max(128), z.number().finite(), z.null()]);
@@ -12,7 +13,7 @@ export const protectedIngestDocumentSchema = z.object({
   _id: technicalId.optional(),
   sourceId: technicalId,
   operation: protectedStoreOperationSchema,
-  eventId: technicalId,
+  eventId: eventIdSchema,
   clientid: technicalId,
   _receivedAt: instant,
   persistedAt: instant.optional(),
@@ -20,7 +21,7 @@ export const protectedIngestDocumentSchema = z.object({
   _provenance: z.object({
     serviceAuthenticated: z.literal(true),
     sourceId: technicalId,
-    eventId: technicalId,
+    eventId: eventIdSchema,
     technicalClientId: technicalId,
     brokerIdentity: z.enum(['broker-assertion-config-verified', 'declared-unverified']),
     mqttContext: z.enum(['service-declared', 'missing']),
