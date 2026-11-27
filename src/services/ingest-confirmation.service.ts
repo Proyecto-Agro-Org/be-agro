@@ -1,5 +1,5 @@
 import {
-  CONFIRMED_STATUSES, EVENT_ID_PATTERN, INGEST_CONFIRMATION_EVIDENCE_VERSION, SOURCE_ID_PATTERN,
+  CONFIRMED_STATUSES, EVENT_ID_PATTERN, INGEST_CONFIRMATION_EVIDENCE_VERSION, PAYLOAD_SHA256_PATTERN, SOURCE_ID_PATTERN,
   type ConfirmationEvidencePort, type ConfirmationScope, type EvidenceState, type IngestConfirmation, type IngestConfirmationService, type IngestConfirmationStatus,
 } from '../iot/ingest-confirmation.contracts.js';
 
@@ -16,8 +16,9 @@ export function createIngestConfirmationService(options: { evidence: Confirmatio
   const { evidence } = options;
   if (!evidence || typeof evidence.claims !== 'function' || typeof evidence.inbox !== 'function' || typeof evidence.quarantine !== 'function') throw new TypeError('Evidence port required');
   return {
-    async confirm(scope: ConfirmationScope, eventId: string): Promise<IngestConfirmation> {
+    async confirm(scope: ConfirmationScope, eventId: string, payloadSha256: string): Promise<IngestConfirmation> {
       if (typeof eventId !== 'string' || !EVENT_ID_PATTERN.test(eventId)) throw new TypeError('Invalid eventId');
+      if (typeof payloadSha256 !== 'string' || !PAYLOAD_SHA256_PATTERN.test(payloadSha256)) throw new TypeError('Invalid payloadSha256');
       if (!scope || typeof scope.sourceId !== 'string' || !SOURCE_ID_PATTERN.test(scope.sourceId) || typeof scope.realm !== 'string') throw new TypeError('Invalid scope');
       const [claims, inbox, quarantine] = await Promise.all([settle(() => evidence.claims(scope, eventId)), settle(() => evidence.inbox(scope, eventId)), settle(() => evidence.quarantine(scope, eventId))]);
       // Defence in depth: only rows that carry EXACTLY the caller's scope and the asked eventId count. A foreign or malformed row is ignored, never confirmed.
@@ -25,8 +26,13 @@ export function createIngestConfirmationService(options: { evidence: Confirmatio
         rows.filter(r => r.realm === scope.realm && r.sourceId === scope.sourceId && r.eventId === eventId);
       const validClaims = claims.ok ? mine(claims.rows) : [], validInbox = inbox.ok ? mine(inbox.rows) : [], validQuarantine = quarantine.ok ? mine(quarantine.rows) : [];
       const state = (s: Settled<unknown>, valid: readonly unknown[]): EvidenceState => !s.ok ? 'unavailable' : valid.length > 0 ? 'present' : 'absent';
+      // BE13-11L: same eventId + same hash = legitimate retry/re-delivery; ANY other hash recorded for this (scope, eventId) = conflict (never a confirmation).
+      const hashes = new Set(validInbox.map(i => i.payloadSha256));
+      const payloadHash: IngestConfirmation['payloadHash'] = validInbox.length === 0 ? 'unverifiable' : hashes.size === 1 && hashes.has(payloadSha256) ? 'match' : 'mismatch';
       let status: IngestConfirmationStatus;
-      if (validClaims.length > 0) status = validInbox.length >= 2 ? 'duplicate-confirmed' : 'processed';
+      if (payloadHash === 'mismatch') status = 'conflict';
+      else if (validClaims.length > 0 && payloadHash === 'unverifiable') status = 'pending';       // a claim whose content cannot be tied to the asked bytes is not proof
+      else if (validClaims.length > 0) status = validInbox.length >= 2 ? 'duplicate-confirmed' : 'processed';
       else if (validQuarantine.length > 0) status = 'quarantined';
       else if (validInbox.length > 0) status = 'received-durable';
       else if (!claims.ok || !inbox.ok || !quarantine.ok) status = 'pending';
@@ -34,7 +40,7 @@ export function createIngestConfirmationService(options: { evidence: Confirmatio
       const times = validClaims.length > 0 ? validClaims.map(c => c.committedAt) : validInbox.map(i => i.persistedAt);
       return Object.freeze({
         eventId, realm: scope.realm, status, confirmed: CONFIRMED_STATUSES.includes(status), evidenceVersion: INGEST_CONFIRMATION_EVIDENCE_VERSION,
-        evidence: Object.freeze({ claim: state(claims, validClaims), inbox: state(inbox, validInbox), quarantine: state(quarantine, validQuarantine) }),
+        evidence: Object.freeze({ claim: state(claims, validClaims), inbox: state(inbox, validInbox), quarantine: state(quarantine, validQuarantine) }), payloadHash,
         deliveries: inbox.ok ? validInbox.length : null,
         durableAt: times.length > 0 ? Math.min(...times) : null,
       });

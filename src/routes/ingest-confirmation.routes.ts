@@ -1,5 +1,5 @@
 import { Router, type Request } from 'express';
-import { EVENT_ID_PATTERN, type ConfirmationScope, type IngestConfirmationService } from '../iot/ingest-confirmation.contracts.js';
+import { EVENT_ID_PATTERN, PAYLOAD_SHA256_PATTERN, type ConfirmationScope, type IngestConfirmationService } from '../iot/ingest-confirmation.contracts.js';
 
 // BE13-11J — HTTP reconciliation endpoint (LOCAL prototype). NOT mounted by app.ts and refuses to be built unless it is explicitly TEST_ONLY.
 // The caller's scope (realm + sourceId) is derived by the SERVER from the authenticated principal; nothing in the path, query or body can widen it.
@@ -24,7 +24,9 @@ export function createIngestConfirmationRouter(options: { mode: 'TEST_ONLY'; ser
       if (scope === null) { response.status(403).json({ error: 'forbidden' }); return; }
       const eventId = request.params.eventId;
       if (typeof eventId !== 'string' || !EVENT_ID_PATTERN.test(eventId)) { response.status(400).json({ error: 'invalid-event-id' }); return; }
-      const c = await options.service.confirm(scope, eventId);
+      const sha = request.query.payloadSha256;
+      if (typeof sha !== 'string' || !PAYLOAD_SHA256_PATTERN.test(sha)) { response.status(400).json({ error: 'invalid-payload-sha256' }); return; }
+      const c = await options.service.confirm(scope, eventId, sha);
       response.status(200).json({ eventId: c.eventId, status: c.status, confirmed: c.confirmed, evidenceVersion: c.evidenceVersion, deliveries: c.deliveries, durableAt: c.durableAt });
     } catch {
       response.status(503).json({ error: 'unavailable' });                    // the publisher must NOT read this as success

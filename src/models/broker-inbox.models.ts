@@ -20,6 +20,8 @@ export const brokerInboxValidator = { $jsonSchema: { bsonType: 'object', additio
   properties: {
     _id: { bsonType: 'string', pattern: '^ib_[0-9a-f]{32}$' },
     realm: { enum: ['test', 'development', 'preview', 'production'] },
+    // BE13-11L: optional (LEGACY records have none). Never backfilled with a guess; see scripts/be13-11l/inbox-eventid-migration.ts.
+    eventId: { bsonType: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$' },
     sourceId: technicalId, principalReference: safeRef, technicalDeviceKey: technicalId, connectionReference: safeRef, mqttClientId: technicalId,
     topic: { bsonType: 'string', minLength: 1, maxLength: 1024 },
     qos: { bsonType: 'int', enum: [0, 1, 2] },
@@ -36,7 +38,10 @@ export const brokerInboxValidator = { $jsonSchema: { bsonType: 'object', additio
 // - `_id` (implicit, unique): inboxId lookups; recovery filters by { _id, realm }.
 // - `inbox_realm_persisted`: inspection of what a realm persisted over time (backlog review). No worker-scheduling index:
 //   there is no worker.
-export const brokerInboxIndexes = [{ key: { realm: 1, rawPersistedAt: 1 }, name: 'inbox_realm_persisted' }] as const;
+// - `inbox_realm_source_event` (BE13-11L): direct publisher reconciliation lookup by (realm, sourceId, eventId). NOT unique: legitimate re-deliveries are separate records.
+export const INBOX_EVENT_INDEX_NAME = 'inbox_realm_source_event';
+export const brokerInboxIndexes = [{ key: { realm: 1, rawPersistedAt: 1 }, name: 'inbox_realm_persisted' },
+  { key: { realm: 1, sourceId: 1, eventId: 1, rawPersistedAt: -1 }, name: INBOX_EVENT_INDEX_NAME }] as const;
 
 export async function provisionBrokerInboxCollection(connection: Connection, prefix: string) {
   const name = brokerInboxCollection(prefix), db = connection.db;
