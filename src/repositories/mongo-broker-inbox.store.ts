@@ -20,7 +20,7 @@ const revision = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const instant = z.number().int().min(0).max(8.64e15);
 const inboxIdSchema = z.string().regex(/^ib_[0-9a-f]{32}$/);
 const MAX_BYTES = 16 * 1024 * 1024;
-const eventIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$/);
+import { eventIdSchema } from '../iot/event-id.js';
 const requestSchema = z.object({
   eventId: eventIdSchema.optional(),
   realm: catalogueRealmSchema, sourceId: technicalId, principalReference: safeRef, technicalDeviceKey: technicalId, connectionReference: safeRef, mqttClientId: technicalId,

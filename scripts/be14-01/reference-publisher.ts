@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { EVENT_ID_PATTERN } from '../../src/iot/event-id.js';
 import { structuredLogLine } from '../../src/iot/confirmation-observability.js';
 import { CONFIRMED_STATUSES } from '../../src/iot/ingest-confirmation.contracts.js';
 import { validateOutboxPolicy, type OutboxPolicy } from '../be13-11n/publisher-outbox.js';
@@ -52,7 +53,7 @@ export function createFileStore(path: string, ops: { rename?: (from: string, to:
 }
 
 // ---------------------------------------------------------------- identity, bytes, hash
-export const EVENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/;     // the STRICTER pattern of the broker payload parser (no '.')
+export const EVENT_ID_RE = EVENT_ID_PATTERN;     // BE14-02: the ONE canonical definition (src/iot/event-id.ts); a device ports this exact pattern
 export const sha256Hex = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 /** Deterministic bytes: fixed key order, no re-serialization later. The hash is ALWAYS taken over these exact bytes (what is stored is what is published). */
 export function encodeEvent(e: { eventId: string; sentAt: number; clientid: string; payload: Record<string, number | string | boolean | null>; deviceTimestamp?: string | number | null; topic?: string; dataOrigin?: 'simulated' | 'physical-unverified' | 'unknown' }): Uint8Array {

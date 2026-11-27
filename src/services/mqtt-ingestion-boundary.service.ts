@@ -3,6 +3,7 @@ import { catalogueRealmSchema } from '../auth/identity-catalogue.schemas.js';
 import { isBlockingPlaceholder } from '../adapters/ingestion-production-placeholders.js';
 import { brokerContextFingerprint, brokerProvenanceFingerprint, payloadSha256 } from '../iot/broker-fingerprints.js';
 import { parseBrokerPayload, payloadLimitsSchema } from '../iot/broker-payload.parser.js';
+import { eventIdSchema } from '../iot/event-id.js';
 import { runWithQuarantineScope } from '../iot/quarantine-reconcile-scope.js';
 import { classifyIngestionFailure } from '../iot/ingestion-failure-classification.js';
 import { emitAlert, emitMetric } from '../iot/ingestion-observability.js';
@@ -63,7 +64,7 @@ const identitySchema = z.discriminatedUnion('status', [
 // Store answers are validated like any other authority answer.
 const receiptSchema = z.object({ inboxId: inboxIdSchema, realm: catalogueRealmSchema, rawPersistedAt: instant, rawPayloadSha256: hex64,
   rawPayloadBytes: z.number().int().min(0), provenanceFingerprint: hex64 }).strict();
-const recordSchema = z.object({ eventId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$/).nullable().default(null), inboxId: inboxIdSchema, realm: catalogueRealmSchema, sourceId: technicalId, principalReference: safeRef, technicalDeviceKey: technicalId,
+const recordSchema = z.object({ eventId: eventIdSchema.nullable().default(null), inboxId: inboxIdSchema, realm: catalogueRealmSchema, sourceId: technicalId, principalReference: safeRef, technicalDeviceKey: technicalId,
   connectionReference: safeRef, mqttClientId: technicalId, topic, qos: qosSchema, retain: z.boolean(), packetId: packetIdSchema, receivedAt: instant, verifiedAt: instant,
   rawPersistedAt: instant, verifierRevision: revision, mappingRevision: revision, contextFingerprint: hex64, rawPayloadSha256: hex64, provenanceFingerprint: hex64,
   rawPayload: z.instanceof(Uint8Array), rawPayloadBytes: z.number().int().min(0) }).strict();

@@ -5,6 +5,8 @@ Deriva de `CONTRATO_BE13_RECONCILIACION_E2E.md` (canónico) y no lo modifica. Va
 ## Registro del outbox
 `eventId`, `payloadSha256`, `payloadB64` (bytes exactos), `createdAt`, `publishAttempts`, `reconciliationAttempts`, `lastPublishAt`, `lastReconciliationAt`, `nextAttemptAt`, `state`, `lane` (`fast`|`slow`), `brokerAcceptedCount`, `unconfirmedSince`, `lastReconciliation`, `finishedAt`, `version`. Más `nextSeq` (contador del generador de `eventId`), persistido atómicamente con las entradas.
 
+> **BE14-02:** el `eventId` del outbox cumple la definición canónica única (`src/iot/event-id.ts`: `^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$`, sin `.`, sin normalización). `<claveTécnica>:<seq>` ya la cumple; el firmware debe portar ese patrón exacto.
+
 ## State machine
 `PENDING_PUBLISH` → (`publish-ok`) `BROKER_ACCEPTED` → (`query-start`) `WAITING_CONFIRMATION` → `CONFIRMED` | `QUARANTINED` | `CONFLICT_REQUIRES_REVIEW` | (`not-confirmed`) `RETRY_REQUIRED` → (`retry-due`) `PENDING_PUBLISH`.
 `WAITING_CONFIRMATION` → (`throttled`, HTTP 429) `BROKER_ACCEPTED`. `PENDING_PUBLISH` / `RETRY_REQUIRED` → (`slow-exhausted`) `UNCONFIRMED_EXPLICIT`. `publish-failed` mantiene `PENDING_PUBLISH`.

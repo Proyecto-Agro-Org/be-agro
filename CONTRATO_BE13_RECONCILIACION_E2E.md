@@ -14,6 +14,7 @@ Semántica: **at-least-once + procesamiento idempotente + almacenamiento durable
 ## 2. Identidad y clave de reconciliación
 - Clave: `(realm, sourceId, eventId)`. `sourceId` lo deriva el servidor del principal autenticado; el `eventId` lo fija el publisher y es estable entre reintentos.
 - El `clientId` MQTT **es** la identidad técnica del dispositivo (el boundary rechaza `technical-identity-mismatch` si no coincide): **una conexión por identidad de publisher**; dos conexiones concurrentes con el mismo `clientId` son una colisión de identidad.
+- **Definición canónica del `eventId` (BE14-02, única en todo el pipeline: `src/iot/event-id.ts`):** `^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$` — 1 a 128 caracteres, sensible a mayúsculas, **sin `.`**, sin espacios, sin normalización. Parser, esquemas, Durable Inbox, cuarentena, API de reconciliación y publisher usan exactamente esta definición. *Nota de compatibilidad:* hasta BE14-01 la API y algunas capas de persistencia admitían `.`; ningún id con `.` pudo ingerirse nunca (el parser lo rechazaba), por lo que el ajuste es *tightening-compatible*; una consulta con `.` devuelve ahora `400 invalid-event-id` sin consultar Mongo.
 - Contenido: `payloadSha256` = SHA-256 de los bytes exactos publicados (idénticos en cada reintento); el inbox guarda `rawPayloadSha256` y `eventId` (registros nuevos).
 
 ## 3. Publicación

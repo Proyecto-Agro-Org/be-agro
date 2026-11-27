@@ -3,6 +3,7 @@ import { catalogueRealmSchema, securityVersionSchema } from '../auth/identity-ca
 import { epoch, logicalKey } from '../auth/validation.js';
 import { physicalDeviceSchema, sensorDeviceAssociationSchema } from '../sensors/schemas.js';
 
+import { eventIdSchema } from './event-id.js';
 const technicalId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/);
 const timestamp = <T extends z.ZodType>(value: T, origin: string) =>
   z.object({ value, origin: z.literal(origin), trustedForAttribution: z.literal(false) }).strict();
@@ -15,10 +16,10 @@ export const gateCandidateSchema = z.object({
   sourceId: technicalId,
   storeOperation: z.literal('measurement'),
   operation: z.literal('telemetry'),
-  eventId: technicalId,
+  eventId: eventIdSchema,
   device: z.object({ kind: z.literal('mqtt-clientid'), value: technicalId }).strict(),
   declaredTechnicalIdentity: technicalId,
-  idempotencyKey: z.object({ sourceId: technicalId, operation: z.literal('measurement'), eventId: technicalId }).strict(),
+  idempotencyKey: z.object({ sourceId: technicalId, operation: z.literal('measurement'), eventId: eventIdSchema }).strict(),
   timestamps: z.object({
     deviceTimestamp: timestamp(z.union([z.string().max(128), z.number().finite(), z.null()]), 'device-declared'),
     sentAt: timestamp(epoch, 'broker-declared'),

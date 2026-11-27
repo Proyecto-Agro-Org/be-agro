@@ -1,4 +1,5 @@
 import type { Connection } from 'mongoose';
+import { EVENT_ID_PATTERN_SOURCE } from '../iot/event-id.js';
 import { ingestionPrefix } from './ingestion-persistence.models.js';
 
 // BE13-11B — Durable Broker Inbox. Its PURPOSE is to keep the exact raw bytes of VERIFIED deliveries (unlike audit and
@@ -21,7 +22,7 @@ export const brokerInboxValidator = { $jsonSchema: { bsonType: 'object', additio
     _id: { bsonType: 'string', pattern: '^ib_[0-9a-f]{32}$' },
     realm: { enum: ['test', 'development', 'preview', 'production'] },
     // BE13-11L: optional (LEGACY records have none). Never backfilled with a guess; see scripts/be13-11l/inbox-eventid-migration.ts.
-    eventId: { bsonType: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9:_.-]{0,127}$' },
+    eventId: { bsonType: 'string', pattern: EVENT_ID_PATTERN_SOURCE },
     sourceId: technicalId, principalReference: safeRef, technicalDeviceKey: technicalId, connectionReference: safeRef, mqttClientId: technicalId,
     topic: { bsonType: 'string', minLength: 1, maxLength: 1024 },
     qos: { bsonType: 'int', enum: [0, 1, 2] },
