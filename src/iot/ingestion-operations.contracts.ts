@@ -101,7 +101,9 @@ export type MetricName =
   // BE13-11C
   | 'broker_inbox_reconciliation_total' | 'broker_inbox_orphan_candidate_total'
   // BE13-11D (lab adapter)
-  | 'broker_adapter_connection_total' | 'broker_adapter_delivery_total';
+  | 'broker_adapter_connection_total' | 'broker_adapter_delivery_total'
+  // BE13-11P (reconciliation API; labels only from closed vocabularies, never eventId/sourceId)
+  | 'ingest_confirmation_request_total' | 'ingest_confirmation_total' | 'ingest_confirmation_evidence_unavailable_total';
 // Only low-cardinality labels; values are mapped onto closed vocabularies before emission.
 export interface MetricLabels {
   readonly stage?: IngestionStage | 'operations' | 'boundary';

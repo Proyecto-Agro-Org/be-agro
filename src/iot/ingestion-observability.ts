@@ -10,7 +10,8 @@ const METRICS: ReadonlySet<string> = new Set(['ingestion_total', 'ingestion_acce
   'retry_attempt_total', 'recovery_outcome_total', 'quarantine_transition_total', 'replay_total', 'authorization_denied_total',
   'broker_delivery_total', 'provenance_result_total', 'mqtt_boundary_rejected_total',
   'broker_inbox_persist_total', 'broker_inbox_recovery_total', 'broker_inbox_integrity_failure_total',
-  'broker_inbox_reconciliation_total', 'broker_inbox_orphan_candidate_total', 'broker_adapter_connection_total', 'broker_adapter_delivery_total']);
+  'broker_inbox_reconciliation_total', 'broker_inbox_orphan_candidate_total', 'broker_adapter_connection_total', 'broker_adapter_delivery_total',
+  'ingest_confirmation_request_total', 'ingest_confirmation_total', 'ingest_confirmation_evidence_unavailable_total']);
 const STAGES: ReadonlySet<string> = new Set(['mapper', 'trust-gate', 'builder', 'be12', 'composition', 'persistence', 'recovery', 'retry', 'operations', 'boundary']);
 const CLASSES: ReadonlySet<string> = new Set(['transient', 'ambiguous-commit', 'validation', 'security', 'conflict', 'policy-blocked', 'consistency', 'unknown']);
 const OUTCOMES: ReadonlySet<string> = new Set(['accepted', 'duplicate', 'recovered-committed', 'quarantined', 'uncertain', 'committed', 'not-committed', 'inconsistent',
@@ -18,7 +19,10 @@ const OUTCOMES: ReadonlySet<string> = new Set(['accepted', 'duplicate', 'recover
   'audit-unavailable', 'evidence-required', 'evidence-type-not-accepted', 'resolve-not-verified', 'quarantine-not-found', 'invalid-request',
   'RETRYABLE', 'REPLAYING', 'BLOCKED', 'RESOLVED', 'DISCARDED', 'OPEN',
   'ingested', 'rejected', 'verified', 'unverified', 'unavailable', 'persisted', 'processed', 'failed',
-  'recovered-and-processed', 'already-processed', 'integrity-failed', 'blocked', 'stale-reconciliation', 'candidate', 'connected', 'disconnected', 'acked', 'withheld', 'dropped', 'received']);
+  'recovered-and-processed', 'already-processed', 'integrity-failed', 'blocked', 'stale-reconciliation', 'candidate', 'connected', 'disconnected', 'acked', 'withheld', 'dropped', 'received',
+  // BE13-11P: confirmation statuses, request outcomes and evidence sources (closed vocabulary)
+  'received-durable', 'duplicate-confirmed', 'not-found', 'pending', 'conflict', 'ok', 'unauthenticated', 'invalid-input', 'rate-limited', 'uri-too-long', 'error',
+  'evidence-claim', 'evidence-inbox', 'evidence-quarantine']);
 const ALERTS: ReadonlySet<string> = new Set(['QUARANTINE_BACKLOG_HIGH', 'RETRY_EXHAUSTED', 'PERSISTENCE_INCONSISTENT', 'AUTHORIZATION_DENIED_SPIKE',
   'RECOVERY_INCONSISTENT', 'REALM_ISOLATION_VIOLATION', 'AUDIT_RESULT_MISSING',
   'PROVENANCE_REJECTION_SPIKE', 'BROKER_VERIFIER_UNAVAILABLE', 'TECHNICAL_IDENTITY_MISMATCH',
