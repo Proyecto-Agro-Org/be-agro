@@ -1,0 +1,12 @@
+{
+  "_comment": "BE14-04 MODE B with MQTT observer + fault control. Secrets are NEVER written here: only the NAMES of environment variables. Local loopback infrastructure only. No real external publisher exists yet; this is a template.",
+  "technicalKey": "ESP32-AGRO-001",
+  "mqtt": { "url": "mqtt://127.0.0.1:1883", "usernameEnv": "CONFORMANCE_MQTT_USER", "passwordEnv": "CONFORMANCE_MQTT_PASSWORD" },
+  "reconciliation": { "principal": "TEST_ONLY_PRINCIPAL_A" },
+  "scope": { "foreignPrincipal": "TEST_ONLY_PRINCIPAL_B" },
+  "bridge": { "command": "node", "args": ["path/to/your-publisher-bridge.mjs"] },
+  "publisher": { "kind": "real-external", "name": "my-firmware-gateway" },
+  "observer": { "enabled": true, "topicFilter": "agro/lab/verified", "apiUrl": "http://127.0.0.1:18083/api/v5", "apiKeyEnv": "CONFORMANCE_EMQX_API_KEY", "apiSecretEnv": "CONFORMANCE_EMQX_API_SECRET", "observerUsernameEnv": "CONFORMANCE_OBSERVER_USER", "observerPasswordEnv": "CONFORMANCE_OBSERVER_PASSWORD" },
+  "faultControl": { "mode": "lab-emqx", "brokerContainer": "agro-emqx-lab-<runId>", "runId": "<runId>", "requiredFaults": [] },
+  "timeouts": { "perTestMs": 120000, "bridgeMs": 30000 }
+}

@@ -54,8 +54,10 @@ export async function startEmqxLab(basePort: number, runId: string, loadUsers: r
   let token = '';
   // BE13-11I: bodies are cut to 600 chars by default (log hygiene); `full` returns the COMPLETE management-API answer for evidence snapshots.
   const api = async (method: string, path: string, body?: unknown, o: { full?: boolean } = {}) => {
-    const response = await fetch(`http://127.0.0.1:${apiPort}/api/v5${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
+    const call = () => fetch(`http://127.0.0.1:${apiPort}/api/v5${path}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: 'Bearer ' + token } : {}) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    let response = await call();
+    if (response.status === 401 && token) { await login(30); response = await call(); }          // BE14-04: the token dies when the broker is stopped/started from outside (fault controller); re-login transparently
     return { status: response.status, body: scrub(o.full ? await response.text() : (await response.text()).slice(0, 600)) };
   };
   const createVolume = () => { volumeName = containerName + '-data' + (volumeSeq === 0 ? '' : '-' + volumeSeq); volumeSeq += 1;
