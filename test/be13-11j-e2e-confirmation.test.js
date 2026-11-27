@@ -197,3 +197,10 @@ test('J24 the EMQX campaign wiring: real router + real Mongo evidence, original 
   assert.match(h, /exactly one explicit outcome/); assert.match(h, /eventsWithMoreThanOneMeasurement/);
   assert.match(h, /withLab\(\{ durable: true, flushIntervalMs: 1, writeBufferMaxItems: 1 \}/);     // historical broker config untouched
 });
+
+test('J25 (11Q) a hung evidence source is bounded: it answers `pending` within the timeout, never confirms, never hangs', async () => {
+  const be = createBackend(); be.deliver(A, 'hang-1'); const hang = () => new Promise(() => {});
+  const svc = createIngestConfirmationService({ evidence: { ...be.evidence, claims: hang, inbox: hang }, evidenceTimeoutMs: 60 });
+  const t = Date.now(); const r = await svc.confirm(A, 'hang-1', H); assert.ok(Date.now() - t < 1500); assert.equal(r.status, 'pending'); assert.equal(r.confirmed, false); assert.deepEqual([r.evidence.claim, r.evidence.inbox], ['unavailable', 'unavailable']);
+  assert.throws(() => createIngestConfirmationService({ evidence: be.evidence, evidenceTimeoutMs: 0 }), TypeError);
+});
