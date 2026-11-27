@@ -1,3 +1,5 @@
+import { emitMetric } from '../iot/ingestion-observability.js';
+import type { IngestionMetricsPort } from '../iot/ingestion-operations.contracts.js';
 import {
   CONFIRMED_STATUSES, EVENT_ID_PATTERN, INGEST_CONFIRMATION_EVIDENCE_VERSION, PAYLOAD_SHA256_PATTERN, SOURCE_ID_PATTERN,
   type ConfirmationEvidencePort, type QuarantineEvidence, type ConfirmationScope, type EvidenceState, type IngestConfirmation, type IngestConfirmationService, type IngestConfirmationStatus,
@@ -12,7 +14,7 @@ async function settle<T>(work: () => Promise<readonly T[]>): Promise<Settled<T>>
   try { const rows = await work(); return Array.isArray(rows) ? { ok: true, rows } : { ok: false }; } catch { return { ok: false }; }
 }
 
-export function createIngestConfirmationService(options: { evidence: ConfirmationEvidencePort; clock?: () => number }): IngestConfirmationService {
+export function createIngestConfirmationService(options: { evidence: ConfirmationEvidencePort; clock?: () => number; metrics?: IngestionMetricsPort }): IngestConfirmationService {
   const { evidence } = options;
   if (!evidence || typeof evidence.claims !== 'function' || typeof evidence.inbox !== 'function' || typeof evidence.quarantine !== 'function') throw new TypeError('Evidence port required');
   return {
@@ -41,6 +43,11 @@ export function createIngestConfirmationService(options: { evidence: Confirmatio
       else if (validInbox.length > 0) status = 'received-durable';
       else if (!claims.ok || !inbox.ok || !quarantine.ok) status = 'pending';
       else status = 'not-found';
+      // BE13-11P (best-effort, closed vocabulary): never an identifier as a label; an unavailable evidence source is visible BEFORE it becomes a pending storm.
+      if (options.metrics) {
+        await emitMetric(options.metrics, 'ingest_confirmation_total', { outcome: status });
+        for (const [source, s] of [['claim', claims], ['inbox', inbox], ['quarantine', quarantine]] as const) if (!s.ok) await emitMetric(options.metrics, 'ingest_confirmation_evidence_unavailable_total', { outcome: ('evidence-' + source) as never });
+      }
       const times = validClaims.length > 0 ? validClaims.map(c => c.committedAt) : validInbox.map(i => i.persistedAt);
       return Object.freeze({
         eventId, realm: scope.realm, status, confirmed: CONFIRMED_STATUSES.includes(status), evidenceVersion: INGEST_CONFIRMATION_EVIDENCE_VERSION,
