@@ -7,6 +7,7 @@ import express from 'express';
 import { CONFIRMED_STATUSES, EVENT_ID_PATTERN } from '../dist/src/iot/ingest-confirmation.contracts.js';
 import { createIngestConfirmationService } from '../dist/src/services/ingest-confirmation.service.js';
 import { createIngestConfirmationRouter } from '../dist/src/routes/ingest-confirmation.routes.js';
+import { createTokenBucketRateLimiter, PROPOSED_TEST_RATE_LIMIT } from '../dist/src/iot/confirmation-rate-limit.js';
 import { DEFAULT_PUBLISHER_RETRY_POLICY, delayBefore, reconcilePublish } from '../dist/scripts/be13-11j/publisher-reconciler.js';
 import { eventIdOfRawPayload } from '../dist/src/repositories/mongo-ingest-confirmation.evidence.js';
 import { idempotencyDocumentId } from '../dist/src/repositories/mongo-measurement-persistence.repository.js';
@@ -138,7 +139,7 @@ async function withServer(be, fn, authorityOverrides = {}) {
   const service = createIngestConfirmationService({ evidence: be.evidence });
   const principals = { 'emqx-user:lab-device-a': A, 'emqx-user:lab-device-b': B };
   const authority = { authenticate: async req => req.get('x-principal') ?? null, scopeOf: async p => principals[p] ?? null, ...authorityOverrides };
-  const app = express(); app.use(createIngestConfirmationRouter({ mode: 'TEST_ONLY', service, authority }));
+  const app = express(); app.use(createIngestConfirmationRouter({ mode: 'TEST_ONLY', service, authority, rateLimiter: createTokenBucketRateLimiter(PROPOSED_TEST_RATE_LIMIT) }));
   const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
   try { return await fn(`http://127.0.0.1:${server.address().port}`); } finally { server.closeAllConnections(); await new Promise(r => server.close(r)); }
 }
@@ -174,7 +175,8 @@ test('J21 HTTP backend unavailable: 503 (never a confirming answer) and evidence
 
 test('J22 the router refuses to exist outside TEST_ONLY and is not composed anywhere in the productive app', () => {
   const service = createIngestConfirmationService({ evidence: createBackend().evidence });
-  for (const mode of ['PRODUCTION', undefined, 'APPROVED']) assert.throws(() => createIngestConfirmationRouter({ mode, service, authority: {} }), /TEST_ONLY/);
+  for (const mode of ['PRODUCTION', undefined]) assert.throws(() => createIngestConfirmationRouter({ mode, service, authority: {}, rateLimiter: createTokenBucketRateLimiter(PROPOSED_TEST_RATE_LIMIT) }), /TEST_ONLY/);
+  assert.throws(() => createIngestConfirmationRouter({ mode: 'APPROVED', service, authority: {}, rateLimiter: createTokenBucketRateLimiter(PROPOSED_TEST_RATE_LIMIT) }), /NOT_APPROVED/);
   for (const f of ['../src/app.ts', '../src/http/infrastructure.ts', '../src/http/protect-application.ts']) assert.equal(/ingest-confirmation/.test(readFileSync(new URL(f, import.meta.url), 'utf8')), false, f);
 });
 

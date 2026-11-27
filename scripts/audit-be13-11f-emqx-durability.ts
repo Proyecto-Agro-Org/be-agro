@@ -8,6 +8,7 @@
 // No Atlas, no external broker, no hardware, no production; credentials are generated per run.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import express from 'express';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -28,6 +29,7 @@ import { loadMqttJsFactory } from '../src/adapters/emqx-mqtt-connect.js';
 import { LAB_VERIFIED_TOPIC } from '../src/adapters/emqx-mqtt-broker.adapter.js';
 import { EMQX_IMAGE, labContainersRemaining, labVolumesRemaining, startEmqxLab, type EmqxLab, type EmqxLabOptions } from './be13-11d/emqx-lab.js';
 import { LAB_PRINCIPALS, INGEST, BUSINESS, SENSOR, startLabConsumer, type LabConsumer, type MetricSink, type TimingMap } from './be13-11d/lab-consumer.js';
+import { createTokenBucketRateLimiter, PROPOSED_TEST_RATE_LIMIT } from '../src/iot/confirmation-rate-limit.js';
 import { createIngestConfirmationService } from '../src/services/ingest-confirmation.service.js';
 import { createIngestConfirmationRouter } from '../src/routes/ingest-confirmation.routes.js';
 import { createMongoIngestConfirmationEvidence } from '../src/repositories/mongo-ingest-confirmation.evidence.js';
@@ -448,9 +450,9 @@ async function main() {
           const policy: PublisherRetryPolicy = { mode: 'TEST_ONLY', initialDelayMs: 2000, maxAttempts: 4, backoffFactor: 1.5, maxDelayMs: 6000, maxElapsedMs: 60000 };
           const svc = createIngestConfirmationService({ evidence: createMongoIngestConfirmationEvidence({ connection: conns[3]!, prefix: INGEST, realm: 'test' }) });
           const authority = { authenticate: async (req: { get(h: string): string | undefined }) => req.get('x-principal') ?? null, scopeOf: async (pr: string) => { const m = LAB_PRINCIPALS[pr]; return m ? { realm: 'test' as const, sourceId: m.sourceId } : null; } };
-          const app = express(); app.use(createIngestConfirmationRouter({ mode: 'TEST_ONLY', service: svc, authority: authority as never }));
+          const app = express(); app.use(createIngestConfirmationRouter({ mode: 'TEST_ONLY', service: svc, authority: authority as never, rateLimiter: createTokenBucketRateLimiter(PROPOSED_TEST_RATE_LIMIT) }));
           const server = app.listen(0, '127.0.0.1'); await once(server, 'listening'); const base = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
-          const ask = async (id: string, principal = 'emqx-user:lab-device-a') => { const r = await fetch(base + '/ingest-confirmations/' + id, { headers: { 'x-principal': principal }, signal: AbortSignal.timeout(8000) }); return r.status === 200 ? { ok: true as const, status: ((await r.json()) as { status: string }).status } : { ok: false as const }; };
+          const ask = async (id: string, principal = 'emqx-user:lab-device-a') => { const r = await fetch(base + '/ingest-confirmations/' + id + '?payloadSha256=' + createHash('sha256').update(eventBody(id, 0)).digest('hex'), { headers: { 'x-principal': principal }, signal: AbortSignal.timeout(8000) }); return r.status === 200 ? { ok: true as const, status: ((await r.json()) as { status: string }).status } : { ok: false as const }; };
           // keep the consumer connected while the publisher retries (same supervisor policy as the original window)
           let keep = true; const keeper = (async () => { while (keep) { await sleep(3000); const st = await L().api('GET', '/clients/' + consumerId()).catch(() => null); let cn: boolean | null = null; try { cn = (JSON.parse(st?.body ?? '{}') as { connected?: boolean }).connected ?? null; } catch { /* */ } if (keep && st && (st.status === 404 || cn === false)) { await c.stop().catch(() => {}); live.delete(c); await sleep(1500); c = await mk(); } } })();
           const results: ReconcileResult[] = []; let nextIdx = 0, republished = 0;

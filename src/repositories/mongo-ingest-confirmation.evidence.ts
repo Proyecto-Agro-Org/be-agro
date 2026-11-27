@@ -55,8 +55,12 @@ export function createMongoIngestConfirmationEvidence(options: { connection: Con
     },
     async quarantine(scope, eventId): Promise<readonly QuarantineEvidence[]> {
       sameRealm(scope.realm);
-      const rows = await quarantine.find({ realm, sourceId: scope.sourceId, eventId }, READ).limit(16).toArray();
-      return rows.map(r => ({ realm: r.realm as TrustGateRealm, sourceId: r.sourceId === null ? null : String(r.sourceId), eventId: String(r.eventId) }));
+      const shape = (r: Record<string, unknown>): QuarantineEvidence => ({ realm: r.realm as TrustGateRealm, sourceId: r.sourceId == null ? null : String(r.sourceId), eventId: r.eventId == null ? null : String(r.eventId),
+        principalReference: r.principalReference == null ? null : String(r.principalReference), declaredEventId: r.declaredEventId == null ? null : String(r.declaredEventId), payloadSha256: r.payloadSha256 == null ? null : String(r.payloadSha256) });
+      const out = (await quarantine.find({ realm, sourceId: scope.sourceId, eventId }, READ).limit(16).toArray()).map(shape);
+      // BE13-11M: rows written before a sourceId was known are reachable ONLY through the caller's authenticated principal (index quarantine_realm_principal_event).
+      if (typeof scope.principalReference === 'string') out.push(...(await quarantine.find({ realm, principalReference: scope.principalReference, declaredEventId: eventId }, READ).limit(16).toArray()).map(shape));
+      return out;
     },
   };
 }

@@ -3,6 +3,7 @@ import { catalogueRealmSchema } from '../auth/identity-catalogue.schemas.js';
 import { isBlockingPlaceholder } from '../adapters/ingestion-production-placeholders.js';
 import { brokerContextFingerprint, brokerProvenanceFingerprint, payloadSha256 } from '../iot/broker-fingerprints.js';
 import { parseBrokerPayload, payloadLimitsSchema } from '../iot/broker-payload.parser.js';
+import { runWithQuarantineScope } from '../iot/quarantine-reconcile-scope.js';
 import { classifyIngestionFailure } from '../iot/ingestion-failure-classification.js';
 import { emitAlert, emitMetric } from '../iot/ingestion-observability.js';
 import type { AuditAction, IngestionAlertPort, IngestionAuditStore, IngestionMetricsPort } from '../iot/ingestion-operations.contracts.js';
@@ -255,7 +256,9 @@ function createBoundaryCore(deps: MqttIngestionBoundaryDependencies) {
   async function ingestFields(admission: { protectedDocument: unknown; provenanceEvidence: object }, fields: readonly string[], eventId: string, payloadFingerprint: string,
     provenance: Provenance, receipt?: PersistedBrokerDeliveryReceipt): Promise<Ingested> {
     const results = [];
-    for (const field of fields) results.push(freeze({ field, result: await boot.ingest(admission.protectedDocument, admission.provenanceEvidence, { field }) }));
+    // BE13-11M: facts already PROVEN by the boundary, made available to the quarantine store (never read from the payload by the store).
+    for (const field of fields) results.push(freeze({ field, result: await runWithQuarantineScope({ principalReference: provenance.principalReference, payloadSha256: payloadFingerprint, declaredEventId: eventId },
+      () => boot.ingest(admission.protectedDocument, admission.provenanceEvidence, { field })) }));
     await emitMetric(metrics, 'broker_delivery_total', { stage: 'boundary', outcome: 'ingested' });
     return freeze({ status: 'ingested' as const, eventId, payloadFingerprint, provenance, results: freeze(results), ...(receipt ? { receipt } : {}) });
   }
