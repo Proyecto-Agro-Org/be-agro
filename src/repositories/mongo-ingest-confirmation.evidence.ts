@@ -13,6 +13,7 @@ import { quarantineCollection } from '../models/ingestion-quarantine.models.js';
 // is a BOUNDED scan of the caller's most recent records, parsing the eventId out of the raw payload. A production-grade lookup needs an indexed
 // eventId on the inbox record: that is an open human decision, not made here. A miss beyond the window is `absent` => `not-found`/retry, never success.
 export const INBOX_SCAN_LIMIT = 5000;
+export const INBOX_DIRECT_LIMIT = 64;
 const READ = { readConcern: { level: 'majority' }, maxTimeMS: 3000 } as never;
 
 export function eventIdOfRawPayload(raw: unknown): string | null {
@@ -24,7 +25,9 @@ export function eventIdOfRawPayload(raw: unknown): string | null {
   } catch { return null; }
 }
 
-export function createMongoIngestConfirmationEvidence(options: { connection: Connection; prefix: string; realm: TrustGateRealm }): ConfirmationEvidencePort {
+export function createMongoIngestConfirmationEvidence(options: { connection: Connection; prefix: string; realm: TrustGateRealm; legacyScan?: boolean }): ConfirmationEvidencePort {
+  // `legacyScan` (default true): records written BEFORE 11L have no eventId; they are found by the bounded scan below. Turn it off once the migration has run everywhere.
+  const legacyScan = options.legacyScan !== false;
   const db = options.connection.db;
   if (!db) throw new TypeError('Connected MongoDB database required');
   const realm = catalogueRealmSchema.parse(options.realm);
@@ -40,8 +43,15 @@ export function createMongoIngestConfirmationEvidence(options: { connection: Con
     },
     async inbox(scope, eventId): Promise<readonly InboxEvidence[]> {
       sameRealm(scope.realm);
-      const rows = await inbox.find({ realm, sourceId: scope.sourceId }, { ...(READ as object), projection: { rawPayload: 1, rawPersistedAt: 1, sourceId: 1, realm: 1 } } as never).sort({ rawPersistedAt: -1 }).limit(INBOX_SCAN_LIMIT).toArray();
-      return rows.filter(r => eventIdOfRawPayload(r.rawPayload) === eventId).map(r => ({ realm: r.realm as TrustGateRealm, sourceId: String(r.sourceId), eventId, persistedAt: ms(r.rawPersistedAt) }));
+      // 1. Direct, indexed lookup (inbox_realm_source_event): records written by 11L+ carry their eventId.
+      const direct = await inbox.find({ realm, sourceId: scope.sourceId, eventId }, { ...(READ as object), projection: { rawPersistedAt: 1, rawPayloadSha256: 1, sourceId: 1, realm: 1, eventId: 1 } } as never).sort({ rawPersistedAt: -1 }).limit(INBOX_DIRECT_LIMIT).toArray();
+      const out: InboxEvidence[] = direct.map(r => ({ realm: r.realm as TrustGateRealm, sourceId: String(r.sourceId), eventId: String(r.eventId), persistedAt: ms(r.rawPersistedAt), payloadSha256: String(r.rawPayloadSha256) }));
+      // 2. LEGACY fallback: only records WITHOUT an eventId (missing or null), bounded; the eventId is parsed out of the immutable raw bytes.
+      if (legacyScan) {
+        const legacy = await inbox.find({ realm, sourceId: scope.sourceId, eventId: null }, { ...(READ as object), projection: { rawPayload: 1, rawPersistedAt: 1, rawPayloadSha256: 1, sourceId: 1, realm: 1 } } as never).sort({ rawPersistedAt: -1 }).limit(INBOX_SCAN_LIMIT).toArray();
+        for (const r of legacy) if (eventIdOfRawPayload(r.rawPayload) === eventId) out.push({ realm: r.realm as TrustGateRealm, sourceId: String(r.sourceId), eventId, persistedAt: ms(r.rawPersistedAt), payloadSha256: String(r.rawPayloadSha256) });
+      }
+      return out;
     },
     async quarantine(scope, eventId): Promise<readonly QuarantineEvidence[]> {
       sameRealm(scope.realm);

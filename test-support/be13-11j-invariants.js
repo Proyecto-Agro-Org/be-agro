@@ -1,6 +1,8 @@
 // BE13-11J — in-memory backend model + the invariant checker used by BOTH the regular tests and the mutation tests.
 // The model mirrors the real idempotency key (realm, sourceId, eventId): one logical measurement per key however many times it is delivered.
 export const REALM = 'test';
+export const H = 'a'.repeat(64);          // payloadSha256 of the (single) content every event of the model carries unless stated
+export const H2 = 'b'.repeat(64);
 export const A = { realm: REALM, sourceId: 'lab-source-a' };
 export const B = { realm: REALM, sourceId: 'lab-source-b' };
 
@@ -18,7 +20,7 @@ export function createBackend() {
   return {
     evidence, down, claims, inbox, quarantine, measurements,
     /** A delivery reaches the backend: durable inbox record + (first time only) the committed claim and ONE measurement. */
-    deliver(scope, id) { t += 1; inbox.push({ realm: scope.realm, sourceId: scope.sourceId, eventId: id, persistedAt: t });
+    deliver(scope, id, sha = H) { t += 1; inbox.push({ realm: scope.realm, sourceId: scope.sourceId, eventId: id, persistedAt: t, payloadSha256: sha });
       if (!measurements.has(key(scope, id))) { measurements.set(key(scope, id), 1); claims.push({ realm: scope.realm, sourceId: scope.sourceId, eventId: id, committedAt: t }); } },
     quarantineEvent(scope, id) { quarantine.push({ realm: scope.realm, sourceId: scope.sourceId, eventId: id }); },
     measurementCount: () => [...measurements.values()].reduce((a, b) => a + b, 0),
@@ -34,7 +36,7 @@ export async function checkInvariants({ createService, reconcilePublish, idempot
   const bad = [];
   const mk = (backend, scope, publishFn) => {
     const service = createService({ evidence: backend.evidence }), c = clock();
-    return { c, deps: { publish: publishFn, confirm: async id => { const r = await service.confirm(scope, id); return { ok: true, status: r.status }; }, sleep: c.sleep, now: c.now } };
+    return { c, deps: { publish: publishFn, confirm: async id => { const r = await service.confirm(scope, id, H); return { ok: true, status: r.status }; }, sleep: c.sleep, now: c.now } };
   };
   // INV-A: a broker PUBACK is never the final answer — PUBACK always, backend never receives => explicit UNCONFIRMED.
   { const be = createBackend(); const { deps } = mk(be, A, async () => true); const r = await reconcilePublish('e-a', fastPolicy(), deps); if (r.outcome !== 'UNCONFIRMED_EXPLICIT') bad.push('INV-A'); }
@@ -42,7 +44,7 @@ export async function checkInvariants({ createService, reconcilePublish, idempot
   { const be = createBackend(); const seen = []; const { deps } = mk(be, A, async id => { seen.push(id); return true; }); await reconcilePublish('e-b', fastPolicy(), deps); if (seen.length < 2 || new Set(seen).size !== 1 || seen[0] !== 'e-b') bad.push('INV-B'); }
   // INV-C: tenant B cannot confirm tenant A's event, even if the store leaks foreign rows.
   { const be = createBackend(); be.deliver(A, 'e-c'); const leaky = { ...be.evidence, claims: async () => be.claims, inbox: async () => be.inbox };
-    const svc = createService({ evidence: leaky }); const r = await svc.confirm(B, 'e-c'); if (r.status !== 'not-found' || r.confirmed) bad.push('INV-C'); }
+    const svc = createService({ evidence: leaky }); const r = await svc.confirm(B, 'e-c', H); if (r.status !== 'not-found' || r.confirmed) bad.push('INV-C'); }
   // INV-D: pending / not-found / unknown statuses are never success.
   { for (const status of ['pending', 'not-found', 'weird']) { const c = clock(); const r = await reconcilePublish('e-d', fastPolicy(), { publish: async () => true, confirm: async () => ({ ok: true, status }), sleep: c.sleep, now: c.now }); if (r.outcome === 'CONFIRMED') bad.push('INV-D'); } }
   // INV-E: a re-delivery / retry of the same event keeps ONE logical measurement (the real idempotency document id is stable per key, distinct per event).

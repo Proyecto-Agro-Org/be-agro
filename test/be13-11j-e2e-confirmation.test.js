@@ -10,23 +10,24 @@ import { createIngestConfirmationRouter } from '../dist/src/routes/ingest-confir
 import { DEFAULT_PUBLISHER_RETRY_POLICY, delayBefore, reconcilePublish } from '../dist/scripts/be13-11j/publisher-reconciler.js';
 import { eventIdOfRawPayload } from '../dist/src/repositories/mongo-ingest-confirmation.evidence.js';
 import { idempotencyDocumentId } from '../dist/src/repositories/mongo-measurement-persistence.repository.js';
-import { A, B, checkInvariants, createBackend, fastPolicy } from '../test-support/be13-11j-invariants.js';
+import { A, B, H, H2, checkInvariants, createBackend, fastPolicy } from '../test-support/be13-11j-invariants.js';
 
 const clock = () => { let n = 0; return { now: () => n, sleep: async ms => { n += ms; } }; };
 const rig = (backend, scope, publishFn) => { const service = createIngestConfirmationService({ evidence: backend.evidence }), c = clock();
-  return { service, deps: { publish: publishFn, confirm: async id => ({ ok: true, status: (await service.confirm(scope, id)).status }), sleep: c.sleep, now: c.now } }; };
+  return { service, deps: { publish: publishFn, confirm: async id => ({ ok: true, status: (await service.confirm(scope, id, H)).status }), sleep: c.sleep, now: c.now } }; };
 
 test('J1 contract: closed status vocabulary, exactly three confirming statuses, eventId pattern', async () => {
   assert.deepEqual([...CONFIRMED_STATUSES].sort(), ['duplicate-confirmed', 'processed', 'received-durable']);
   for (const bad of ['', ' x', 'a/b', 'a'.repeat(129), '../x', 'x y']) assert.equal(EVENT_ID_PATTERN.test(bad), false, bad);
   const s = createIngestConfirmationService({ evidence: createBackend().evidence });
-  await assert.rejects(() => s.confirm(A, '../x'), TypeError);
-  await assert.rejects(() => s.confirm({ realm: 'test', sourceId: '' }, 'e1'), TypeError);
+  await assert.rejects(() => s.confirm(A, '../x', H), TypeError);
+  await assert.rejects(() => s.confirm(A, 'e1', 'xyz'), TypeError);
+  await assert.rejects(() => s.confirm({ realm: 'test', sourceId: '' }, 'e1', H), TypeError);
   assert.throws(() => createIngestConfirmationService({ evidence: {} }), TypeError);
 });
 
 test('J2 success: a committed claim is `processed` with durable evidence and is frozen', async () => {
-  const be = createBackend(); be.deliver(A, 'e1'); const r = await createIngestConfirmationService({ evidence: be.evidence }).confirm(A, 'e1');
+  const be = createBackend(); be.deliver(A, 'e1'); const r = await createIngestConfirmationService({ evidence: be.evidence }).confirm(A, 'e1', H);
   assert.equal(r.status, 'processed'); assert.equal(r.confirmed, true); assert.equal(r.evidence.claim, 'present'); assert.equal(r.evidenceVersion, 1);
   assert.ok(r.durableAt > 0); assert.equal(Object.isFrozen(r), true);
 });
@@ -34,34 +35,34 @@ test('J2 success: a committed claim is `processed` with durable evidence and is 
 test('J3 pending (fail-closed): unavailable evidence is never confirmed; durable inbox evidence still counts', async () => {
   const be = createBackend(); const s = createIngestConfirmationService({ evidence: be.evidence });
   be.down.claims = be.down.inbox = be.down.quarantine = true;
-  let r = await s.confirm(A, 'e2'); assert.equal(r.status, 'pending'); assert.equal(r.confirmed, false); assert.equal(r.deliveries, null);
-  be.down.inbox = be.down.quarantine = false; r = await s.confirm(A, 'e2'); assert.equal(r.status, 'pending');           // claims unavailable + nothing else => still pending
-  be.inbox.push({ realm: 'test', sourceId: A.sourceId, eventId: 'e2', persistedAt: 5 }); r = await s.confirm(A, 'e2');
+  let r = await s.confirm(A, 'e2', H); assert.equal(r.status, 'pending'); assert.equal(r.confirmed, false); assert.equal(r.deliveries, null);
+  be.down.inbox = be.down.quarantine = false; r = await s.confirm(A, 'e2', H); assert.equal(r.status, 'pending');           // claims unavailable + nothing else => still pending
+  be.inbox.push({ realm: 'test', sourceId: A.sourceId, eventId: 'e2', persistedAt: 5, payloadSha256: H }); r = await s.confirm(A, 'e2', H);
   assert.equal(r.status, 'received-durable'); assert.equal(r.confirmed, true);                                           // durable inbox record is real backend evidence
 });
 
 test('J4 missing: every source answered and none holds the event => not-found (not success)', async () => {
-  const r = await createIngestConfirmationService({ evidence: createBackend().evidence }).confirm(A, 'nope');
+  const r = await createIngestConfirmationService({ evidence: createBackend().evidence }).confirm(A, 'nope', H);
   assert.equal(r.status, 'not-found'); assert.equal(r.confirmed, false);
 });
 
 test('J5 duplicate: the same event admitted twice keeps ONE measurement and is `duplicate-confirmed`', async () => {
-  const be = createBackend(); be.deliver(A, 'e3'); assert.equal((await createIngestConfirmationService({ evidence: be.evidence }).confirm(A, 'e3')).status, 'processed');
-  be.deliver(A, 'e3'); const r = await createIngestConfirmationService({ evidence: be.evidence }).confirm(A, 'e3');
+  const be = createBackend(); be.deliver(A, 'e3'); assert.equal((await createIngestConfirmationService({ evidence: be.evidence }).confirm(A, 'e3', H)).status, 'processed');
+  be.deliver(A, 'e3'); const r = await createIngestConfirmationService({ evidence: be.evidence }).confirm(A, 'e3', H);
   assert.equal(r.status, 'duplicate-confirmed'); assert.equal(r.confirmed, true); assert.equal(r.deliveries, 2); assert.equal(be.measurementCount(), 1);
 });
 
 test('J6 quarantine: a quarantined event is a controlled non-success and wins over a durable inbox record', async () => {
-  const be = createBackend(); be.inbox.push({ realm: 'test', sourceId: A.sourceId, eventId: 'e4', persistedAt: 1 }); be.quarantineEvent(A, 'e4');
-  const r = await createIngestConfirmationService({ evidence: be.evidence }).confirm(A, 'e4'); assert.equal(r.status, 'quarantined'); assert.equal(r.confirmed, false);
+  const be = createBackend(); be.inbox.push({ realm: 'test', sourceId: A.sourceId, eventId: 'e4', persistedAt: 1, payloadSha256: H }); be.quarantineEvent(A, 'e4');
+  const r = await createIngestConfirmationService({ evidence: be.evidence }).confirm(A, 'e4', H); assert.equal(r.status, 'quarantined'); assert.equal(r.confirmed, false);
 });
 
 test('J7 cross-tenant: B asking about A\'s event gets the SAME answer as for an event that never existed (no existence leak), also against a leaky store', async () => {
   const be = createBackend(); be.deliver(A, 'secret-1'); const s = createIngestConfirmationService({ evidence: be.evidence });
-  const foreign = await s.confirm(B, 'secret-1'), never = await s.confirm(B, 'never-existed');
+  const foreign = await s.confirm(B, 'secret-1', H), never = await s.confirm(B, 'never-existed', H);
   assert.deepEqual({ ...foreign, eventId: 'x' }, { ...never, eventId: 'x' }); assert.equal(foreign.status, 'not-found');
   const leaky = createIngestConfirmationService({ evidence: { ...be.evidence, claims: async () => be.claims, inbox: async () => be.inbox, quarantine: async () => be.quarantine } });
-  assert.equal((await leaky.confirm(B, 'secret-1')).status, 'not-found');
+  assert.equal((await leaky.confirm(B, 'secret-1', H)).status, 'not-found');
 });
 
 test('J8 reconciliation: baseline = one publish, PUBACK, confirmation, no retry', async () => {
@@ -80,7 +81,7 @@ test('J9 F-E2 simulated: PUBACK but the backend never receives it => not-found, 
 test('J10 duplicate after a lost confirmation: the first publish arrived, the answer did not; the retry creates NO second measurement', async () => {
   const be = createBackend(), service = createIngestConfirmationService({ evidence: be.evidence }); let q = 0, c = clock();
   const r = await reconcilePublish('dup-1', fastPolicy(), { publish: async id => { be.deliver(A, id); return true; }, sleep: c.sleep, now: c.now,
-    confirm: async id => { q += 1; if (q === 1) throw new Error('timeout'); return { ok: true, status: (await service.confirm(A, id)).status }; } });
+    confirm: async id => { q += 1; if (q === 1) throw new Error('timeout'); return { ok: true, status: (await service.confirm(A, id, H)).status }; } });
   assert.equal(r.outcome, 'CONFIRMED'); assert.equal(r.attempts, 2); assert.equal(r.finalConfirmation, 'duplicate-confirmed'); assert.equal(be.measurementCount(), 1);
 });
 
@@ -145,10 +146,10 @@ async function withServer(be, fn, authorityOverrides = {}) {
 test('J19 HTTP: 401 unauthenticated, 403 without scope, 400 bad eventId, 200 otherwise, no-store', async () => {
   const be = createBackend(); be.deliver(A, 'h-1');
   await withServer(be, async base => {
-    assert.equal((await fetch(base + '/ingest-confirmations/h-1')).status, 401);
-    assert.equal((await fetch(base + '/ingest-confirmations/h-1', { headers: { 'x-principal': 'emqx-user:unknown' } })).status, 403);
-    assert.equal((await fetch(base + '/ingest-confirmations/..%2Fx', { headers: HEADERS })).status, 400);
-    const ok = await fetch(base + '/ingest-confirmations/h-1', { headers: HEADERS }); assert.equal(ok.status, 200); assert.equal(ok.headers.get('cache-control'), 'no-store');
+    assert.equal((await fetch(base + '/ingest-confirmations/h-1?payloadSha256=' + H)).status, 401);
+    assert.equal((await fetch(base + '/ingest-confirmations/h-1?payloadSha256=' + H, { headers: { 'x-principal': 'emqx-user:unknown' } })).status, 403);
+    assert.equal((await fetch(base + '/ingest-confirmations/..%2Fx?payloadSha256=' + H, { headers: HEADERS })).status, 400);
+    const ok = await fetch(base + '/ingest-confirmations/h-1?payloadSha256=' + H, { headers: HEADERS }); assert.equal(ok.status, 200); assert.equal(ok.headers.get('cache-control'), 'no-store');
     const body = await ok.json(); assert.equal(body.status, 'processed'); assert.equal(body.confirmed, true); assert.equal('measurementId' in body, false);
   });
 });
@@ -157,18 +158,18 @@ test('J20 HTTP cross-tenant: B gets the same 200/not-found body for A\'s event a
   const be = createBackend(); be.deliver(A, 'h-2');
   await withServer(be, async base => {
     const B_HEADERS = { 'x-principal': 'emqx-user:lab-device-b' };
-    const foreign = await (await fetch(base + '/ingest-confirmations/h-2', { headers: B_HEADERS })).json(), unknown = await (await fetch(base + '/ingest-confirmations/zzz', { headers: B_HEADERS })).json();
+    const foreign = await (await fetch(base + '/ingest-confirmations/h-2?payloadSha256=' + H, { headers: B_HEADERS })).json(), unknown = await (await fetch(base + '/ingest-confirmations/zzz?payloadSha256=' + H, { headers: B_HEADERS })).json();
     assert.equal(foreign.status, 'not-found'); assert.deepEqual({ ...foreign, eventId: 'x' }, { ...unknown, eventId: 'x' });
-    const widened = await (await fetch(base + '/ingest-confirmations/h-2?sourceId=lab-source-a&realm=test', { headers: B_HEADERS })).json(); assert.equal(widened.status, 'not-found');
-    const own = await (await fetch(base + '/ingest-confirmations/h-2', { headers: HEADERS })).json(); assert.equal(own.status, 'processed');
+    const widened = await (await fetch(base + '/ingest-confirmations/h-2?sourceId=lab-source-a&realm=test&payloadSha256=' + H, { headers: B_HEADERS })).json(); assert.equal(widened.status, 'not-found');
+    const own = await (await fetch(base + '/ingest-confirmations/h-2?payloadSha256=' + H, { headers: HEADERS })).json(); assert.equal(own.status, 'processed');
   });
 });
 
 test('J21 HTTP backend unavailable: 503 (never a confirming answer) and evidence failure => pending', async () => {
   const be = createBackend(); be.deliver(A, 'h-3');
-  await withServer(be, async base => { assert.equal((await fetch(base + '/ingest-confirmations/h-3', { headers: HEADERS })).status, 503); }, { scopeOf: async () => { throw new Error('authority down'); } });
+  await withServer(be, async base => { assert.equal((await fetch(base + '/ingest-confirmations/h-3?payloadSha256=' + H, { headers: HEADERS })).status, 503); }, { scopeOf: async () => { throw new Error('authority down'); } });
   be.down.claims = be.down.inbox = be.down.quarantine = true;
-  await withServer(be, async base => { const b = await (await fetch(base + '/ingest-confirmations/h-3', { headers: HEADERS })).json(); assert.equal(b.status, 'pending'); assert.equal(b.confirmed, false); });
+  await withServer(be, async base => { const b = await (await fetch(base + '/ingest-confirmations/h-3?payloadSha256=' + H, { headers: HEADERS })).json(); assert.equal(b.status, 'pending'); assert.equal(b.confirmed, false); });
 });
 
 test('J22 the router refuses to exist outside TEST_ONLY and is not composed anywhere in the productive app', () => {
@@ -179,7 +180,7 @@ test('J22 the router refuses to exist outside TEST_ONLY and is not composed anyw
 
 test('J23 the Mongo evidence adapter scopes every read by realm + sourceId, reads with majority, and never writes', () => {
   const src = readFileSync(new URL('../src/repositories/mongo-ingest-confirmation.evidence.ts', import.meta.url), 'utf8');
-  assert.equal((src.match(/sourceId: scope\.sourceId/g) ?? []).length, 3);
+  assert.ok((src.match(/sourceId: scope\.sourceId/g) ?? []).length >= 4);
   assert.match(src, /readConcern: \{ level: 'majority' \}/);
   assert.equal(/insertOne|updateOne|deleteOne|replaceOne|bulkWrite|createIndex|\.drop\(/.test(src), false);
   assert.equal(eventIdOfRawPayload({ buffer: Buffer.from('{"eventId":"abc-1"}') }), 'abc-1');
