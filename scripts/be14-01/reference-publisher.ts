@@ -120,7 +120,8 @@ export function createReferencePublisher(o: { store: DurableOutboxStore; policy:
   /** Reading -> stable eventId (persisted counter, never the clock) -> deterministic bytes -> hash -> durable outbox entry. The eventId is fixed HERE and never regenerated. */
   function submitReading(r: { payload: Record<string, number | string | boolean | null>; eventId?: string; sentAt?: number; deviceTimestamp?: string | number | null; topic?: string; dataOrigin?: 'simulated' | 'physical-unverified' | 'unknown' }): SubmitResult {
     const explicit = r.eventId !== undefined, eventId = r.eventId ?? `${o.technicalKey}:${snap.nextSeq}`;
-    const bytes = encodeEvent({ eventId, sentAt: r.sentAt ?? now(), clientid: o.technicalKey, payload: r.payload, ...(r.deviceTimestamp === undefined ? {} : { deviceTimestamp: r.deviceTimestamp }), ...(r.topic === undefined ? {} : { topic: r.topic }), ...(r.dataOrigin === undefined ? {} : { dataOrigin: r.dataOrigin }) });
+    // deviceTimestamp is REQUIRED by the backend pipeline (a reading without it is quarantined: found by the BE14-01 integration). It is DECLARED by the device, fixed here at creation and never regenerated on retry; it is not identity.
+    const t = now(); const bytes = encodeEvent({ eventId, sentAt: r.sentAt ?? t, clientid: o.technicalKey, payload: r.payload, deviceTimestamp: r.deviceTimestamp ?? t, ...(r.topic === undefined ? {} : { topic: r.topic }), ...(r.dataOrigin === undefined ? {} : { dataOrigin: r.dataOrigin }) });
     return submitBytes(eventId, bytes, !explicit);
   }
   function submitBytes(eventId: string, bytes: Uint8Array, consumeSeq = false): SubmitResult {

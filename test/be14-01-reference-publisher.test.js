@@ -40,9 +40,9 @@ test('B2 eventId: generated from the device key + a PERSISTED counter (never the
   await r.pump(r.pub, 4000); assert.ok(r.publishes.filter(p => p.eventId === a.eventId).length >= 2); assert.deepEqual([...new Set(r.publishes.map(p => p.eventId))].sort(), [a.eventId, b.eventId]);
   const again = r.make(); const c = again.submitReading(reading); assert.equal(c.eventId, KEY + ':3');                                              // restart: the counter continues
   assert.throws(() => mod.encodeEvent({ eventId: 'bad.id', sentAt: 1, clientid: KEY, payload: {} }), /INVALID_EVENT_ID/);                           // '.' passes the confirmation API but NOT the payload parser
-  const sentAt = r.pub.get(a.eventId) && JSON.parse(Buffer.from(r.pub.get(a.eventId).payloadB64, 'base64').toString()).sentAt;
-  assert.equal(r.pub.submitReading({ ...reading, eventId: a.eventId, sentAt }).result, 'ALREADY_PRESENT');                                       // same reading, same bytes: idempotent
-  assert.equal(r.pub.submitReading({ ...reading, eventId: a.eventId, sentAt: sentAt + 1 }).result, 'REJECTED_EVENT_ID_REUSED_WITH_OTHER_BYTES');   // other bytes under the same id: refused
+  const orig = JSON.parse(Buffer.from(r.pub.get(a.eventId).payloadB64, 'base64').toString()), sentAt = orig.sentAt, deviceTimestamp = orig.deviceTimestamp;
+  assert.equal(r.pub.submitReading({ ...reading, eventId: a.eventId, sentAt, deviceTimestamp }).result, 'ALREADY_PRESENT');                                       // same reading, same bytes: idempotent
+  assert.equal(r.pub.submitReading({ ...reading, eventId: a.eventId, sentAt: sentAt + 1, deviceTimestamp }).result, 'REJECTED_EVENT_ID_REUSED_WITH_OTHER_BYTES');   // other bytes under the same id: refused
 });
 
 test('B3 state machine: explicit table; PUBACK can never reach CONFIRMED; terminal states have no exits', () => {
@@ -202,4 +202,13 @@ test('B22 file store: a transient EPERM/EBUSY on the atomic rename is retried (b
   const store = mod.createFileStore(path, { rename: flaky }); store.save({ nextSeq: 7, entries: [] }); assert.equal(store.load().nextSeq, 7); assert.equal(calls, 4);
   assert.throws(() => mod.createFileStore(path, { rename: () => { throw Object.assign(new Error('x'), { code: 'EPERM' }); } }).save({ nextSeq: 1, entries: [] }), /x/);
   let once = 0; assert.throws(() => mod.createFileStore(path, { rename: () => { once += 1; throw Object.assign(new Error('nope'), { code: 'ENOSPC' }); } }).save({ nextSeq: 1, entries: [] }), /nope/); assert.equal(once, 1);
+});
+
+test('B23 contract requirement found by the integration: a reading WITH deviceTimestamp is ACCEPTED by the real boundary pipeline; without it the pipeline quarantines it', async () => {
+  const { boundarySetup, delivery, envelope } = await import('../test-support/be13-11a-broker.fixtures.js'); const f = envelope();
+  const via = async bytes => { const s = await boundarySetup(); const r = await s.admission.admit(delivery({ payload: bytes }), { mode: 'persist-and-process' }); return r.results.map(x => x.result.status + ':' + (x.result.reasonCode ?? '')); };
+  const base = { eventId: f.eventId, sentAt: f.sentAt, clientid: f.clientid, payload: { temperature: 1 }, topic: f.mqtt.topic, dataOrigin: 'simulated' };
+  assert.deepEqual(await via(Buffer.from(mod.encodeEvent({ ...base, deviceTimestamp: f.deviceTimestamp }))), ['accepted:']);
+  assert.deepEqual(await via(Buffer.from(mod.encodeEvent(base))), ['quarantined:invalid-authority-response']);
+  const r = rig(mod); const { eventId } = r.pub.submitReading({ payload: { temperature: 1 } }); assert.equal(typeof JSON.parse(Buffer.from(r.pub.get(eventId).payloadB64, 'base64').toString()).deviceTimestamp, 'number');   // the reference publisher always declares it
 });
