@@ -1,4 +1,5 @@
 // BE13-11J — LOCAL_TEST_ONLY publisher reconciliation loop. Never imported by app code.
+// SUPERSEDED by scripts/be13-11n/publisher-outbox.ts (durable outbox, two lanes, restart recovery). Kept because the 11J tests/mutants and the campaign history use it.
 //
 //   publish(eventId) -> (PUBACK = BROKER_ACCEPTED only) -> wait -> confirm(eventId) -> confirmed? stop : publish AGAIN WITH THE SAME eventId -> ...
 // Bounded by an injected policy (attempts and elapsed time). The loop NEVER invents a new eventId, NEVER treats PUBACK as final, NEVER treats

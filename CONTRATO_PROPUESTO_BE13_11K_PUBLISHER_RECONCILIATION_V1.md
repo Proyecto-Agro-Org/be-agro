@@ -1,5 +1,7 @@
 # CONTRATO PROPUESTO — `PublisherReconciliationContract` v1
 
+> **SUPERSEDED** por `CONTRATO_BE13_RECONCILIACION_E2E.md` (BE13-FINAL): lo propuesto aquí quedó implementado en local (11L-11Q). Se conserva como historia de la decisión.
+
 Estado: **`PROPUESTO` / `RECOMMENDATION_READY`**. No aprobado, no implementado como producto, no habilitado en Production. Basado en el prototipo `TEST_ONLY` de BE13-11J (`CONTRATO_BE13_11J_INGEST_CONFIRMATION.md`) y en las decisiones recomendadas en `ADR_BE13_11K_RECONCILIATION_DECISION.md`. Las partes marcadas **[NUEVO vs 11J]** no existen todavía.
 
 Semántica: **at-least-once + procesamiento idempotente + confirmación end-to-end.** El contrato no promete exactly-once.
