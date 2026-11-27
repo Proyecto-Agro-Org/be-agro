@@ -23,6 +23,11 @@ El reporte JSON queda en `.local-evidence/publisher-conformance-report.json` (ig
 9. **Corregir los FAIL** en el publisher (no en el kit ni en BE13): cada `failureCode` indica qué regla se violó (p. ej. `PUBACK_AS_SUCCESS`, `RETRY_CHANGED_IDENTITY`, `DEVICE_TIMESTAMP_MISSING`, `SILENT_DROP`).
 10. **Repetir** hasta cubrir los niveles alcanzables.
 
+## Onboarding del firmware real (BE14-05)
+Qué debe implementar el firmware y qué decide producto: `ESPECIFICACION_BE14_FUTURE_PUBLISHER_REQUIREMENTS.md`; trazabilidad requisito→test: `MATRIZ_BE14_REQUIREMENT_TO_CONFORMANCE.md`; plan: `PLAN_BE14_FIRMWARE_IMPLEMENTATION.md`; entrada de plataforma: `PLANTILLA_BE14_PUBLISHER_PLATFORM_INPUT.md`.
+Checklist: 1) el firmware compila; 2) identidad `TEST_ONLY` provisionada; 3) endpoint MQTT local; 4) endpoint de reconciliación local; 5) puente externo (declara `crash-injection`, `clock-control`, `capacity-config`, `policy-config`, `outbox-corruption`); 6) observador; 7) fault-control; 8) corrida de conformidad.
+**Primera corrida real: por niveles, no 40 pruebas juntas.** Orden `--levels 0` → `1` → `2` → `3` → `4` → `5`; **detenerse en el nivel en que falle un MUST** (cada `failureCode` indica la regla) y no avanzar hasta corregirlo. `CONFORMANCE PASS LOCAL/EXTERNAL` no es `productionReady`. Nota: L2-04 no es inyectable contra un broker real (decisión D17), por lo que el veredicto externo puede quedar `INCOMPLETE` por ese único caso.
+
 ## Modo B completo (BE14-04): observador MQTT + fault-control
 Sin observador, los tests `world: mqtt` quedan `NOT_RUN` (ver abajo). Con observador y control de fallos se ejecuta el catálogo completo contra un broker local real:
 1. **Levantar la infraestructura local**: un EMQX de laboratorio (loopback) con la regla `lab_verify` (la crea `startEmqxLab`; ver `scripts/be13-11d/emqx-lab.ts`). El contenedor debe llevar la etiqueta `agro.emqx.lab=<runId>`.

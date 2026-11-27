@@ -23,7 +23,7 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 export function createObserver(o: { runId: string; technicalIdentity: string; storePayloadBytes?: boolean; topicRule?: (topic: string) => boolean; now?: () => number; onPublish?: (p: ObservedPublish & { eventId: string | null; sha: string }) => void }) {
   const t0 = (o.now ?? (() => performance.now()))(), clock = () => Math.round(((o.now ?? (() => performance.now()))() - t0) * 100) / 100;
-  const events: ObserverEvent[] = [], kept: { bytes: Buffer; eventId: string | null; sha: string; clientId: string; topic: string; at: number }[] = [];
+  const events: ObserverEvent[] = [], kept: { bytes: Buffer; eventId: string | null; sha: string; clientId: string; topic: string; at: number; qos: number | null }[] = [];
   const open = new Map<string, number>(); let opens = 0, closes = 0, reconnects = 0, collisions = 0, maxConcurrent = 0, seq = 0, everConnected = false; const flaps: number[] = [];
   const topicOk = o.topicRule ?? ((t: string) => t.length >= 1 && Buffer.byteLength(t) <= 1024 && !/[\u0000+#]/.test(t));
   const push = (type: ObservationType, extra: Partial<ObserverEvent> = {}) => { const e: ObserverEvent = { runId: o.runId, observerEventId: ++seq, timestamp: clock(), technicalIdentity: o.technicalIdentity, clientId: null, type, topic: null, qos: null, dup: null, eventId: null, payloadSha256: null, payloadLength: null, ...extra }; events.push(e); return e; };
@@ -41,14 +41,14 @@ export function createObserver(o: { runId: string; technicalIdentity: string; st
       push(p.dup === true ? 'DUP_PUBLISH_SEEN' : 'PUBLISH_SEEN', { clientId: p.clientId, topic: p.topic, qos: p.qos, dup: p.dup === null ? 'NOT_OBSERVABLE' : p.dup, eventId, payloadSha256: hash, payloadLength: p.bytes.length });
       if (!parsed.ok) push('PAYLOAD_CONTRACT_FAIL', { clientId: p.clientId, topic: p.topic, payloadSha256: hash, payloadLength: p.bytes.length });
       if (!topicOk(p.topic)) push('TOPIC_INVALID_SEEN', { clientId: p.clientId, topic: p.topic });
-      kept.push({ bytes: Buffer.from(p.bytes), eventId, sha: hash, clientId: p.clientId, topic: p.topic, at: clock() }); o.onPublish?.({ ...p, eventId, sha: hash });
+      kept.push({ bytes: Buffer.from(p.bytes), eventId, sha: hash, clientId: p.clientId, topic: p.topic, at: clock(), qos: p.qos }); o.onPublish?.({ ...p, eventId, sha: hash });
     },
   };
   const publishes = () => kept.filter(k => mine(k.clientId) || true);
   return {
     sink, runId: o.runId, events: () => events.map(e => ({ ...e })),
     /** Publish records in the shape the conformance world expects. */
-    publishRecords: () => kept.map(k => ({ clientId: k.clientId, topic: k.topic, bytes: k.bytes, eventId: k.eventId ?? '', sha: k.sha, delivered: true })),
+    publishRecords: () => kept.map(k => ({ clientId: k.clientId, topic: k.topic, bytes: k.bytes, eventId: k.eventId ?? '', sha: k.sha, delivered: true, qos: k.qos })),
     connectRecords: () => events.filter(e => (e.type === 'CONNECT_SEEN' || e.type === 'RECONNECT_SEEN') && e.clientId !== null).map(e => ({ clientId: e.clientId!, at: e.timestamp })),
     connections: () => ({ opens, closes, reconnects, collisions, maxConcurrent, currentlyOpen: [...open.values()].reduce((a, b) => a + b, 0) }),
     /** Heuristic for sources that can only poll (EMQX API): many CONNECTs inside a short window = takeover flapping = a shared clientId. */

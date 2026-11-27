@@ -12,7 +12,7 @@ import { sha256Hex } from '../be14-01/reference-publisher.js';
 
 export type MqttMode = 'normal' | 'puback-no-delivery' | 'down' | 'drop-before-puback';
 export type HttpMode = { kind: 'normal' } | { kind: '429'; retryAfterSec: number } | { kind: '401' } | { kind: '403' } | { kind: '500' } | { kind: 'timeout' } | { kind: 'reset' } | { kind: 'malformed' } | { kind: 'wrong-event' } | { kind: 'unknown-status' };
-export interface PublishRecord { clientId: string; topic: string; bytes: Buffer; eventId: string; sha: string; delivered: boolean }
+export interface PublishRecord { clientId: string; topic: string; bytes: Buffer; eventId: string; sha: string; delivered: boolean; /** MQTT QoS the publisher used (BE14-05: the contract requires QoS 1) */ qos?: number | null }
 export interface ConnectRecord { clientId: string; at: number }
 export interface HttpRecord { path: string; query: Record<string, string>; principal: string | null; method: string; mode: string }
 type Row = { realm: 'test'; sourceId: string; eventId: string; persistedAt?: number; committedAt?: number; payloadSha256?: string; principalReference?: string | null; declaredEventId?: string | null };
@@ -38,10 +38,10 @@ export function createWorld(o: { technicalKey: string; principalA?: string; prin
   const factory = (_url: string, opts: { clientId: string }) => {
     const handlers: Record<string, (...a: unknown[]) => void> = {}; let closed = false; const clientId = opts.clientId;
     const c = { clientId, on: (e: string, l: (...a: unknown[]) => void) => { handlers[e] = l; if (e === 'connect') setTimeout(() => { if (mqttMode === 'down') handlers.error?.(new Error('ECONNREFUSED')); else { connects.push({ clientId, at: ++t }); open.set(clientId, (open.get(clientId) ?? 0) + 1); maxConcurrent = Math.max(maxConcurrent, open.get(clientId)!); l(); } }, 0); },
-      publish: (topic: string, payload: Buffer, _o: object, cb: (e: Error | null) => void): void => { setTimeout(() => {
+      publish: (topic: string, payload: Buffer, pubOpts: { qos?: number }, cb: (e: Error | null) => void): void => { setTimeout(() => {
         if (closed || mqttMode === 'down') return cb(new Error('not-connected'));
         const bytes = Buffer.from(payload); let eventId = ''; try { eventId = String((JSON.parse(bytes.toString('utf8')) as { eventId?: string }).eventId ?? ''); } catch { /* */ }
-        const deliver = mqttMode === 'normal'; publishes.push({ clientId, topic, bytes, eventId, sha: sha256Hex(bytes), delivered: deliver });
+        const deliver = mqttMode === 'normal'; publishes.push({ clientId, topic, bytes, eventId, sha: sha256Hex(bytes), delivered: deliver, qos: pubOpts?.qos ?? null });
         if (mqttMode === 'drop-before-puback') { ingest(o.technicalKey, bytes); api.dropConnections(); return; }      // the broker took it, but the publisher never learns the outcome (callback never fires)
         if (deliver) ingest(clientId === o.technicalKey ? o.technicalKey : clientId, bytes); cb(null);
       }, 0); },
