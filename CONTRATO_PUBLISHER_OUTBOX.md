@@ -7,6 +7,8 @@ Deriva de `CONTRATO_BE13_RECONCILIACION_E2E.md` (canónico) y no lo modifica. Va
 
 > **BE14-02:** el `eventId` del outbox cumple la definición canónica única (`src/iot/event-id.ts`: `^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$`, sin `.`, sin normalización). `<claveTécnica>:<seq>` ya la cumple; el firmware debe portar ese patrón exacto.
 
+> **BE14-03:** reglas de lectura válidas confirmadas por el kit de conformidad: `deviceTimestamp` es un **entero ≥ 0** (epoch ms; strings, `null`, flotantes y negativos son cuarentenados por el pipeline) y el payload debe parsear con el parser real del backend; el publisher rechaza localmente lo que no cumpla (`INVALID_DEVICE_TIMESTAMP`, `INVALID_READING:<motivo>`). La certificación de cualquier publisher se hace con `npm run publisher:conformance` (ver `CONTRATO_BE14_03_PUBLISHER_CONFORMANCE.md`).
+
 ## State machine
 `PENDING_PUBLISH` → (`publish-ok`) `BROKER_ACCEPTED` → (`query-start`) `WAITING_CONFIRMATION` → `CONFIRMED` | `QUARANTINED` | `CONFLICT_REQUIRES_REVIEW` | (`not-confirmed`) `RETRY_REQUIRED` → (`retry-due`) `PENDING_PUBLISH`.
 `WAITING_CONFIRMATION` → (`throttled`, HTTP 429) `BROKER_ACCEPTED`. `PENDING_PUBLISH` / `RETRY_REQUIRED` → (`slow-exhausted`) `UNCONFIRMED_EXPLICIT`. `publish-failed` mantiene `PENDING_PUBLISH`.
