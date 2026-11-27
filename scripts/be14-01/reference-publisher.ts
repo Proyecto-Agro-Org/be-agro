@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { parseBrokerPayload } from '../../src/iot/broker-payload.parser.js';
 import { EVENT_ID_PATTERN } from '../../src/iot/event-id.js';
 import { structuredLogLine } from '../../src/iot/confirmation-observability.js';
 import { CONFIRMED_STATUSES } from '../../src/iot/ingest-confirmation.contracts.js';
@@ -61,7 +62,12 @@ export function encodeEvent(e: { eventId: string; sentAt: number; clientid: stri
   const body: Record<string, unknown> = { version: 1, eventId: e.eventId, sentAt: e.sentAt, clientid: e.clientid };
   if (e.deviceTimestamp !== undefined) body.deviceTimestamp = e.deviceTimestamp;
   body.payload = e.payload; body.mqtt = { ...(e.topic === undefined ? {} : { topic: e.topic }), messageType: 'telemetry', dataOrigin: e.dataOrigin ?? 'unknown' };
-  return Buffer.from(JSON.stringify(body), 'utf8');
+  // BE14-03 (found by the conformance kit): the pipeline only processes a deviceTimestamp that is a NON-NEGATIVE INTEGER epoch (strings, null, floats and negatives are parseable but get quarantined),
+  // and the backend parser rejects readings with invalid keys/values. A publisher must refuse such a reading LOCALLY instead of publishing something that can never be confirmed.
+  if (body.deviceTimestamp !== undefined && !(typeof body.deviceTimestamp === 'number' && Number.isSafeInteger(body.deviceTimestamp) && body.deviceTimestamp >= 0)) throw new TypeError('INVALID_DEVICE_TIMESTAMP');
+  const bytes = Buffer.from(JSON.stringify(body), 'utf8'); const parsed = parseBrokerPayload(bytes, { maxBytes: 1 << 20, maxDepth: 8, maxKeys: 64, maxStringLength: 256 });
+  if (!parsed.ok) throw new TypeError('INVALID_READING:' + parsed.reasonCode);
+  return bytes;
 }
 
 // ---------------------------------------------------------------- ports
@@ -122,7 +128,7 @@ export function createReferencePublisher(o: { store: DurableOutboxStore; policy:
   function submitReading(r: { payload: Record<string, number | string | boolean | null>; eventId?: string; sentAt?: number; deviceTimestamp?: string | number | null; topic?: string; dataOrigin?: 'simulated' | 'physical-unverified' | 'unknown' }): SubmitResult {
     const explicit = r.eventId !== undefined, eventId = r.eventId ?? `${o.technicalKey}:${snap.nextSeq}`;
     // deviceTimestamp is REQUIRED by the backend pipeline (a reading without it is quarantined: found by the BE14-01 integration). It is DECLARED by the device, fixed here at creation and never regenerated on retry; it is not identity.
-    const t = now(); const bytes = encodeEvent({ eventId, sentAt: r.sentAt ?? t, clientid: o.technicalKey, payload: r.payload, deviceTimestamp: r.deviceTimestamp ?? t, ...(r.topic === undefined ? {} : { topic: r.topic }), ...(r.dataOrigin === undefined ? {} : { dataOrigin: r.dataOrigin }) });
+    const t = now(); const bytes = encodeEvent({ eventId, sentAt: r.sentAt ?? t, clientid: o.technicalKey, payload: r.payload, deviceTimestamp: r.deviceTimestamp === undefined ? t : r.deviceTimestamp, ...(r.topic === undefined ? {} : { topic: r.topic }), ...(r.dataOrigin === undefined ? {} : { dataOrigin: r.dataOrigin }) });
     return submitBytes(eventId, bytes, !explicit);
   }
   function submitBytes(eventId: string, bytes: Uint8Array, consumeSeq = false): SubmitResult {

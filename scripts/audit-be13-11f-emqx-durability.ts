@@ -37,6 +37,7 @@ import { reconcilePublish, type PublisherRetryPolicy, type ReconcileResult } fro
 import { createFileOutboxStore, createOutboxPublisher, sha256Hex, type OutboxPolicy } from './be13-11n/publisher-outbox.js';
 import { createFileStore as createRefFileStore, createHttpReconciliationClient, createMemoryStore as createRefMemoryStore, createReferencePublisher, createTestOnlyAuth } from './be14-01/reference-publisher.js';
 import { createMqttPublisherPort } from './be14-01/mqtt-port.js';
+import { integratedResults } from './be14-03/integrated.js';
 import { classifyEventualDelivery, classifyOutcome, deliveryTimeline, parseSessionResponses, scenarioOfEvent, type PacketRecord } from './be13-11i/delivery-order.js';
 
 // KNOWN_LIMITATION = a durability requirement the broker DEMONSTRABLY does not meet (documented, reproducible, expected here). A PUBACKed message that is
@@ -523,6 +524,7 @@ async function main() {
             measurementsDistinctEvents: nByEvent.size, eventsWithMoreThanOneMeasurement: [...nByEvent.values()].filter(n => n > 1).length, publisherCrash: crashInfo, backendRestart: events, mqttConnectionsOpenNow: j14.mqttPort.connectionsOpen,
             crossTenantProbe: { eventId: probe.eventId, askedByB: cross, askedByOwner: own }, elapsedMs: Math.round(performance.now() - n0) };
           writeFileSync('.local-evidence/be14-01-' + process.env.BE14_01_TAG!.replace(/[^\w.-]/g, '_') + '.json', JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', tag: process.env.BE14_01_TAG, summary: summary14, originalWindow, before: before.map(e => ({ eventId: e.eventId, publishAttempts: e.publishAttempts, brokerAcceptedCount: e.brokerAcceptedCount })), entries: finalEntries.map(e => ({ ...e, payloadB64: undefined })) }, null, 1));
+          writeFileSync('.local-evidence/publisher-conformance-integrated-' + process.env.BE14_01_TAG!.replace(/[^\w.-]/g, '_') + '.json', JSON.stringify({ label: 'LOCAL_LAB_EVIDENCE', source: 'BE14-03 integrated campaign (real EMQX + Mongo + router)', results: integratedResults(summary14 as never) }, null, 1));
           server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); await j14.mqttPort.close(); mark('14-01 done ' + JSON.stringify({ byState, f_e2: summary14.f_e2, normal: summary14.normal, conflict: summary14.conflict }));
           assert.equal(confirmedNoEvidence.length, 0, 'no entry CONFIRMED without backend evidence'); assert.equal(summary14.eventsWithMoreThanOneMeasurement, 0, 'no duplicate measurement'); assert.equal(crashInfo.identical, true, 'outbox rebuilt from disk is identical');
           assert.equal(rogueEntry.state, 'CONFLICT_REQUIRES_REVIEW', 'same eventId + different bytes => conflict'); assert.equal(rogueEntry.publishAttempts, 1, 'a conflict is never republished'); assert.equal(cross.kind === 'status' && cross.status, 'not-found', 'cross-tenant probe sees nothing');

@@ -9,7 +9,8 @@
     "dev:build": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "dev": "npm run build && node --env-file-if-exists=.env --watch dist/scripts/start.js",
     "start": "node --env-file-if-exists=.env dist/scripts/start.js",
-    "test": "npm run build && node --test"
+    "test": "npm run build && node --test",
+    "publisher:conformance": "npm run build && node dist/scripts/be14-03/cli.js"
   },
   "engines": {
     "node": "24.x"

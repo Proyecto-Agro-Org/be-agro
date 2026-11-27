@@ -91,12 +91,12 @@
    "payloadSha256": "20faeedab5181bde3a3e30544a946253b97a1d258644857335daa47fc628fd1c"
   },
   {
-   "name": "V6-device-timestamp-string",
+   "name": "V6-device-timestamp",
    "reading": {
     "eventId": "ESP32-AGRO-001:6",
     "sentAt": 1795115900000,
     "clientid": "ESP32-AGRO-001",
-    "deviceTimestamp": "2026-11-18T10:15:00Z",
+    "deviceTimestamp": 1795115899000,
     "payload": {
      "soil_temperature_c": 19.25
     },
@@ -104,8 +104,8 @@
     "dataOrigin": "simulated"
    },
    "eventId": "ESP32-AGRO-001:6",
-   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:6\",\"sentAt\":1795115900000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":\"2026-11-18T10:15:00Z\",\"payload\":{\"soil_temperature_c\":19.25},\"mqtt\":{\"topic\":\"uade/a26t02/ESP32-AGRO-001/telemetry\",\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
-   "payloadSha256": "f8ee513fb34c7de17e83e11428efc2207e1ec2d864bb96b9ec72568e406b24a3"
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:6\",\"sentAt\":1795115900000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":1795115899000,\"payload\":{\"soil_temperature_c\":19.25},\"mqtt\":{\"topic\":\"uade/a26t02/ESP32-AGRO-001/telemetry\",\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "payloadSha256": "a2b7e30e487dc48d39c5230601b5c6eece4fc32c4d1789ec12df6567cb9727ed"
   }
  ]
 }

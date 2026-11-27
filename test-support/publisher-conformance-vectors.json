@@ -1,0 +1,370 @@
+{
+ "version": 1,
+ "note": "BE14-03 publisher conformance vectors (machine-readable). Language-independent: exact bytes, expected SHA-256, validity. Topics are CONTRACT STRINGS from the iot-ingest contract; they are NOT confirmed productive topics. deviceTimestamp rule (measured against the real boundary): a NON-NEGATIVE INTEGER epoch is the only processable value; strings (even ISO), null, floats, negatives are quarantined; booleans/objects/129+ chars are rejected by the parser.",
+ "eventIdPattern": "^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$",
+ "technicalKey": "ESP32-AGRO-001",
+ "eventIds": [
+  {
+   "caseId": "E01-min",
+   "eventId": "a",
+   "valid": true
+  },
+  {
+   "caseId": "E02-max-128",
+   "eventId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "valid": true
+  },
+  {
+   "caseId": "E03-letters",
+   "eventId": "abcXYZ",
+   "valid": true
+  },
+  {
+   "caseId": "E04-digits",
+   "eventId": "0123456789",
+   "valid": true
+  },
+  {
+   "caseId": "E05-colon",
+   "eventId": "a:b",
+   "valid": true
+  },
+  {
+   "caseId": "E06-underscore",
+   "eventId": "a_b",
+   "valid": true
+  },
+  {
+   "caseId": "E07-hyphen",
+   "eventId": "a-b",
+   "valid": true
+  },
+  {
+   "caseId": "E08-technicalKey-seq",
+   "eventId": "ESP32-AGRO-001:42",
+   "valid": true
+  },
+  {
+   "caseId": "E09-uuid-like",
+   "eventId": "550e8400-e29b-41d4-a716-446655440000",
+   "valid": true
+  },
+  {
+   "caseId": "X01-dot",
+   "eventId": "a.b",
+   "valid": false
+  },
+  {
+   "caseId": "X02-slash",
+   "eventId": "a/b",
+   "valid": false
+  },
+  {
+   "caseId": "X03-backslash",
+   "eventId": "a\b",
+   "valid": false
+  },
+  {
+   "caseId": "X04-space",
+   "eventId": "a b",
+   "valid": false
+  },
+  {
+   "caseId": "X05-tab",
+   "eventId": "a\tb",
+   "valid": false
+  },
+  {
+   "caseId": "X06-newline",
+   "eventId": "a\nb",
+   "valid": false
+  },
+  {
+   "caseId": "X07-unicode",
+   "eventId": "café",
+   "valid": false
+  },
+  {
+   "caseId": "X08-leading-colon",
+   "eventId": ":a",
+   "valid": false
+  },
+  {
+   "caseId": "X09-leading-underscore",
+   "eventId": "_a",
+   "valid": false
+  },
+  {
+   "caseId": "X10-leading-hyphen",
+   "eventId": "-a",
+   "valid": false
+  },
+  {
+   "caseId": "X11-129",
+   "eventId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "valid": false
+  },
+  {
+   "caseId": "X12-empty",
+   "eventId": "",
+   "valid": false
+  }
+ ],
+ "payloads": [
+  {
+   "caseId": "P01-basic",
+   "technicalKey": "ESP32-AGRO-001",
+   "sequence": 1,
+   "eventId": "ESP32-AGRO-001:1",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:1\",\"sentAt\":1795115600000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":1795115599000,\"payload\":{\"soil_temperature_c\":21.5,\"soil_moisture_reported_pct\":43},\"mqtt\":{\"topic\":\"uade/a26t02/ESP32-AGRO-001/telemetry\",\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "payloadSha256": "a6438c8ca76908ec2c72ad4dd2c247d2a76141b0fc09368fc9753a4846b98faa",
+   "valid": true,
+   "expectedParser": {
+    "ok": true
+   },
+   "pipelineAccepted": true
+  },
+  {
+   "caseId": "P02-null-and-zero",
+   "technicalKey": "ESP32-AGRO-001",
+   "sequence": 2,
+   "eventId": "ESP32-AGRO-001:2",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:2\",\"sentAt\":1795115660000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":1795115659000,\"payload\":{\"soil_temperature_c\":null,\"soil_moisture_reported_pct\":0},\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "payloadSha256": "9009d8b5c3156136d3795d6d7a2a5fcf69511b26c314e8177c011ec659c2cbe7",
+   "valid": true,
+   "expectedParser": {
+    "ok": true
+   },
+   "pipelineAccepted": true
+  },
+  {
+   "caseId": "P03-bool-string",
+   "technicalKey": "sensor_7",
+   "sequence": 42,
+   "eventId": "sensor_7:00000042",
+   "bytes": "{\"version\":1,\"eventId\":\"sensor_7:00000042\",\"sentAt\":1795115720000,\"clientid\":\"sensor_7\",\"deviceTimestamp\":1795115719000,\"payload\":{\"valve_open\":true,\"status_text\":\"ok\"},\"mqtt\":{\"topic\":\"a26t02/clientes/cliente_001/campos/campo_001/dispositivos/sensor_001/telemetria\",\"messageType\":\"telemetry\",\"dataOrigin\":\"physical-unverified\"}}",
+   "payloadSha256": "abd3fa3eb42278f11366be858ddb31bcfbf192e648c561c995911407c9bdeb35",
+   "valid": true,
+   "expectedParser": {
+    "ok": true
+   },
+   "pipelineAccepted": true
+  },
+  {
+   "caseId": "P04-unicode",
+   "technicalKey": "ESP32-AGRO-001",
+   "sequence": 4,
+   "eventId": "ESP32-AGRO-001:4",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:4\",\"sentAt\":1795115780000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":1795115779000,\"payload\":{\"note\":\"ñandú – riego ☔ 😀\"},\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"unknown\"}}",
+   "payloadSha256": "174b252935a2b6fe8646783a0a0b3e54f20503e8a9e55b1153680c2bd4e5bd93",
+   "valid": true,
+   "expectedParser": {
+    "ok": true
+   },
+   "pipelineAccepted": true
+  },
+  {
+   "caseId": "P05-number-formats",
+   "technicalKey": "ESP32-AGRO-001",
+   "sequence": 5,
+   "eventId": "ESP32-AGRO-001:5",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:5\",\"sentAt\":1795115840000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":1795115839000,\"payload\":{\"a\":-0.000001,\"b\":1e+21,\"c\":123456789.125,\"d\":-7},\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "payloadSha256": "20faeedab5181bde3a3e30544a946253b97a1d258644857335daa47fc628fd1c",
+   "valid": true,
+   "expectedParser": {
+    "ok": true
+   },
+   "pipelineAccepted": true
+  },
+  {
+   "caseId": "P06-device-timestamp",
+   "technicalKey": "ESP32-AGRO-001",
+   "sequence": 6,
+   "eventId": "ESP32-AGRO-001:6",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:6\",\"sentAt\":1795115900000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":1795115899000,\"payload\":{\"soil_temperature_c\":19.25},\"mqtt\":{\"topic\":\"uade/a26t02/ESP32-AGRO-001/telemetry\",\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "payloadSha256": "a2b7e30e487dc48d39c5230601b5c6eece4fc32c4d1789ec12df6567cb9727ed",
+   "valid": true,
+   "expectedParser": {
+    "ok": true
+   },
+   "pipelineAccepted": true
+  }
+ ],
+ "invalidPayloads": [
+  {
+   "caseId": "M01-missing-version",
+   "bytes": "{\"eventId\":\"ESP32-AGRO-001:9\",\"sentAt\":1795115600000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":1795115599000,\"payload\":{\"t\":1},\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "valid": false,
+   "expectedParser": {
+    "ok": false,
+    "reason": "payload-malformed"
+   }
+  },
+  {
+   "caseId": "M02-extra-top-level-key",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:9\",\"sentAt\":1795115600000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":1795115599000,\"payload\":{\"t\":1},\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"},\"realm\":\"production\"}",
+   "valid": false,
+   "expectedParser": {
+    "ok": false,
+    "reason": "payload-malformed"
+   }
+  },
+  {
+   "caseId": "M03-payload-array",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:9\",\"sentAt\":1795115600000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":1795115599000,\"payload\":[1],\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "valid": false,
+   "expectedParser": {
+    "ok": false,
+    "reason": "payload-malformed"
+   }
+  },
+  {
+   "caseId": "M04-bad-eventId-dot",
+   "bytes": "{\"version\":1,\"eventId\":\"dev.9\",\"sentAt\":1795115600000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":1795115599000,\"payload\":{\"t\":1},\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "valid": false,
+   "expectedParser": {
+    "ok": false,
+    "reason": "payload-malformed"
+   }
+  },
+  {
+   "caseId": "M05-payload-key-uppercase",
+   "bytes": "{\"version\":1,\"eventId\":\"ESP32-AGRO-001:9\",\"sentAt\":1795115600000,\"clientid\":\"ESP32-AGRO-001\",\"deviceTimestamp\":1795115599000,\"payload\":{\"T\":1},\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "valid": false,
+   "expectedParser": {
+    "ok": false,
+    "reason": "payload-malformed"
+   }
+  },
+  {
+   "caseId": "M06-non-finite",
+   "bytes": "{\"version\":1,\"eventId\":\"a:1\",\"sentAt\":1,\"payload\":{\"t\":1e999},\"mqtt\":{\"messageType\":\"telemetry\",\"dataOrigin\":\"simulated\"}}",
+   "valid": false,
+   "expectedParser": {
+    "ok": false,
+    "reason": "payload-malformed"
+   }
+  },
+  {
+   "caseId": "M07-not-json",
+   "bytes": "not json",
+   "valid": false,
+   "expectedParser": {
+    "ok": false,
+    "reason": "payload-malformed"
+   }
+  }
+ ],
+ "deviceTimestamps": [
+  {
+   "caseId": "T01-epoch-ms-integer",
+   "value": 1795115599000,
+   "valid": true,
+   "note": "accepted by the real pipeline"
+  },
+  {
+   "caseId": "T02-zero",
+   "value": 0,
+   "valid": true,
+   "note": "accepted by the real pipeline"
+  },
+  {
+   "caseId": "T03-omitted",
+   "value": "OMIT",
+   "valid": false,
+   "note": "rejected by the parser or quarantined by the pipeline (invalid-authority-response)"
+  },
+  {
+   "caseId": "T04-negative",
+   "value": -1,
+   "valid": false,
+   "note": "rejected by the parser or quarantined by the pipeline (invalid-authority-response)"
+  },
+  {
+   "caseId": "T05-float",
+   "value": 1.5,
+   "valid": false,
+   "note": "rejected by the parser or quarantined by the pipeline (invalid-authority-response)"
+  },
+  {
+   "caseId": "T06-null",
+   "value": null,
+   "valid": false,
+   "note": "rejected by the parser or quarantined by the pipeline (invalid-authority-response)"
+  },
+  {
+   "caseId": "T07-empty-string",
+   "value": "",
+   "valid": false,
+   "note": "rejected by the parser or quarantined by the pipeline (invalid-authority-response)"
+  },
+  {
+   "caseId": "T08-iso-string",
+   "value": "2026-11-18T10:15:00Z",
+   "valid": false,
+   "note": "rejected by the parser or quarantined by the pipeline (invalid-authority-response)"
+  },
+  {
+   "caseId": "T09-string-128",
+   "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "valid": false,
+   "note": "rejected by the parser or quarantined by the pipeline (invalid-authority-response)"
+  },
+  {
+   "caseId": "T10-boolean",
+   "value": true,
+   "valid": false,
+   "note": "rejected by the parser or quarantined by the pipeline (invalid-authority-response)"
+  },
+  {
+   "caseId": "T11-object",
+   "value": {
+    "a": 1
+   },
+   "valid": false,
+   "note": "rejected by the parser or quarantined by the pipeline (invalid-authority-response)"
+  }
+ ],
+ "topics": [
+  {
+   "caseId": "K01-esp32-example",
+   "topic": "uade/a26t02/ESP32-AGRO-001/telemetry",
+   "valid": true
+  },
+  {
+   "caseId": "K02-client-field-example",
+   "topic": "a26t02/clientes/cliente_001/campos/campo_001/dispositivos/sensor_001/telemetria",
+   "valid": true
+  },
+  {
+   "caseId": "K03-lab-route",
+   "topic": "agro/lab/in/a",
+   "valid": true
+  },
+  {
+   "caseId": "K10-empty",
+   "topic": "",
+   "valid": false
+  },
+  {
+   "caseId": "K11-plus-wildcard",
+   "topic": "a/+/b",
+   "valid": false
+  },
+  {
+   "caseId": "K12-hash-wildcard",
+   "topic": "a/#",
+   "valid": false
+  },
+  {
+   "caseId": "K13-nul",
+   "topic": "a\u0000b",
+   "valid": false
+  },
+  {
+   "caseId": "K14-too-long",
+   "topic": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "valid": false
+  }
+ ]
+}

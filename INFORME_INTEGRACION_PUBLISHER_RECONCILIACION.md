@@ -41,6 +41,8 @@ Documentos: `CONTRATO_PUBLISHER_OUTBOX.md`, `MATRIZ_PRUEBAS_PUBLISHER_E2E.md`, `
 | LOW | `rename` atómico del store de archivo falla con `EPERM` transitorio en Windows (el primer intento de campaña abortó) | resuelto: reintento acotado; test B22 |
 | INFO | no existe publisher real; la integración con el firmware requiere portar esta referencia (persistencia del dispositivo y transporte MQTT del ESP32 son decisiones pendientes) | documentado |
 
+> **Corrección posterior (BE14-03):** el kit de conformidad detectó que la referencia aceptaba `deviceTimestamp` no procesables (el vector V6 usaba un string ISO, parseable pero cuarentenado por el pipeline) y readings que el parser rechaza; se corrigió (V6 ahora entero) y la campaña E2E de este informe sigue siendo válida (usó enteros).
+
 ## 5. Campaña E2E (una; `.local-evidence/be14-01-E2.json`)
 Mismo escenario que BE13 (`D13 → D13b`, reproduce F-E2) con el publisher de referencia sobre **MQTT.js real, EMQX real, router/servicio de confirmación reales y evidencia Mongo real**. Honestidad sobre las ejecuciones: la primera abortó por el `EPERM` del store; la segunda completó pero **sin validez** (payloads sin `deviceTimestamp`, todos cuarentenados); la evidencia válida es la tercera, tras corregir ambos defectos **del publisher** (no del backend).
 | Métrica | Valor |
