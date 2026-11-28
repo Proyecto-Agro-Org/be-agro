@@ -1,16 +1,30 @@
 # Plan de implementación del backend be-agro
 
-**Actualizado:** 16/11/2026 · alineación BE-00/BE-01.
+**Actualizado:** 19/11/2026 · BE-09.5/09.5A implementadas y auditadas, autenticación sin activar.
 **Fuente rectora:** Plan de Trabajo Backend A26T02 del 05/11/2026 §§7–11.
 **Contrato y evidencia:** [ESPECIFICACION.md](ESPECIFICACION.md), [INFORME_BE00_BE01.md](INFORME_BE00_BE01.md).
 
 ## Uso y estado
 
+Estado vigente BE-09 al 19/11: BE-09.2/09.3 y documentación BE-09.4 ya integradas en dev
+(PR #13/#14 como evidencia reciente). BE-09.5 agrega localmente catálogo físico auth aislado,
+writer CAS, generaciones para reactivación y revocación posterior; auditoría BE-09.5A con **320/320 pruebas** y
+**13/13 escenarios HTTP** aprobados. MongoDB real, aprobación externa/mapeo BE-02,
+contratos FE/GIS, operación y activación siguen pendientes. No se completan casillas Done por
+integrar infraestructura deshabilitada. Publicación/integración sujetas a controles GitHub.
+Auditoría: [BE-09.5A](INFORME_BE09_5A_AUDITORIA_FINAL.md); recibos de persistencia explícitos
+y checkpoints de revocación, sin retorno void interpretado como confirmación.
+Detalle: [implementación BE-09.5](INFORME_BE09_5_IMPLEMENTACION_CATALOGO.md) y
+[seguridad/concurrencia](MATRIZ_BE09_5_SEGURIDAD_CONCURRENCIA.md).
+
 - [ ] Pendiente; [/] trabajo local preparado/en revisión; [!] requiere decisión/evidencia; [x] PR integrado y criterios satisfechos.
 - Una entrega local o un PR abierto no está Done. No se completa ninguna etapa por haber redactado su propuesta.
-- Solo main y origin/main comprobadas. No asumir develop/dev; acordar rama de integración antes de crear feature/<issue>-<tema>. Esta auditoría no crea ramas, commits, Issues ni despliegues.
-- BE-00 y BE-01 producen documentación; no incluyen BE-02/03/04 ni instalación/migración de paquetes.
-- Ya existen Express/JS, health y CORS. Se adaptan al stack objetivo conservando comportamiento; no se reconstruyen.
+- Rama de integración acordada: `dev`. Base de recuperación BE-09: `636c71731ee100f78c76c78b46753ccf1223ac39`, merge del PR #10. `main` permanece en `1bb20f76b7a739f42c75b37b9a64315276560ec1`. Los registros previos de consolidación describen su fase preparatoria, no un bloqueo actual de ese merge.
+- BE-00 y BE-01 fueron documentación integrada mediante PR #1; esto no completa automáticamente criterios externos ni etapas posteriores.
+- BE-05 a BE-08 tienen código integrado en `dev` mediante PR #10; PR #5 cerrado como incorporado y #6 a #9 cerrados como redundantes, con trazabilidad conservada. TypeScript, Mongoose, Zod, errores/logging y hardening cuentan con validación local, no validación HTTP Preview real. No se completan automáticamente sus criterios externos.
+- BE-02/03/04 son propuestas documentales de PR #2/#3/#4, ahora incorporadas en dev sin aprobar Atlas, contratos o unidades. No se ejecutaron migraciones ni normalizadores; sus criterios de cierre siguen pendientes.
+- Historial del 17/11: BE-09.0/09.1 se recuperaron sobre esta base en `feature/be-09-infraestructura-sobre-dev`, conservando originales y respaldos. Entonces BE-09.2 aún no se iniciaba. El estado vigente posterior es el apartado BE-09.5 anterior; autenticación productiva y endpoints de negocio siguen sin habilitar.
+- Evidencia: [consolidación histórica](INFORME_CONSOLIDACION_DEV_BE02_BE08.md) y [recuperación BE-09](INFORME_RECUPERACION_BE09_SOBRE_DEV.md). Ninguna casilla nueva se marca Done.
 - Las casillas anteriores E0…E4 no estaban completadas. Se reorganizan con los IDs del plan del 05/11, evitando colisiones con la numeración BE sugerida del antiguo documento.
 
 ## Backlog vigente y dependencias
@@ -19,15 +33,15 @@
 |---|---|---|---|---|
 | [/] | BE-00 | 0 | Auditar repo, ramas, health, scripts, entorno, pruebas, Vercel y documentación. Informe trazable con límites de acceso; PR revisado/integrado para cierre. | Repo y fuentes disponibles |
 | [/] | BE-01 | 0 | Consolidar capas, Zod, jerarquía, colecciones comunes, auth observada y alertas. Documentos coherentes, decisiones pendientes explícitas; PR integrado para cierre. | BE-00 y plan 05/11 |
-| [ ] | BE-02 | 1 | Definir IDs y schema Mongo físico/objetivo con ejemplos sanitizados, BSON, lotes, relaciones y alcance de cliente; índices convencionales e históricos preservados. | BE-01; evidencia Atlas/ingesta |
-| [ ] | BE-03 | 1 | Definir DTORequest/DTOResponse, schemas Zod y OpenAPI con frontend: campo_id/area_id/device_id, rutas sensores, auth, errores, filtros, límites y nullabilidad. | BE-01; modelo mínimo BE-02 y decisiones de sesión |
-| [ ] | BE-04 | 1 | Catálogo de unidades, precisión, fuente, null, fechas adquisición/recepción y conversión de datos previos; ejemplos aprobados por dominio/ingesta. | BE-02/03; muestras y Agronomía |
-| [ ] | BE-05 | 2 | Migrar Express JS a TypeScript sin perder health/CORS/Vercel; scripts dev/build/start o estrategia equivalente documentada y reproducible. | Contrato mínimo BE-02/03/04 |
-| [ ] | BE-06 | 2 | Implementar capas por recurso y DTOs/mappers/adapters, sin consultas Mongo en controllers ni Express en services. | BE-05 |
-| [ ] | BE-07 | 2 | Configurar Mongoose y Zod requests/env; conexión segura, fallos controlados y configuración validada. | BE-05/06; modelo aprobado |
-| [ ] | BE-08 | 2 | Error handler/404 uniforme, logging con request ID, CORS, seguridad HTTP y límites; pruebas sin secretos. | BE-03 y base TS |
-| [ ] | BE-09 | 3 | Integrar Google/sesión aprobada, contexto de cliente, recuperación/logout y aislamiento de consultas por jerarquía. | BE-07/08; política auth cerrada |
-| [ ] | BE-10 | 4 | GET campos por cliente y catálogo áreas; campos vacíos, 400/401/404, filtro por cliente dentro de repository. | BE-02/03/09 |
+| [/] | BE-02 | 1 | Definir IDs y schema Mongo físico/objetivo con ejemplos sanitizados, BSON, lotes, relaciones y alcance de cliente; índices convencionales e históricos preservados. | BE-01; evidencia Atlas/ingesta |
+| [/] | BE-03 | 1 | Definir DTORequest/DTOResponse, schemas Zod y OpenAPI con frontend: campo_id/area_id/device_id, rutas sensores, auth, errores, filtros, límites y nullabilidad. | BE-01; modelo mínimo BE-02 y decisiones de sesión |
+| [/] | BE-04 | 1 | Catálogo de unidades, precisión, fuente, null, fechas adquisición/recepción y conversión de datos previos; ejemplos aprobados por dominio/ingesta. | BE-02/03; muestras y Agronomía |
+| [/] | BE-05 | 2 | Migrar Express JS a TypeScript sin perder health/CORS/Vercel; scripts dev/build/start o estrategia equivalente documentada y reproducible. | Contrato mínimo BE-02/03/04 |
+| [/] | BE-06 | 2 | Implementar capas por recurso y DTOs/mappers/adapters, sin consultas Mongo en controllers ni Express en services. | BE-05 |
+| [/] | BE-07 | 2 | Configurar Mongoose y Zod requests/env; conexión segura, fallos controlados y configuración validada. | BE-05/06; modelo aprobado |
+| [/] | BE-08 | 2 | Error handler/404 uniforme, logging con request ID, CORS, seguridad HTTP y límites; pruebas sin secretos. | BE-03 y base TS |
+| [/] | BE-09 | 3 | Integrar Google/sesión aprobada, contexto de cliente, recuperación/logout y aislamiento de consultas por jerarquía. | BE-07/08; política auth cerrada |
+| [/] | BE-10 | 4 | GET campos por cliente y catálogo áreas; campos vacíos, 400/401/404, filtro por cliente dentro de repository. | BE-02/03/09 |
 | [ ] | BE-11 | 4 | Dispositivos por área y detalle, mappers/ubicación/última comunicación, recursos ajenos 404; conservar rutas públicas acordadas. | BE-10 |
 | [ ] | BE-12 | 5 | Última medición por dispositivo autorizado, unidades/fuentes, nulls y sensor sin lecturas; ruta a acordar sin duplicar detalle innecesariamente. | BE-04/11 |
 | [ ] | BE-13 | 5 | Históricos con Zod, ISO/zona, rango válido, límite, orden y truncamiento; cliente y dispositivo verificados e índices evaluados. | BE-04/12 |
@@ -111,3 +125,7 @@ INT-01/DEP-01/E2E-01 validan recorrido real con usuarios de prueba, dos clientes
 | E4.1…E4.5 | INT-01, DEP-01, E2E-01 y documentación/DoD por entrega |
 
 Se conserva esta trazabilidad y los criterios útiles; el plan anterior completo está en Git base 9cab86f. Las propuestas de Time Series, hosting alternativo y cookie obligatoria no rigen como acuerdos. Para cierre usar [DEFINITION_OF_DONE.md](DEFINITION_OF_DONE.md).
+
+
+### BE-10 local — 19/11/2026
+CRUD de cliente actual/campos/áreas preparado y deshabilitado, con 374/374 offline, 13/13 Mongo local y 13/13 HTTP. La consigna BE-10 amplía el alcance histórico de consulta a CRUD aislado. Contratos CRUD, mapeo físico, integración de sesiones/dependencias y agregados FE pendientes; no se marca Done. Ver INFORME_BE10_CLIENTES_CAMPOS_AREAS.md y CONTRATO_BE10_API_FRONTEND.md.

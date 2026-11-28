@@ -1,8 +1,10 @@
 # Propuesta de esquema MongoDB para be-agro
 
-**Actualización:** 16/11/2026 · BE-01.
-**Estado:** modelo conceptual propuesto; pendiente de relevamiento y aprobación BE-02.
+**Actualización:** 16/11/2026 · BE-02, preservando acuerdos de BE-01.
+**Estado:** parcial; propuesta lógica preparada, sin comprobación física en Atlas ni aprobación de tipos/colecciones nuevos.
 **Decisión confirmada:** colecciones convencionales, **no Time Series**. No se ejecutan migraciones.
+
+El desarrollo detallado por entidad, obligatoriedad, tipos BSON recomendados, cardinalidades, matriz de IDs, índices y ejemplos está en [INFORME_BE02_MODELO_DATOS.md](INFORME_BE02_MODELO_DATOS.md). Este resumen no convierte esas recomendaciones en schema aprobado. BE-03/04 no se iniciaron.
 
 ## 1. Qué se conoce y qué falta verificar
 
@@ -11,6 +13,8 @@ El inventario histórico compartido enumera clientes, usuarios, lotes y disposit
 El código de iot-ingest (`e6ffda0f0a4b9a18298c239ac34cc61de6b1c3fa`) usa por defecto base iot_sensores y colecciones mediciones/dispositivos, configurables. Inserta JSON libre con _receivedAt Date y _id generado; actualiza dispositivos por clientid string con _createdAt/_lastSeen Date. No garantiza tenant, campo, área, formato de magnitudes ni fecha de adquisición. El clientid MQTT identifica dispositivo; **no significa cliente del sistema**.
 
 No se verificaron opciones de colecciones, índices efectivos, documentos reales ni versiones de Atlas. El índice único clientid está solicitado por el repository de ingesta; su existencia física no fue comprobada. La falta de un model de clientes/áreas en ingesta tampoco demuestra que esas colecciones no existan.
+
+Revisión BE-02 del mismo commit de ingesta: `createIndex` captura su fallo y permite continuar; por ello ni siquiera una respuesta exitosa del servicio prueba unicidad efectiva. El resolver de estado acepta aliases y toma el primero; `/ingest` no aplica ese resolver. El merge libre puede sobrescribir campos como `entityId` o `areaId` enviados por un emisor: no usarlos como fuente confiable de autorización.
 
 ## 2. Modelo lógico confirmado
 
@@ -34,11 +38,16 @@ Campo y Área no se fusionan. El significado de lotes y la colección física de
 | usuarios | _id: IdUsuario, entityId: IdCliente, googleSub si se aprueba Google, email, nombre, activo |
 | campos | _id: IdCampo, entityId: IdCliente, nombre |
 | areas | _id: IdArea, entityId: IdCliente, campoId: IdCampo, nombre |
-| dispositivos | _id físico preservado, entityId, campoId, areaId, deviceId público, clientid MQTT, nombre, ubicación vigente opcional |
-| mediciones | _id físico preservado, referencia de dispositivo/cliente/campo/área verificable, instante adquisición, recepción, payload bruto y fuente/versión de formato |
+| Dispositivo lógico / catálogo por acordar | deviceId público, entityId, campoId, areaId, nombre, alias MQTT provisionado y ubicación opcional; separar de campos libres de ingesta |
+| dispositivos de ingesta | Preservar _id BSON, clientid, _createdAt/_lastSeen y estado recibido; no suponer contexto de autorización protegido |
+| mediciones | Preservar _id BSON, _receivedAt y body original menos _id; proyectar referencias verificables, adquisición/recepción y procedencia en lectura, sin migrar el bruto |
 | alertas | Solo si se aprueba persistencia: cliente/relaciones, tipo, severidad, descripción, estado, apertura/resolución |
 
 No se propone sobrescribir _lastSeen como instante de adquisición. Un evento de broker puede actualizarlo sin una medición nueva. Unificar clientid/device_id/_id requiere tabla de correlación confiable; preferir mapear sobre el modelo real antes que renombrar datos.
+
+El informe BE-02 recomienda strings estables para IDs de catálogos nuevos y referencias de dominio, conservando el BSON físico existente en ingesta. Es una propuesta condicionada al relevamiento, no una conversión de documentos ni una equivalencia demostrada. Campo/Área/Usuario/Cliente usan IDs públicos string en el frontend; `campo_norte` es un **area_id** del mock, no un campo por su prefijo.
+
+Se propone catálogo de dispositivos protegido, separado del estado libre mientras la ingesta no proteja sus campos. El nombre `catalogo_dispositivos` es solo candidato; no existe evidencia de esa colección ni se crea aquí. Unificarlo con `dispositivos` exige acordar escritores/propiedad de campos. Sin permisos de DB separados, nombres distintos no bastan para garantizar protección.
 
 ### Mediciones convencionales y preservación
 
@@ -58,6 +67,8 @@ Mantener brutos e históricos, incluyendo datos parciales. No introducir TTL ni 
 6. Recurso ajeno/inexistente: 404. No permitir que campo_id/cliente_id del navegador amplíen acceso.
 
 La opción de desnormalizar entityId/campoId/areaId en mediciones puede facilitar índices, pero exige consistencia, responsable y tratamiento de historial de reasignaciones; no está resuelta en esta propuesta.
+
+Mientras no se apruebe contexto temporal, no reasignar un dispositivo con historial ni reutilizar sus aliases entre clientes. La relación actual no debe transferir automáticamente datos antiguos a otro tenant. Si la propiedad histórica no se puede probar, los brutos quedan sin exposición autorizada. El endurecimiento de la ingesta pública sigue siendo una dependencia de integridad, distinta del aislamiento de lectura.
 
 ## 5. Mapeos hacia frontend
 
@@ -83,16 +94,19 @@ Los nombres siguientes se refieren al **modelo propuesto**. Adaptarlos a los cam
 
 | Consulta | Índice convencional candidato |
 |---|---|
-| Última/histórico por dispositivo y cliente | { entityId: 1, deviceId: 1, timestamp: -1 } |
-| Resumen por campo/tiempo | { entityId: 1, campoId: 1, timestamp: -1 } |
-| Resumen por área/tiempo | { entityId: 1, areaId: 1, timestamp: -1 } |
+| Última/histórico en proyección persistida futura, si se aprueba | { entityId: 1, deviceId: 1, timestampAdquisicion: -1, _id: -1 }, condicionado a fecha válida/contexto confiable |
+| Legado con device_id y timestamp realmente confirmados | { device_id: 1, timestamp: -1, _id: -1 }, dispositivo previamente autorizado; no aplicar a strings temporales heterogéneos |
+| Legado con clientid y fecha de recepción | { clientid: 1, _receivedAt: -1, _id: -1 }, no equivale a histórico por adquisición |
+| Resumen por campo/área en proyección futura | { entityId: 1, campoId: 1, timestampAdquisicion: -1 } o areaId, según consulta aprobada |
 | Áreas del campo | { entityId: 1, campoId: 1 } en areas |
-| Dispositivos del área | { entityId: 1, areaId: 1 } en dispositivos |
-| Identidad Google | googleSub único si proveedor/alta aprobados |
+| Dispositivos del área | { entityId: 1, areaId: 1 } en catálogo confiable por acordar |
+| Identidad federada | proveedor/issuer/subject único parcial si proveedor/alta y campos aprobados; googleSub sigue como nombre histórico candidato |
 | Alertas persistidas | { entityId: 1, estado: 1, timestamp: -1 }, sujeto a filtros |
 | Estado MQTT actual | clientid único solicitado por ingesta; evaluar unicidad real global |
 
 No duplicar índices por defecto: medir cardinalidad, costo de escritura y explain en base aislada. Deduplicación de telemetría por msg_id/seq es propuesta histórica aún no implementada; evaluar claves y duplicados antes de cualquier índice único.
+
+No crear índices sobre campos propuestos como si la ingesta ya los produjera. Evaluar índices parciales para identidades/aliases opcionales y msgId presente; timestamp/valores iguales no prueban duplicación. El detalle de opciones, límites y fuentes oficiales está en el informe BE-02 §8.
 
 ## 7. Relevamiento y eventual compatibilidad
 
@@ -105,3 +119,9 @@ Solo después de aprobación: diseñar respaldo, conteos previos, compatibilidad
 La propuesta anterior (Git base 9cab86f) usaba timestamp Date con timeField/metaField, contexto y equivalencia campos→area_id. Esa arquitectura queda retirada por plan del 05/11 y jerarquía completa. `ddbb.puml` se actualiza como diagrama conceptual, sin afirmar existencia física de colecciones. La alternativa de persistir alertas continúa pendiente; ausencia visual de mediciones sigue a cargo del frontend.
 
 Referencias: [ESPECIFICACION.md](ESPECIFICACION.md), [INFORME_BE00_BE01.md](INFORME_BE00_BE01.md).
+
+## 9. Resultado de BE-02
+
+El diseño lógico y los ejemplos quedan preparados para revisión, con inventario separado por código/documentación/Atlas/propuesta. Ninguna colección se comprobó en Atlas; siguen pendientes lotes, tipos BSON físicos, catálogo confiable, correlación MQTT y reasignaciones. No marcar BE-02 como integrado ni convertir esos pendientes en hechos.
+
+La rama de esta entrega es `feature/be-02-modelo-datos`, basada en el historial corregido de BE-00/01; destino indicado por el usuario: `dev`. No se hicieron cambios de rama, commits, push ni PR. Ver [informe BE-02](INFORME_BE02_MODELO_DATOS.md) para evidencia, decisiones y límites de BE-03/04.

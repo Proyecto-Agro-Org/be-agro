@@ -1,0 +1,271 @@
+// SYNTHETIC TEST SUPPORT for BE13-05. Not production code, not a persistence
+// layer, not an approved policy. Lives outside test/ so `node --test` does not
+// load it as a suite. Everything here is an explicit test double.
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createIngestProvenanceAuthority } from '../dist/src/iot/ingest-provenance.authority.js';
+import { createProtectedIngestMapper } from '../dist/src/iot/protected-ingest.mapper.js';
+import { createBe12IdentityPorts } from '../dist/src/adapters/ingestion-identity.adapters.js';
+import { createMeasurementAttributionService } from '../dist/src/services/measurement-attribution.service.js';
+import { createMeasurementIngestionComposition } from '../dist/src/services/measurement-ingestion-composition.service.js';
+
+const fixtureRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'be13-01', 'fixtures');
+const manifest = JSON.parse(readFileSync(join(fixtureRoot, 'manifest.json'), 'utf8'));
+export const fixture = id => JSON.parse(readFileSync(join(fixtureRoot, manifest.find(row => row.id === id).file), 'utf8'));
+
+export const REALM = 'test';
+export const SENT = 1795115600000;
+export const RECEIVED = SENT + 100;
+export const PERSISTED = RECEIVED + 10;
+export const DEVICE_TS = 1795115595000;
+
+export function protectedDocument(patch = {}, { receivedAt = RECEIVED, persistedAt = PERSISTED } = {}) {
+  const envelope = { ...fixture('F01'), ...patch };
+  return {
+    sourceId: patch.sourceId ?? 'synthetic-ingest', operation: 'measurement', eventId: envelope.eventId, clientid: envelope.clientid,
+    _receivedAt: new Date(receivedAt), ...(persistedAt === null ? {} : { persistedAt: new Date(persistedAt) }), _payload: structuredClone(envelope.payload),
+    _provenance: { serviceAuthenticated: true, sourceId: patch.sourceId ?? 'synthetic-ingest', eventId: envelope.eventId, technicalClientId: envelope.clientid,
+      brokerIdentity: 'declared-unverified', mqttContext: 'service-declared', topic: envelope.mqtt.topic, messageType: 'telemetry',
+      dataOriginDeclared: envelope.mqtt.dataOrigin, physicalMeasurementVerified: false, commercialAttribution: false,
+      deviceTimestamp: envelope.deviceTimestamp ?? null, brokerDeclaredAt: new Date(envelope.sentAt), receivedAt: new Date(receivedAt) },
+  };
+}
+
+// ProtectedDocument → Candidate through the real BE13-02 mapper and a synthetic provenance verifier.
+export function mapDocument(document) {
+  const evidence = Object.freeze({ syntheticTestOnly: true });
+  const boundary = createIngestProvenanceAuthority({ verify: v => v === evidence ? { sourceId: document.sourceId, operation: 'telemetry',
+    eventId: document.eventId, device: { kind: 'mqtt-clientid', value: document.clientid } } : null });
+  return createProtectedIngestMapper(boundary.authority).map(document, boundary.attest(evidence));
+}
+export const candidate = (patch, options) => {
+  const result = mapDocument(protectedDocument(patch, options));
+  if (result.status !== 'candidate') throw new Error('fixture must be a candidate');
+  return result;
+};
+
+export const device = (patch = {}) => ({ realm: REALM, id: 'device-1', sourceId: 'synthetic-ingest', key: { kind: 'mqtt-clientid', value: 'synthetic-device-001' },
+  verification: 'verified', lifecycle: 'active', version: 3, createdAt: 1, updatedAt: 2, ...patch });
+export const association = (patch = {}) => ({ realm: REALM, id: 'assoc-A', revision: 1, clientId: 'client-A', sensorId: 'sensor-A', fieldId: 'field-A',
+  areaId: 'area-A', physicalDeviceId: 'device-1', sourceId: 'synthetic-ingest', device: { kind: 'mqtt-clientid', value: 'synthetic-device-001' },
+  validFrom: 0, validTo: null, state: 'active', auditReason: 'synthetic', ...patch });
+export const closed = patch => association({ state: 'closed', ...patch });
+
+// In-memory realm-scoped identity store: applies realm "in storage".
+export function createInMemoryIdentityStore(state, calls = []) {
+  return {
+    async findDevicesByKey(q) {
+      calls.push(['store:devices', q]);
+      const rows = state.devices.filter(r => r.realm === q.realm && r.sourceId === q.sourceId && r.key.kind === q.key.kind && r.key.value === q.key.value);
+      return { realm: q.realm, rows: structuredClone(rows.slice(0, q.limit)) };
+    },
+    async findAssociationsAt(q) {
+      calls.push(['store:associations', q]);
+      const rows = state.history.filter(r => r.realm === q.realm && r.physicalDeviceId === q.physicalDeviceId && r.validFrom <= q.at && (r.validTo === null || q.at < r.validTo));
+      return { realm: q.realm, complete: true, rows: structuredClone(rows.slice(0, q.limit)) };
+    },
+  };
+}
+
+// In-memory idempotency fake: single-threaded, deterministic, NOT persistence.
+export function createInMemoryIdempotency(calls = []) {
+  const entries = new Map();
+  const id = k => JSON.stringify([k.realm, k.sourceId, k.operation, k.eventId, k.field]);
+  return {
+    entries,
+    async lookup(k) { calls.push(['idem:lookup', k]); const fp = entries.get(id(k)); return fp ? { realm: k.realm, status: 'present', fingerprint: fp } : { realm: k.realm, status: 'absent' }; },
+    async claim(k) {
+      calls.push(['idem:claim', k]);
+      const current = entries.get(id(k));
+      if (current === undefined) { entries.set(id(k), k.fingerprint); return { realm: k.realm, status: 'claimed' }; }
+      return { realm: k.realm, status: current === k.fingerprint ? 'replay' : 'conflict' };
+    },
+  };
+}
+
+export function world(overrides = {}) {
+  const calls = [];
+  const state = {
+    devices: [device()], history: [association()],
+    temporal: { status: 'trusted', at: RECEIVED, clock: 'received-at', policyRevision: 7 },
+    hardware: { status: 'verified', origin: 'simulated', method: 'synthetic-double', attestationRevision: 2 },
+    catalogue: { temperature: { magnitude: 'temperature', unit: 'celsius' }, soil_moisture: { magnitude: 'soil-moisture-raw', unit: 'percent' } },
+    policies: {
+      clock: () => ({ status: 'approved', clock: 'received-at', policyRevision: 1 }),
+      declaredAt: q => ({ status: 'approved', source: 'device-timestamp', declaredAt: q.candidateClocks.deviceTimestamp, policyRevision: 1 }),
+      missingReason: () => ({ status: 'approved', missingReason: 'absent', policyRevision: 1 }),
+      persistenceTime: q => ({ status: 'approved', persistedAt: q.persistedAt, policyRevision: 1 }),
+    },
+    ...overrides,
+  };
+  const identityStore = createInMemoryIdentityStore(state, calls);
+  const idempotency = createInMemoryIdempotency(calls);
+  const temporal = { async decide(q) { calls.push(['temporal', q]); return { realm: q.realm, ...state.temporal }; } };
+  const hardware = { async verify(q) { calls.push(['hardware', q]);
+    return state.hardware.status === 'verified' ? { realm: q.realm, physicalDeviceId: q.physicalDeviceId, ...state.hardware } : { realm: q.realm, ...state.hardware }; } };
+  const catalogue = { async evaluate(q) { calls.push(['catalogue', q]); const row = state.catalogue[q.field];
+    return row ? { status: 'approved', realm: q.realm, field: q.field, catalogueRevision: 4, ...row } : { status: 'unknown-magnitude', realm: q.realm }; } };
+  const policy = name => ({ async decide(q) { calls.push(['policy:' + name, q]); return { realm: q.realm, ...state.policies[name](q) }; } });
+  const policies = { clock: policy('clock'), declaredAt: policy('declaredAt'), missingReason: policy('missingReason'), persistenceTime: policy('persistenceTime') };
+  // Real BE-12 service over the same store; synthetic temporal mirrors the synthetic clock policy.
+  const be12 = createMeasurementAttributionService({
+    ...createBe12IdentityPorts(identityStore, REALM),
+    temporal: { async select(event) { calls.push(['be12:temporal', event.eventId]);
+      return state.be12Temporal ? state.be12Temporal(event) : { status: 'trusted', at: event.receivedAt, clock: 'received-at' }; } },
+    catalogue: { async accepts() { return state.be12Catalogue ?? true; } },
+  }, { realm: REALM });
+  const deps = { realmContext: { realm: REALM }, identityStore, temporal, hardware, catalogue, policies, idempotency, be12 };
+  return { state, calls, deps, idempotency, compose: (extra = {}) => createMeasurementIngestionComposition({ ...deps, ...extra }) };
+}
+
+export const deepFrozen = v => v === null || typeof v !== 'object' || (Object.isFrozen(v) && Object.values(v).every(deepFrozen));
+export const objectsOf = (v, out = new Set()) => { if (v !== null && typeof v === 'object' && !out.has(v)) { out.add(v); Object.values(v).forEach(x => objectsOf(x, out)); } return out; };
+
+// BE13-06: in-memory stand-in for persistMeasurementAtomically. Single-threaded
+// and therefore trivially "atomic"; NOT a transaction and NOT persistence.
+export function createInMemoryPersistence(calls = []) {
+  const claims = new Map(), measurements = new Map();
+  const id = k => JSON.stringify([k.realm, k.sourceId, k.operation, k.eventId, k.field]);
+  // BE13-11A: hash the whole key (the former truncation made distinct events collide and silently overwrite each other).
+  const mid = k => 'm_' + createHash('sha256').update(id(k)).digest('hex');
+  return {
+    claims, measurements,
+    async lookup(k) { calls.push(['persist:lookup', k]); const c = claims.get(id(k));
+      return c ? { realm: k.realm, status: 'present', fingerprint: c.fingerprint, measurementId: c.measurementId } : { realm: k.realm, status: 'absent' }; },
+    async persistAtomically(input, options) {
+      calls.push(['persist:atomic', input]);
+      const k = input.key, current = claims.get(id(k));
+      if (current) return current.fingerprint === input.fingerprint ? { realm: k.realm, status: 'duplicate', measurementId: current.measurementId } : { realm: k.realm, status: 'conflict' };
+      // BE13-10B fence: evaluated right before the (synchronous) writes; not held → nothing is written.
+      if (options?.fence !== undefined && (await options.fence(null)) !== true) throw new Error('INGESTION_REPLAY_FENCE_STALE');
+      if (claims.has(id(k))) { const c = claims.get(id(k)); return c.fingerprint === input.fingerprint ? { realm: k.realm, status: 'duplicate', measurementId: c.measurementId } : { realm: k.realm, status: 'conflict' }; }
+      const measurementId = mid(k);
+      claims.set(id(k), { fingerprint: input.fingerprint, measurementId }); measurements.set(measurementId, structuredClone(input));
+      return { realm: k.realm, status: 'persisted', measurementId };
+    },
+    replayFencing: 'atomic',
+  };
+}
+
+// ---------------------------------------------------------------- BE13-08 synthetic doubles (TEST_ONLY)
+// Bounded retry policy: maxAttempts is a TEST_ONLY number, not an SLO.
+export function createTestOnlyRetryPolicy(maxAttempts = 3, calls = []) {
+  return { decide(input) { calls.push(['retry:decide', input]); return input.attempt < maxAttempts ? { action: 'retry' } : { action: 'stop' }; } };
+}
+// Deterministic scheduler: records waits, never sleeps.
+export function createDeterministicScheduler(calls = []) {
+  return { waits: [], async wait(input) { calls.push(['retry:wait', input]); this.waits.push(input); } };
+}
+// Recovery over the in-memory persistence fake (same semantics as the Mongo recovery).
+export function createInMemoryRecovery(persistence, calls = []) {
+  const id = k => JSON.stringify([k.realm, k.sourceId, k.operation, k.eventId, k.field]);
+  return {
+    async inspect(k) {
+      calls.push(['recovery:inspect', k]);
+      const claim = persistence.claims.get(id(k));
+      const measurement = claim ? persistence.measurements.get(claim.measurementId) : [...persistence.measurements.values()].find(m => id(m.key) === id(k));
+      if (!claim && !measurement) return { realm: k.realm, state: 'not-committed' };
+      if (claim && !measurement) return { realm: k.realm, state: 'inconsistent', inconsistency: 'orphan-claim' };
+      if (!claim && measurement) return { realm: k.realm, state: 'inconsistent', inconsistency: 'orphan-measurement' };
+      if (claim.fingerprint !== measurement.fingerprint) return { realm: k.realm, state: 'inconsistent', inconsistency: 'fingerprint-mismatch' };
+      return { realm: k.realm, state: 'committed', measurementId: claim.measurementId, fingerprint: claim.fingerprint };
+    },
+  };
+}
+// In-memory quarantine store with the same dedupe key, state machine and audit semantics.
+export async function createInMemoryQuarantine(realm = REALM) {
+  const { quarantineIdFor } = await import('../dist/src/repositories/mongo-ingestion-quarantine.store.js');
+  const { initialQuarantineStatus, isTransitionAllowed } = await import('../dist/src/iot/ingestion-failure-classification.js');
+  const rows = new Map(); let clock = 0; const settleCalls = [];
+  return {
+    rows,
+    async record(entry) {
+      if (entry.realm !== realm) throw new Error('QUARANTINE_REALM_MISMATCH');
+      const quarantineId = quarantineIdFor(entry); const now = ++clock;
+      const row = rows.get(quarantineId) ?? { ...structuredClone(entry), quarantineId, status: initialQuarantineStatus(entry.retryClass), version: 0, attemptCount: 0, firstSeenAt: now, audit: [] };
+      row.attemptCount += 1; row.version += 1; row.lastSeenAt = now; row.audit.push({ action: 'recorded', at: now, outcome: entry.reasonCode, reasonCode: entry.reasonCode, evidence: null });
+      rows.set(quarantineId, row);
+      return { realm, quarantineId, status: row.status, attemptCount: row.attemptCount };
+    },
+    async get(id) { const r = rows.get(id); return r && r.realm === realm ? { ...structuredClone(r), lease: r.lease ? { ...r.lease } : null } : null; },
+    async transition({ quarantineId, from, to, evidence, outcome, expectedVersion }) {
+      if (from === 'REPLAYING' || to === 'REPLAYING') return 'not-allowed'; // BE13-10B: only the lease CAS touches REPLAYING
+      const r = rows.get(quarantineId); if (!r || r.realm !== realm) return 'not-found';
+      if (r.status !== from || (expectedVersion !== undefined && r.version !== expectedVersion)) return 'stale';
+      if (!isTransitionAllowed(from, to, r.retryClass) || (from === 'BLOCKED' && to === 'RETRYABLE' && !evidence)) return 'not-allowed';
+      r.status = to; r.version += 1; r.audit.push({ action: 'transition', at: ++clock, outcome, reasonCode: null, evidence }); return 'transitioned';
+    },
+    // BE13-10B: same CAS semantics as the Mongo store; check-and-set is synchronous (single-threaded ⇒ atomic).
+    async acquireLease({ quarantineId, expectedVersion, ownerId, acquiredAt }) {
+      const r = rows.get(quarantineId); if (!r || r.realm !== realm) return { result: 'not-found' };
+      if (r.status !== 'RETRYABLE' || r.version !== expectedVersion) return { result: r.status === 'RETRYABLE' || r.status === 'REPLAYING' ? 'stale' : 'not-allowed' };
+      r.version += 1; r.status = 'REPLAYING'; r.lease = { ownerId, acquiredAt, token: r.version };
+      r.audit.push({ action: 'transition', at: ++clock, outcome: 'lease-acquired', reasonCode: null, evidence: null });
+      return { result: 'acquired', leaseToken: r.version };
+    },
+    async settleReplay({ quarantineId, holder, to, outcome, evidence, expectedVersion }, transaction) {
+      settleCalls.push({ quarantineId, holder, to, outcome, transaction: transaction === undefined ? 'none' : 'inside' });
+      if (holder.kind === 'unleased' && to === 'RETRYABLE') return 'not-allowed';
+      const r = rows.get(quarantineId); if (!r || r.realm !== realm) return 'stale';
+      if (expectedVersion !== undefined && r.version !== expectedVersion) return 'stale';
+      if (holder.kind === 'lease' ? (r.status !== 'REPLAYING' || r.lease?.ownerId !== holder.ownerId || r.lease?.token !== holder.leaseToken) : r.status !== 'RETRYABLE') return 'stale';
+      r.status = to; r.version += 1; delete r.lease;
+      r.audit.push({ action: 'transition', at: ++clock, outcome, reasonCode: null, evidence }); return 'transitioned';
+    },
+    settleCalls,
+    async appendAudit(id, entry) { const r = rows.get(id); if (!r || r.realm !== realm) return false; r.audit.push({ ...entry, at: ++clock }); return true; },
+    async summarize() { const m = new Map(); for (const r of rows.values()) if (r.realm === realm) { const k = JSON.stringify([r.status, r.reasonCode, r.retryClass]); m.set(k, (m.get(k) ?? 0) + 1); }
+      return [...m].map(([k, count]) => { const [status, reasonCode, retryClass] = JSON.parse(k); return { status, reasonCode, retryClass, count }; }); },
+  };
+}
+
+// ---------------------------------------------------------------- BE13-10B synthetic lease governance (TEST_ONLY)
+// A controllable synthetic clock and a lease policy whose window is a TEST_ONLY number of synthetic units. Neither is a
+// proposal for production: the real duration and the real time authority are pending human decisions.
+export const TEST_ONLY_LEASE_WINDOW = 1_000;
+export function createSyntheticLeaseGovernance({ window = TEST_ONLY_LEASE_WINDOW, start = 10_000 } = {}) {
+  const clock = { at: start, trusted: true };
+  return {
+    clock,
+    timeAuthority: { async now({ realm }) { return clock.trusted ? { realm, status: 'trusted', at: clock.at, authorityRevision: 1 } : { realm, status: 'untrusted' }; } },
+    leasePolicy: { async evaluate({ realm, lease, now }) {
+      return { realm, status: now - lease.acquiredAt > window ? 'EXPIRED' : 'ACTIVE', recoveryByNonOwner: 'when-expired', policyRevision: 1 };
+    } },
+  };
+}
+
+// ---------------------------------------------------------------- BE13-09 synthetic doubles (TEST_ONLY)
+// Append-only audit store in memory (same ordering semantics as the Mongo store).
+export function createInMemoryAudit(realm = REALM) {
+  const entries = [], counters = new Map(); let failing = false;
+  return {
+    entries, setFailing(v) { failing = v; },
+    async append(entry) {
+      if (failing) throw new Error('audit down');
+      if (entry.realm !== realm) throw new Error('AUDIT_REALM_MISMATCH');
+      const stream = entry.quarantineId ?? 'realm', key = entry.realm + ':' + stream, sequence = (counters.get(key) ?? 0) + 1;
+      counters.set(key, sequence);
+      const record = { ...structuredClone(entry), stream, sequence, auditId: 'a_' + String(entries.length + 1).padStart(64, '0'), occurredAt: entries.length + 1 };
+      entries.push(record); return { realm, auditId: record.auditId, sequence };
+    },
+    async listForQuarantine(id, limit) { return entries.filter(e => e.realm === realm && e.stream === id).sort((a, b) => a.sequence - b.sequence).slice(0, limit); },
+    async ping() { return !failing; },
+  };
+}
+// Synthetic operator authority: the principal is resolved from a token table owned by
+// the authority; anything else carried by the credential (roles, capabilities, realm) is ignored.
+export function createSyntheticOperatorAuthority(table) {
+  return {
+    async authorize({ credential, realm, capability }) {
+      const principal = table[credential?.token];
+      if (!principal) return { decision: 'deny', reason: 'unauthenticated' };
+      if (!principal.realms.includes(realm)) return { decision: 'deny', reason: 'realm-out-of-scope' };
+      if (!principal.capabilities.includes(capability)) return { decision: 'deny', reason: 'forbidden' };
+      return { decision: 'allow', principal };
+    },
+  };
+}
+export function createRecordingMetrics() { const events = []; return { events, increment(name, labels) { events.push({ name, labels }); } }; }
+export function createRecordingAlerts() { const events = []; return { events, emit(event) { events.push(event); } }; }

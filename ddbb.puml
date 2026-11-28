@@ -2,8 +2,8 @@
 !theme plain
 top to bottom direction
 skinparam linetype ortho
-title Agro - modelo conceptual propuesto BE-01
-note "Colecciones convencionales. No Time Series.\nIDs, nombres BSON y lotes pendientes de BE-02.\nNo representa el estado fisico observado de Atlas." as N
+title Agro - modelo conceptual BE-02 para revision
+note "Colecciones convencionales. No Time Series.\nSin inspeccion de Atlas; tipos fisicos y lotes pendientes.\nLos nombres de clases no confirman colecciones existentes.\nDetalle y propuestas BSON en INFORME_BE02_MODELO_DATOS.md." as N
 class clientes {
   _id: IdCliente
   nombre: string
@@ -24,14 +24,18 @@ class areas {
   campoId: IdCampo
   nombre: string
 }
-class dispositivos {
-  _id: IdFisico
+class "Dispositivo - catalogo confiable" as dispositivos {
   entityId: IdCliente
   campoId: IdCampo
   areaId: IdArea
   deviceId: IdPublico
-  clientid: IdMQTT
+  aliasMQTT: IdMQTT opcional
 }
+note right of dispositivos
+  Catalogo separado o campos protegidos: por acordar.
+  No autorizar desde el merge libre de ingesta.
+  No transferir historicos por reasignacion actual.
+end note
 class mediciones {
   _id: IdFisico
   referenciaDispositivo: pendiente
@@ -47,10 +51,10 @@ class alertas <<opcional>> {
   origen: pendiente
   cicloDeVida: pendiente
 }
-clientes "1" -- "*" usuarios
-clientes "1" -- "*" campos
-campos "1" -- "*" areas
-areas "1" -- "*" dispositivos
-dispositivos "1" -- "*" mediciones
-dispositivos "1" -- "*" alertas
+clientes "1" -- "0..*" usuarios
+clientes "1" -- "0..*" campos
+campos "1" -- "0..*" areas
+areas "1" -- "0..*" dispositivos
+dispositivos "1" -- "0..*" mediciones
+dispositivos "1" -- "0..*" alertas
 @enduml

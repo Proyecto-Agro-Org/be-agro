@@ -1,0 +1,1 @@
+{"version":1,"eventId":"synthetic-deep-sleep-001","sentAt":1795115608000,"clientid":"synthetic-device-001","deviceTimestamp":1795029208000,"payload":{"temperature":19},"mqtt":{"topic":"synthetic/agro/device-001/telemetry","messageType":"telemetry","dataOrigin":"physical-unverified"}}

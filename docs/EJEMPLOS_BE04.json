@@ -1,0 +1,675 @@
+{
+  "document": "BE-04 ejemplos documentales",
+  "dataStatus": "simulated",
+  "approvalStatus": "proposal-not-approved",
+  "notice": "Todos los valores e IDs son ficticios. No son muestras Atlas, fixtures ejecutados contra un mapper ni contratos HTTP/BSON aprobados. proposed describe resultados internos deseados, no una implementación. JSON Extended $date distingue recepción BSON del timestamp string de adquisición.",
+  "cases": [
+    {
+      "id": "E04-01",
+      "scenario": "medicion_valida_condicionada",
+      "evidence": "S03 measurements propuesto, unidades confirmadas como premisa ficticia",
+      "raw": {
+        "schema_version": "2.2",
+        "data_status": "simulated",
+        "device_id": "sim-be04-01",
+        "timestamp": "2026-11-16T12:00:00Z",
+        "_receivedAt": {
+          "$date": "2026-11-16T12:00:05.123Z"
+        },
+        "measurements": {
+          "soil_temperature_c": 21.5,
+          "soil_moisture_reported_pct": 25,
+          "conductivity_us_cm": 1200,
+          "salinity_mg_l": 660,
+          "tds_mg_l": 600
+        }
+      },
+      "preconditions": [
+        "Modelo, unidades, escalado y origen confirmados en este escenario ficticio",
+        "La humedad sigue siendo reportada, no VWC",
+        "Identidad y acceso al dispositivo deben verificarse antes de exposición"
+      ],
+      "proposed": {
+        "acquisition": "2026-11-16T12:00:00Z",
+        "reception": "2026-11-16T12:00:05.123Z",
+        "dataStatus": "simulated",
+        "variables": {
+          "soil_temperature_c": 21.5,
+          "soil_moisture_reported_pct": 25,
+          "conductivity_ds_m": 1.2,
+          "salinity_mg_l": 660,
+          "tds_mg_l": 600
+        },
+        "sensorOrigins": {
+          "soil_temperature_c": "direct",
+          "soil_moisture_reported_pct": "direct-reported",
+          "conductivity_ds_m": "direct-with-unit-conversion",
+          "salinity_mg_l": "device-estimate",
+          "tds_mg_l": "device-estimate"
+        },
+        "npkFromS8": false,
+        "phFromS8": false,
+        "vwcAssumed": false
+      },
+      "sourceRefs": [
+        "S03",
+        "S05",
+        "S09"
+      ],
+      "catalogRefs": [
+        "V01",
+        "V02",
+        "V05",
+        "V06",
+        "V07"
+      ]
+    },
+    {
+      "id": "E04-02",
+      "scenario": "medicion_parcial",
+      "evidence": "S03 estructura propuesta, aceptación de JSON libre S09",
+      "raw": {
+        "device_id": "sim-be04-01",
+        "timestamp": "2026-11-16T12:30:00Z",
+        "measurements": {
+          "soil_temperature_c": 22,
+          "soil_moisture_reported_pct": null
+        }
+      },
+      "proposed": {
+        "soil_temperature_c": 22,
+        "soil_moisture_reported_pct": null,
+        "conductivity_ds_m": null,
+        "reasons": {
+          "soil_moisture_reported_pct": "explicit-null",
+          "conductivity_ds_m": "absent"
+        },
+        "copyPreviousValues": false
+      },
+      "preconditions": [
+        "Escenario ficticio con S8 como fuente identificada y temperatura ya decodificada en ?C",
+        "Solo para el candidato BE-03: se supone aprobado el significado de humedad reportada y las unidades destino %, ?C, dS/m y mg/kg; esta premisa NO constituye aprobaci?n real",
+        "Unidades destino de valores null no afirman la unidad original de campos ausentes"
+      ],
+      "be03SnapshotCandidate": {
+        "timestamp": "2026-11-16T12:30:00Z",
+        "humedad": {
+          "valor": null,
+          "unidad": "%"
+        },
+        "temperatura": {
+          "valor": 22,
+          "unidad": "?C"
+        },
+        "conductividad": {
+          "valor": null,
+          "unidad": "dS/m"
+        },
+        "nitrogeno": {
+          "valor": null,
+          "unidad": "mg/kg"
+        },
+        "fosforo": {
+          "valor": null,
+          "unidad": "mg/kg"
+        },
+        "potasio": {
+          "valor": null,
+          "unidad": "mg/kg"
+        }
+      },
+      "sourceRefs": [
+        "S03",
+        "S08",
+        "S11"
+      ],
+      "catalogRefs": [
+        "V01",
+        "V02",
+        "V05",
+        "V09",
+        "V10",
+        "V11"
+      ]
+    },
+    {
+      "id": "E04-03",
+      "scenario": "cero_valido",
+      "evidence": "S05 temperatura admite cero; S03 unidades como premisa",
+      "raw": {
+        "measurements": {
+          "soil_temperature_c": 0
+        }
+      },
+      "proposed": {
+        "soil_temperature_c": 0,
+        "quality": "usable-under-premises",
+        "replaceWithNull": false
+      },
+      "sourceRefs": [
+        "S05"
+      ],
+      "catalogRefs": [
+        "V01"
+      ]
+    },
+    {
+      "id": "E04-04",
+      "scenario": "valor_ausente",
+      "evidence": "S03 S8 no mide NPK/pH",
+      "raw": {
+        "measurements": {
+          "soil_temperature_c": 20
+        }
+      },
+      "proposed": {
+        "nitrogeno": null,
+        "fosforo": null,
+        "potasio": null,
+        "soil_ph": null,
+        "reason": "not-measured-by-source",
+        "fillZero": false
+      },
+      "preconditions": [
+        "Fuente identificada como S8, sin laboratorio ni sensor adicional para este escenario. No se deduce el modelo de la ausencia de campos."
+      ],
+      "sourceRefs": [
+        "S01",
+        "S03"
+      ],
+      "catalogRefs": [
+        "V09",
+        "V10",
+        "V11",
+        "V12"
+      ]
+    },
+    {
+      "id": "E04-05",
+      "scenario": "ambiente_suelo_y_vwc_distintos",
+      "evidence": "Caso conceptual: no hay payload ni sensor ambiental comprobados. No es formato de ingesta encontrado.",
+      "illustrativeOnly": true,
+      "conceptualObservations": [
+        {
+          "variable": "ambient_relative_humidity_pct",
+          "value": 65,
+          "unit": "%RH",
+          "source": "hypothetical-environmental-instrument-not-identified"
+        },
+        {
+          "variable": "soil_moisture_reported_pct",
+          "value": 25,
+          "unit": "% reported",
+          "source": "simulated-S8"
+        },
+        {
+          "variable": "soil_moisture_volumetric_pct",
+          "value": null,
+          "unit": "% vol.",
+          "source": "calibration-unavailable"
+        }
+      ],
+      "proposed": {
+        "mergeSeries": false,
+        "assumeVwc": false,
+        "mapAmbientToFrontendHumedad": false
+      },
+      "sourceRefs": [
+        "S01",
+        "S03",
+        "S05"
+      ],
+      "catalogRefs": [
+        "V02",
+        "V03",
+        "V04"
+      ]
+    },
+    {
+      "id": "E04-06",
+      "scenario": "dato_derivado_conversion_ce",
+      "evidence": "S04 CE[dS/m]=CE[µS/cm]/1000",
+      "raw": {
+        "measurements": {
+          "conductivity_us_cm": 1200
+        }
+      },
+      "proposed": {
+        "variable": "conductivity_ds_m",
+        "value": 1.2,
+        "unit": "dS/m",
+        "origin": "unit-conversion-of-direct-measurement",
+        "inputRef": "measurements.conductivity_us_cm",
+        "rule": "divide-by-1000-with-known-input-unit",
+        "newIndependentMeasurement": false
+      },
+      "sourceRefs": [
+        "S04",
+        "S05"
+      ],
+      "catalogRefs": [
+        "V05"
+      ]
+    },
+    {
+      "id": "E04-07",
+      "scenario": "resultado_laboratorio",
+      "evidence": "S04 laboratory propuesto; método y muestra son premisas ficticias",
+      "raw": {
+        "laboratory": {
+          "nitrate_no3_mg_kg": 44.3
+        }
+      },
+      "context": {
+        "sampleId": "sim-muestra-01",
+        "sampledAt": "2026-11-01T10:00:00Z",
+        "depthCm": [
+          0,
+          20
+        ],
+        "method": "simulated-method-requires-agronomy-approval",
+        "unit": "mg/kg",
+        "chemicalSpecies": "NO3-",
+        "basis": "dry-soil"
+      },
+      "proposed": {
+        "origin": "laboratory",
+        "sensorDirect": false,
+        "copyToLatestS8Snapshot": false,
+        "mapToGenericNitrogenoWithoutApproval": false
+      },
+      "sourceRefs": [
+        "S04"
+      ],
+      "catalogRefs": [
+        "V09"
+      ]
+    },
+    {
+      "id": "E04-08",
+      "scenario": "adquisicion_distinta_recepcion",
+      "evidence": "S09 _receivedAt; caso sint?tico de timestamp de entrada/legacy con offset, conforme frontera de entrada de BE-03. S03 propone UTC en el dispositivo y no prueba este formato legado real.",
+      "raw": {
+        "timestamp": "2026-11-16T09:00:00-03:00",
+        "_receivedAt": {
+          "$date": "2026-11-16T12:05:00.000Z"
+        }
+      },
+      "proposed": {
+        "acquisitionUtc": "2026-11-16T12:00:00Z",
+        "receptionUtc": "2026-11-16T12:05:00.000Z",
+        "substituteAcquisition": false,
+        "preserveOriginalOffset": true
+      },
+      "sourceRefs": [
+        "S09",
+        "S11"
+      ],
+      "catalogRefs": [
+        "A09"
+      ]
+    },
+    {
+      "id": "E04-09",
+      "scenario": "timestamp_invalido",
+      "evidence": "S09 no valida adquisición, regla propuesta BE-04",
+      "raw": {
+        "timestamp": "2026-02-30T12:00:00Z",
+        "_receivedAt": {
+          "$date": "2026-11-16T12:00:05Z"
+        }
+      },
+      "proposed": {
+        "acquisition": null,
+        "reason": "invalid-calendar",
+        "fallbackToReception": false,
+        "eligibleForAcquisitionHistory": false,
+        "preserveRaw": true
+      },
+      "sourceRefs": [
+        "S09"
+      ],
+      "catalogRefs": [
+        "A09"
+      ]
+    },
+    {
+      "id": "E04-10",
+      "scenario": "unidad_desconocida",
+      "evidence": "S12 legacy soil.conductivity no declara unidad",
+      "raw": {
+        "soil": {
+          "conductivity": 1.8
+        }
+      },
+      "proposed": {
+        "normalizedUsableValue": null,
+        "normalizedUnit": null,
+        "reason": "unit-unknown",
+        "emitPublicMedida": false,
+        "pendingDecision": "D04-06",
+        "divideBy1000": false,
+        "preserveRaw": true
+      },
+      "preconditions": [
+        "Unidad original desconocida y unidad destino/magnitud a?n sin acuerdo productivo en esta rama; dS/m es una propuesta, no un acuerdo demostrado para ese legado."
+      ],
+      "whenTargetUnitApproved": {
+        "condition": "Solo si magnitud y unidad destino dS/m fueron acordadas: se puede representar ausencia de valor utilizable sin convertir el n?mero original",
+        "publicMedidaCandidate": {
+          "valor": null,
+          "unidad": "dS/m"
+        },
+        "assertOriginalUnit": false,
+        "convertOriginalNumber": false
+      },
+      "sourceRefs": [
+        "S11",
+        "S12"
+      ],
+      "catalogRefs": [
+        "V05"
+      ]
+    },
+    {
+      "id": "E04-11",
+      "scenario": "historico_pendiente_conversion",
+      "evidence": "S12 legacy frente a S03 measurements; versiones ficticias no demuestran Atlas",
+      "rawDocuments": [
+        {
+          "device_id": "sim-be04-01",
+          "timestamp": "2026-11-01T12:00:00Z",
+          "soil": {
+            "conductivity": 1.8
+          }
+        },
+        {
+          "device_id": "sim-be04-01",
+          "timestamp": "2026-11-16T12:00:00Z",
+          "measurements": {
+            "conductivity_us_cm": 1200
+          }
+        }
+      ],
+      "proposed": {
+        "firstDocumentUnit": null,
+        "secondDocumentUnitPremise": "µS/cm-if-version-confirmed",
+        "combineAsSingleDsMSeries": false,
+        "rewriteHistoricalDocuments": false,
+        "pendingDecision": "D04-07"
+      },
+      "sourceRefs": [
+        "S03",
+        "S12"
+      ],
+      "catalogRefs": [
+        "V05"
+      ]
+    },
+    {
+      "id": "E04-12",
+      "scenario": "timestamp_submilisegundo",
+      "evidence": "D03-14 y D04-09; Node Date.parse pierde precisión",
+      "raw": {
+        "desde": "2026-11-16T12:00:00.0001Z",
+        "hasta": "2026-11-16T12:00:00.0002Z"
+      },
+      "proposed": {
+        "exactRelation": "desde<hasta",
+        "dateParseReportsEqual": true,
+        "roundSilently": false,
+        "exactComparatorImplemented": false
+      },
+      "sourceRefs": [
+        "S11"
+      ],
+      "catalogRefs": [
+        "A09"
+      ]
+    },
+    {
+      "id": "E04-13",
+      "scenario": "string_numerico",
+      "evidence": "S09 JSON libre no valida tipos de magnitud",
+      "raw": {
+        "measurements": {
+          "soil_temperature_c": "22.5"
+        }
+      },
+      "proposed": {
+        "soil_temperature_c": null,
+        "reason": "string-not-number-under-proposed-contract",
+        "genericCoercion": false,
+        "preserveRaw": true
+      },
+      "sourceRefs": [
+        "S09"
+      ],
+      "catalogRefs": [
+        "V01"
+      ]
+    },
+    {
+      "id": "E04-14",
+      "scenario": "no_finito",
+      "evidence": "Caso sint?ctico: raw contiene string Infinity v?lido como JSON, no number. invalidJsonTexts son textos con literales num?ricos no JSON; no son documentos BSON reales.",
+      "raw": {
+        "measurements": {
+          "soil_temperature_c": "Infinity"
+        }
+      },
+      "proposed": {
+        "soil_temperature_c": null,
+        "reason": "not-a-finite-number",
+        "fillZero": false
+      },
+      "invalidJsonTexts": [
+        "{\"measurements\":{\"soil_temperature_c\":NaN}}",
+        "{\"measurements\":{\"soil_temperature_c\":Infinity}}",
+        "{\"measurements\":{\"soil_temperature_c\":-Infinity}}"
+      ],
+      "sourceRefs": [
+        "S09"
+      ],
+      "catalogRefs": [
+        "V01"
+      ]
+    },
+    {
+      "id": "E04-15",
+      "scenario": "fuera_rango_instrumental",
+      "evidence": "S05 rango de temperatura -40 a80 °C; modelo confirmado como premisa",
+      "raw": {
+        "measurements": {
+          "soil_temperature_c": 100
+        }
+      },
+      "proposed": {
+        "soil_temperature_c": null,
+        "reason": "outside-confirmed-model-range",
+        "clampTo80": false,
+        "automaticAgronomicAlarm": false,
+        "preserveRaw": true
+      },
+      "sourceRefs": [
+        "S05"
+      ],
+      "catalogRefs": [
+        "V01"
+      ]
+    },
+    {
+      "id": "E04-16",
+      "scenario": "payload_string_y_malformado",
+      "evidence": "S09 sobre payload string y tolerancia a texto",
+      "rawDocuments": [
+        {
+          "clientid": "sim-mqtt-01",
+          "payload": "{\"measurements\":{\"soil_temperature_c\":20}}"
+        },
+        {
+          "clientid": "sim-mqtt-01",
+          "payload": "{measurements: roto"
+        }
+      ],
+      "proposed": {
+        "first": "parse-only-with-approved-format-and-unit-contract",
+        "second": "preserve-without-measurement",
+        "parseRecursivelyWithoutLimit": false,
+        "callIngestEndpoint": false
+      },
+      "sourceRefs": [
+        "S09"
+      ],
+      "catalogRefs": [
+        "V01"
+      ]
+    },
+    {
+      "id": "E04-17",
+      "scenario": "duplicado_candidato",
+      "evidence": "S03 msg_id propuesto; S09 insertOne sin deduplicación",
+      "rawDocuments": [
+        {
+          "device_id": "sim-be04-01",
+          "msg_id": "sim-msg-01",
+          "timestamp": "2026-11-16T12:00:00Z"
+        },
+        {
+          "device_id": "sim-be04-01",
+          "msg_id": "sim-msg-01",
+          "timestamp": "2026-11-16T12:00:00Z"
+        }
+      ],
+      "proposed": {
+        "candidateDuplicate": true,
+        "delete": false,
+        "deduplicateByTimestampOnly": false,
+        "pendingDecision": "D04-11"
+      },
+      "sourceRefs": [
+        "S03",
+        "S09"
+      ],
+      "catalogRefs": [
+        "A07",
+        "A09"
+      ]
+    },
+    {
+      "id": "E04-18",
+      "scenario": "declaracion_manual",
+      "evidence": "S03 soil_reference y configuración son propuestas; mecanismo de carga no fijado",
+      "raw": {
+        "soil_reference": {
+          "particle_density_g_cm3": 2.65
+        }
+      },
+      "context": {
+        "declaredBy": "sim-responsable",
+        "source": "manual-assumption-not-a-laboratory-result",
+        "approval": "pending"
+      },
+      "proposed": {
+        "origin": "manually-declared-estimate",
+        "sensorDirect": false,
+        "useAsUniversalDefault": false,
+        "calculatePorosityWithoutApproval": false
+      },
+      "sourceRefs": [
+        "S03",
+        "S04"
+      ],
+      "catalogRefs": [
+        "V15"
+      ]
+    },
+    {
+      "id": "E04-19",
+      "scenario": "reloj_no_sincronizado",
+      "evidence": "S03 timestamp null y time_quality",
+      "raw": {
+        "timestamp": null,
+        "time_quality": "unsynced",
+        "_receivedAt": {
+          "$date": "2026-11-16T12:00:05Z"
+        }
+      },
+      "proposed": {
+        "acquisition": null,
+        "useReceptionAsAcquisition": false,
+        "preserveRaw": true
+      },
+      "sourceRefs": [
+        "S03",
+        "S09"
+      ],
+      "catalogRefs": [
+        "A09"
+      ]
+    },
+    {
+      "id": "E04-20",
+      "scenario": "aliases_conflictivos",
+      "evidence": "S03 y S04 nombres diferentes; coexistencia ficticia para caso negativo",
+      "raw": {
+        "measurements": {
+          "soil_moisture_reported_pct": 25,
+          "soil_moisture_sensor_pct": 45
+        }
+      },
+      "proposed": {
+        "usableHumidity": null,
+        "reason": "conflicting-aliases",
+        "chooseLast": false,
+        "pendingDecision": "D04-01"
+      },
+      "sourceRefs": [
+        "S03",
+        "S04"
+      ],
+      "catalogRefs": [
+        "V02"
+      ]
+    },
+    {
+      "id": "E04-21",
+      "scenario": "tardio_fuera_de_orden",
+      "evidence": "Fechas diferenciadas propuestas S03 y recepción S09",
+      "rawDocuments": [
+        {
+          "msg_id": "sim-nuevo",
+          "timestamp": "2026-11-16T12:30:00Z",
+          "_receivedAt": {
+            "$date": "2026-11-16T12:30:05Z"
+          }
+        },
+        {
+          "msg_id": "sim-tardio",
+          "timestamp": "2026-11-16T12:00:00Z",
+          "_receivedAt": {
+            "$date": "2026-11-16T12:40:00Z"
+          }
+        }
+      ],
+      "proposed": {
+        "latestByAcquisition": "sim-nuevo",
+        "latestByReception": "sim-tardio",
+        "discardLate": false,
+        "historyAscendingByAcquisition": [
+          "sim-tardio",
+          "sim-nuevo"
+        ]
+      },
+      "sourceRefs": [
+        "S03",
+        "S09"
+      ],
+      "catalogRefs": [
+        "A07",
+        "A09"
+      ]
+    }
+  ],
+  "auditScope": "BE-04.1: 21 escenarios documentales; checks sobre instancias y expectativas, sin ejecutar normalizador. Solo be03SnapshotCandidate es candidato de un componente p?blico; proposed son proyecciones internas, no DTOResponse completos."
+}

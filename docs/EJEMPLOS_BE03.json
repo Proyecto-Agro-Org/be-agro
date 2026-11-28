@@ -1,0 +1,696 @@
+{
+  "notice": "Todos los datos son sintéticos, no credenciales ni resultados de Atlas. Unidades de ejemplo, sin conversiones/rangos agronómicos aprobados. Requests son DTOs normalizados; la query HTTP de entrada llega como texto. Casos negativos son propuestas de validación, no respuestas del backend existente. BE-03.1: DTOs GetHistoricoRequest/GetAlertasRequest requieren limit tras normalizaci?n; los componentes de query decodificada permiten omisi?n. Esto no cambia par?metros HTTP.",
+  "schemaDocument": "openapi.json",
+  "cases": [
+    {
+      "id": "health",
+      "schema": "#/components/schemas/GetHealthResponse",
+      "expected": true,
+      "operationId": "GetHealth",
+      "instance": {
+        "status": "ok"
+      }
+    },
+    {
+      "id": "health-cors-legacy",
+      "schema": "#/components/schemas/LegacyErrorResponse",
+      "expected": true,
+      "instance": {
+        "error": "Origin not allowed by CORS"
+      }
+    },
+    {
+      "id": "login-request",
+      "schema": "#/components/schemas/PostLoginRequest",
+      "expected": true,
+      "operationId": "PostLogin",
+      "instance": {
+        "body": {
+          "email": "demo@example.invalid",
+          "password": "solo-ejemplo-sintetico"
+        }
+      }
+    },
+    {
+      "id": "login-response-minimo",
+      "schema": "#/components/schemas/LoginResponse",
+      "expected": true,
+      "instance": {
+        "token": "SIMULATED-NOT-A-CREDENTIAL"
+      }
+    },
+    {
+      "id": "login-response-identidad",
+      "schema": "#/components/schemas/LoginResponse",
+      "expected": true,
+      "instance": {
+        "token": "SIMULATED-NOT-A-CREDENTIAL",
+        "usuario": {
+          "usuario_id": "usuario_sintetico_a",
+          "nombre": "Persona sintética",
+          "email": "demo@example.invalid",
+          "cliente_id": "cliente_sintetico_a"
+        },
+        "cliente": {
+          "cliente_id": "cliente_sintetico_a",
+          "nombre": "Cliente sintético A"
+        }
+      }
+    },
+    {
+      "id": "campos-sin-ruta-real",
+      "schema": "#/components/schemas/GetCamposResponse",
+      "expected": true,
+      "instance": {
+        "campos": [
+          {
+            "campo_id": "campo_sintetico_a",
+            "nombre": "Campo sintético A",
+            "cliente_id": "cliente_sintetico_a"
+          }
+        ]
+      }
+    },
+    {
+      "id": "campos-vacio",
+      "schema": "#/components/schemas/GetCamposResponse",
+      "expected": true,
+      "instance": {
+        "campos": []
+      }
+    },
+    {
+      "id": "dashboard",
+      "schema": "#/components/schemas/GetDashboardResponse",
+      "expected": true,
+      "operationId": "GetDashboard",
+      "instance": {
+        "resumen": {
+          "areas": 1,
+          "sensores": 1,
+          "conectados": 1,
+          "desconectados": 0,
+          "alertas_activas": 0
+        },
+        "areas": [
+          {
+            "area_id": "area_sintetica_a",
+            "nombre": "Área sintética A",
+            "campo_id": "campo_sintetico_a",
+            "sensores": 1,
+            "conectados": 1,
+            "desconectados": 0,
+            "alertas_activas": 0
+          }
+        ],
+        "ultimas_alertas": [],
+        "ultima_actualizacion": "2026-11-16T12:00:00Z"
+      }
+    },
+    {
+      "id": "dashboard-vacio",
+      "schema": "#/components/schemas/GetDashboardResponse",
+      "expected": true,
+      "instance": {
+        "resumen": {
+          "areas": 0,
+          "sensores": 0,
+          "conectados": 0,
+          "desconectados": 0,
+          "alertas_activas": 0
+        },
+        "areas": [],
+        "ultimas_alertas": [],
+        "ultima_actualizacion": null
+      }
+    },
+    {
+      "id": "areas",
+      "schema": "#/components/schemas/GetAreasResponse",
+      "expected": true,
+      "operationId": "GetAreas",
+      "instance": {
+        "areas": [
+          {
+            "area_id": "area_sintetica_a",
+            "nombre": "Área sintética A",
+            "campo_id": "campo_sintetico_a",
+            "sensores": 1,
+            "conectados": 1,
+            "desconectados": 0,
+            "alertas_activas": 0,
+            "ultima_actualizacion": "2026-11-16T12:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "id": "areas-vacio",
+      "schema": "#/components/schemas/GetAreasResponse",
+      "expected": true,
+      "instance": {
+        "areas": []
+      }
+    },
+    {
+      "id": "area",
+      "schema": "#/components/schemas/GetAreaResponse",
+      "expected": true,
+      "operationId": "GetArea",
+      "instance": {
+        "area_id": "area_sintetica_a",
+        "nombre": "Área sintética A",
+        "campo_id": "campo_sintetico_a"
+      }
+    },
+    {
+      "id": "area-compat-sin-campo",
+      "schema": "#/components/schemas/GetAreaResponse",
+      "expected": true,
+      "instance": {
+        "area_id": "area_sintetica_a",
+        "nombre": "Área sintética A"
+      }
+    },
+    {
+      "id": "sensores-area",
+      "schema": "#/components/schemas/GetAreaSensoresResponse",
+      "expected": true,
+      "operationId": "GetAreaSensores",
+      "instance": {
+        "sensores": [
+          {
+            "device_id": "sensor_sintetico_a",
+            "nombre": "Sensor sintético A",
+            "estado": "conectado",
+            "ultima_comunicacion": "2026-11-16T12:00:00Z",
+            "ubicacion": null,
+            "alertas_activas": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "sensores-area-vacio",
+      "schema": "#/components/schemas/GetAreaSensoresResponse",
+      "expected": true,
+      "instance": {
+        "sensores": []
+      }
+    },
+    {
+      "id": "sensor-s8-parcial",
+      "schema": "#/components/schemas/GetSensorResponse",
+      "expected": true,
+      "operationId": "GetSensor",
+      "instance": {
+        "device_id": "sensor_sintetico_a",
+        "nombre": "Sensor sintético A",
+        "area_id": "area_sintetica_a",
+        "area_nombre": "Área sintética A",
+        "estado": "conectado",
+        "ultima_comunicacion": "2026-11-16T12:00:00Z",
+        "ubicacion": null,
+        "ultima_medicion": {
+          "timestamp": "2026-11-16T12:00:00Z",
+          "humedad": {
+            "valor": 25,
+            "unidad": "unidad-de-ejemplo"
+          },
+          "temperatura": {
+            "valor": 0,
+            "unidad": "unidad-de-ejemplo"
+          },
+          "conductividad": {
+            "valor": 1000,
+            "unidad": "unidad-de-ejemplo"
+          },
+          "nitrogeno": {
+            "valor": null,
+            "unidad": "unidad-de-ejemplo"
+          },
+          "fosforo": {
+            "valor": null,
+            "unidad": "unidad-de-ejemplo"
+          },
+          "potasio": {
+            "valor": null,
+            "unidad": "unidad-de-ejemplo"
+          }
+        }
+      }
+    },
+    {
+      "id": "sensor-sin-mediciones",
+      "schema": "#/components/schemas/GetSensorResponse",
+      "expected": true,
+      "instance": {
+        "device_id": "sensor_sintetico_a",
+        "nombre": "Sensor sintético A",
+        "area_id": "area_sintetica_a",
+        "area_nombre": "Área sintética A",
+        "estado": "desconectado",
+        "ultima_comunicacion": null,
+        "ubicacion": null,
+        "ultima_medicion": null
+      }
+    },
+    {
+      "id": "historico-request",
+      "schema": "#/components/schemas/GetHistoricoRequest",
+      "expected": true,
+      "instance": {
+        "params": {
+          "deviceId": "sensor_sintetico_a"
+        },
+        "query": {
+          "campo_id": "campo_sintetico_a",
+          "variable": "humedad",
+          "desde": "2026-11-16T09:00:00-03:00",
+          "hasta": "2026-11-16T13:00:00Z",
+          "limit": 1000
+        }
+      }
+    },
+    {
+      "id": "historico",
+      "schema": "#/components/schemas/GetHistoricoResponse",
+      "expected": true,
+      "operationId": "GetHistorico",
+      "instance": {
+        "device_id": "sensor_sintetico_a",
+        "nombre": "Sensor sintético A",
+        "area_id": "area_sintetica_a",
+        "area_nombre": "Área sintética A",
+        "variable": "humedad",
+        "unidad": "unidad-de-ejemplo",
+        "puntos": [
+          {
+            "timestamp": "2026-11-16T12:00:00Z",
+            "valor": 25
+          },
+          {
+            "timestamp": "2026-11-16T12:30:00Z",
+            "valor": null
+          }
+        ],
+        "truncado": false
+      }
+    },
+    {
+      "id": "historico-vacio",
+      "schema": "#/components/schemas/GetHistoricoResponse",
+      "expected": true,
+      "instance": {
+        "device_id": "sensor_sintetico_a",
+        "nombre": "Sensor sintético A",
+        "area_id": "area_sintetica_a",
+        "area_nombre": "Área sintética A",
+        "variable": "humedad",
+        "unidad": "unidad-de-ejemplo",
+        "puntos": [],
+        "truncado": false
+      }
+    },
+    {
+      "id": "mapa",
+      "schema": "#/components/schemas/GetMapaResponse",
+      "expected": true,
+      "operationId": "GetMapa",
+      "instance": {
+        "sensores": [
+          {
+            "device_id": "sensor_sintetico_a",
+            "nombre": "Sensor sintético A",
+            "area_id": "area_sintetica_a",
+            "area_nombre": "Área sintética A",
+            "estado": "conectado",
+            "ultima_comunicacion": "2026-11-16T12:00:00Z",
+            "ubicacion": null,
+            "ultima_medicion": {
+              "timestamp": "2026-11-16T12:00:00Z",
+              "humedad": {
+                "valor": 25,
+                "unidad": "unidad-de-ejemplo"
+              },
+              "temperatura": {
+                "valor": 0,
+                "unidad": "unidad-de-ejemplo"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "mapa-vacio",
+      "schema": "#/components/schemas/GetMapaResponse",
+      "expected": true,
+      "instance": {
+        "sensores": []
+      }
+    },
+    {
+      "id": "alertas",
+      "schema": "#/components/schemas/GetAlertasResponse",
+      "expected": true,
+      "operationId": "GetAlertas",
+      "instance": {
+        "total": 1,
+        "limit": 50,
+        "alertas": [
+          {
+            "alerta_id": "alerta_sintetica_a",
+            "device_id": "sensor_sintetico_a",
+            "sensor_nombre": "Sensor sintético A",
+            "area_id": "area_sintetica_a",
+            "area_nombre": "Área sintética A",
+            "tipo": "tecnica",
+            "severidad": "media",
+            "descripcion": "Ejemplo sintético sin regla operativa",
+            "timestamp": "2026-11-16T12:00:00Z",
+            "estado": "activa"
+          }
+        ]
+      }
+    },
+    {
+      "id": "alertas-vacio",
+      "schema": "#/components/schemas/GetAlertasResponse",
+      "expected": true,
+      "instance": {
+        "total": 0,
+        "limit": 50,
+        "alertas": []
+      }
+    },
+    {
+      "id": "error-VALIDATION_ERROR",
+      "schema": "#/components/schemas/ErrorResponse",
+      "expected": true,
+      "instance": {
+        "error": {
+          "code": "VALIDATION_ERROR",
+          "message": "Mensaje sintético seguro"
+        }
+      }
+    },
+    {
+      "id": "error-UNAUTHENTICATED",
+      "schema": "#/components/schemas/ErrorResponse",
+      "expected": true,
+      "instance": {
+        "error": {
+          "code": "UNAUTHENTICATED",
+          "message": "Mensaje sintético seguro"
+        }
+      }
+    },
+    {
+      "id": "error-ACCESS_DENIED",
+      "schema": "#/components/schemas/ErrorResponse",
+      "expected": true,
+      "instance": {
+        "error": {
+          "code": "ACCESS_DENIED",
+          "message": "Mensaje sintético seguro"
+        }
+      }
+    },
+    {
+      "id": "error-RESOURCE_NOT_FOUND",
+      "schema": "#/components/schemas/ErrorResponse",
+      "expected": true,
+      "instance": {
+        "error": {
+          "code": "RESOURCE_NOT_FOUND",
+          "message": "Mensaje sintético seguro"
+        }
+      }
+    },
+    {
+      "id": "error-INTERNAL_ERROR",
+      "schema": "#/components/schemas/ErrorResponse",
+      "expected": true,
+      "instance": {
+        "error": {
+          "code": "INTERNAL_ERROR",
+          "message": "Mensaje sintético seguro"
+        }
+      }
+    },
+    {
+      "id": "fecha-sin-zona-invalida",
+      "schema": "#/components/schemas/DateTimeWithZone",
+      "expected": false,
+      "instance": "2026-11-16T12:00:00"
+    },
+    {
+      "id": "fecha-calendario-invalida",
+      "schema": "#/components/schemas/DateTimeWithZone",
+      "expected": false,
+      "instance": "2026-02-30T12:00:00Z"
+    },
+    {
+      "id": "salida-offset-no-utc",
+      "schema": "#/components/schemas/UtcDateTime",
+      "expected": false,
+      "instance": "2026-11-16T09:00:00-03:00"
+    },
+    {
+      "id": "null-no-admitido-area-id",
+      "schema": "#/components/schemas/GetAreaResponse",
+      "expected": false,
+      "instance": {
+        "area_id": null,
+        "nombre": "Inválido"
+      }
+    },
+    {
+      "id": "sensor-falta-variable-null",
+      "schema": "#/components/schemas/GetSensorResponse",
+      "expected": false,
+      "instance": {
+        "device_id": "sensor_sintetico_a",
+        "nombre": "Sensor sintético A",
+        "area_id": "area_sintetica_a",
+        "area_nombre": "Área sintética A",
+        "estado": "conectado",
+        "ultima_comunicacion": "2026-11-16T12:00:00Z",
+        "ubicacion": null,
+        "ultima_medicion": {
+          "timestamp": "2026-11-16T12:00:00Z",
+          "humedad": {
+            "valor": 25,
+            "unidad": "unidad-de-ejemplo"
+          },
+          "temperatura": {
+            "valor": 0,
+            "unidad": "unidad-de-ejemplo"
+          },
+          "conductividad": {
+            "valor": 1000,
+            "unidad": "unidad-de-ejemplo"
+          },
+          "fosforo": {
+            "valor": null,
+            "unidad": "unidad-de-ejemplo"
+          },
+          "potasio": {
+            "valor": null,
+            "unidad": "unidad-de-ejemplo"
+          }
+        }
+      }
+    },
+    {
+      "id": "valor-string-no-coaccionar",
+      "schema": "#/components/schemas/Medida",
+      "expected": false,
+      "instance": {
+        "valor": "0",
+        "unidad": "unidad-de-ejemplo"
+      }
+    },
+    {
+      "id": "historico-limit-invalido",
+      "schema": "#/components/schemas/HistoricoQuery",
+      "expected": false,
+      "instance": {
+        "campo_id": "campo_sintetico_a",
+        "variable": "humedad",
+        "desde": "2026-11-16T12:00:00Z",
+        "hasta": "2026-11-16T13:00:00Z",
+        "limit": 1001
+      }
+    },
+    {
+      "id": "cliente-query-no-autorizacion",
+      "schema": "#/components/schemas/CampoQuery",
+      "expected": false,
+      "instance": {
+        "campo_id": "campo_sintetico_a",
+        "cliente_id": "cliente_sintetico_b"
+      }
+    },
+    {
+      "id": "error-legacy-no-estandar",
+      "schema": "#/components/schemas/ErrorResponse",
+      "expected": false,
+      "instance": {
+        "error": "Mensaje legacy"
+      }
+    },
+    {
+      "id": "query-historico-decodificada-sin-default",
+      "schema": "#/components/schemas/HistoricoQuery",
+      "expected": true,
+      "instance": {
+        "campo_id": "campo_sintetico_a",
+        "variable": "humedad",
+        "desde": "2026-11-16T12:00:00Z",
+        "hasta": "2026-11-16T13:00:00Z"
+      }
+    },
+    {
+      "id": "dto-historico-normalizado-sin-limit-invalido",
+      "schema": "#/components/schemas/GetHistoricoRequest",
+      "expected": false,
+      "instance": {
+        "params": {
+          "deviceId": "sensor_sintetico_a"
+        },
+        "query": {
+          "campo_id": "campo_sintetico_a",
+          "variable": "humedad",
+          "desde": "2026-11-16T12:00:00Z",
+          "hasta": "2026-11-16T13:00:00Z"
+        }
+      }
+    },
+    {
+      "id": "query-alertas-decodificada-sin-default",
+      "schema": "#/components/schemas/AlertasQuery",
+      "expected": true,
+      "instance": {
+        "campo_id": "campo_sintetico_a"
+      }
+    },
+    {
+      "id": "dto-alertas-normalizado-con-default",
+      "schema": "#/components/schemas/GetAlertasRequest",
+      "expected": true,
+      "instance": {
+        "query": {
+          "campo_id": "campo_sintetico_a",
+          "limit": 50
+        }
+      }
+    },
+    {
+      "id": "dto-alertas-normalizado-sin-limit-invalido",
+      "schema": "#/components/schemas/GetAlertasRequest",
+      "expected": false,
+      "instance": {
+        "query": {
+          "campo_id": "campo_sintetico_a"
+        }
+      }
+    }
+  ],
+  "semanticCases": [
+    {
+      "id": "rango-invertido",
+      "kind": "request",
+      "operationId": "GetHistorico",
+      "query": {
+        "campo_id": "campo_sintetico_a",
+        "variable": "humedad",
+        "desde": "2026-11-17T00:00:00Z",
+        "hasta": "2026-11-16T12:00:00Z"
+      },
+      "expectedStatus": 400,
+      "expectedCode": "VALIDATION_ERROR"
+    },
+    {
+      "id": "rango-igual",
+      "kind": "request",
+      "operationId": "GetHistorico",
+      "query": {
+        "campo_id": "campo_sintetico_a",
+        "variable": "humedad",
+        "desde": "2026-11-16T12:00:00Z",
+        "hasta": "2026-11-16T12:00:00Z"
+      },
+      "expectedStatus": 400,
+      "expectedCode": "VALIDATION_ERROR",
+      "note": "Cambio frente a generarSerie mock, que permite igualdad"
+    },
+    {
+      "id": "parametro-repetido",
+      "kind": "query-multiplicity",
+      "queryString": "campo_id=a&campo_id=b",
+      "expectedStatus": 400,
+      "expectedCode": "VALIDATION_ERROR"
+    },
+    {
+      "id": "parametro-campo-vacio",
+      "kind": "request",
+      "query": {
+        "campo_id": " "
+      },
+      "expectedStatus": 400,
+      "expectedCode": "VALIDATION_ERROR"
+    },
+    {
+      "id": "cruce-tenant",
+      "kind": "authorization",
+      "backendIdentity": {
+        "usuario_id": "usuario_sintetico_a",
+        "cliente_id": "cliente_sintetico_a"
+      },
+      "request": {
+        "campo_id": "campo_sintetico_b"
+      },
+      "requestedFieldOwner": "cliente_sintetico_b",
+      "expectedStatus": 404,
+      "expectedCode": "RESOURCE_NOT_FOUND",
+      "readOtherTenant": false
+    },
+    {
+      "id": "sin-sesion",
+      "kind": "authorization",
+      "authorizationHeader": null,
+      "expectedStatus": 401,
+      "expectedCode": "UNAUTHENTICATED"
+    },
+    {
+      "id": "ubicacion-invalida-mapear-null",
+      "kind": "mapping",
+      "source": {
+        "lat": 95,
+        "lon": 20
+      },
+      "expectedOutput": null
+    },
+    {
+      "id": "sin-origen-unidad",
+      "kind": "mapping",
+      "source": {
+        "readings": {
+          "value": 12
+        }
+      },
+      "expectedAction": "No inventar unidad/conversión; pendiente BE-04"
+    },
+    {
+      "id": "rango-submilisegundo",
+      "query": {
+        "desde": "2026-11-16T12:00:00.0001Z",
+        "hasta": "2026-11-16T12:00:00.0002Z"
+      },
+      "expectedRelation": "desde < hasta",
+      "note": "Caso documental: instantes distintos, Date.parse los colapsa al mismo milisegundo. Helper de comparaci?n exacta pendiente; no cubierto por el comprobador sem?ntico local."
+    }
+  ]
+}
